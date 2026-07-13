@@ -12,5 +12,9 @@
 - Redesigned `SchemaReview.xlsx` around a `StartHere` dashboard. Only unresolved
   column and compatibility decisions remain visible; policy results are clearly
   informational and advanced registries/history are hidden by default.
+- Hardened schema finalization against Excel inferring blank decision columns as
+  numeric, and added explicit completion messages to empty review worksheets.
+- Restored full column, compatibility, and type-history overview tabs after the
+  action tabs, with a sheet-by-sheet guide on `StartHere`.
 - CSV readers now preserve leading-zero fields by default, with a per-source
   `KeepLeadingZeros` reader option for explicit control.

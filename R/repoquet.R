@@ -6677,7 +6677,8 @@ RecommendRepositorySchema <- function(survey = NULL, ObservationPath = NULL,
   idx <- match(current_key, old_key)
   same <- !is.na(idx) & registry$ObservationSignature == old$ObservationSignature[idx]
   fields <- intersect(c("ApprovedType", "Decision", "Role", "MergeGroup", "UserNotes"), names(old))
-  for (field in fields) registry[same, (field) := old[[field]][idx[same]]]
+  registry <- .copy_review_character_fields(
+    registry, old, which(same), idx[which(same)], fields)
   registry[same & RequiresReview == TRUE & nzchar(trimws(as.character(Decision))),
            DecisionOrigin := "preserved"]
   registry
@@ -6703,10 +6704,30 @@ RecommendRepositorySchema <- function(survey = NULL, ObservationPath = NULL,
   key <- function(x) paste(x$Scope, x$Database, x$Column, sep = "\r")
   idx <- match(key(compatibility), key(old))
   same <- !is.na(idx) & compatibility$CompatibilitySignature == old$CompatibilitySignature[idx]
-  for (field in intersect(c("ApprovedCommonType", "Decision", "SuggestedRole", "UserNotes"), names(old))) {
-    compatibility[same, (field) := old[[field]][idx[same]]]
-  }
+  fields <- intersect(c("ApprovedCommonType", "Decision", "SuggestedRole", "UserNotes"),
+                      names(old))
+  compatibility <- .copy_review_character_fields(
+    compatibility, old, which(same), idx[which(same)], fields)
   compatibility
+}
+
+.copy_review_character_fields <- function(target, source, target_rows,
+                                           source_rows, fields) {
+  target <- data.table::as.data.table(target)
+  if (length(target_rows) == 0L || length(fields) == 0L) return(target)
+  for (field in fields) {
+    #### Blank Excel columns are often read as numeric or logical. Review ####
+    #### fields are textual contracts, so normalize both sides before a  ####
+    #### data.table assignment can coerce valid decisions to NA.          ####
+    if (!field %in% names(target)) {
+      target[, (field) := NA_character_]
+    } else {
+      data.table::set(target, j = field, value = as.character(target[[field]]))
+    }
+    data.table::set(target, i = target_rows, j = field,
+                    value = as.character(source[[field]][source_rows]))
+  }
+  target
 }
 
 #' Write a compact, user-reviewable schema proposal workbook
@@ -6726,6 +6747,18 @@ WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = 
   compatibility <- data.table::copy(proposal$compatibility %||% data.table::data.table())
   if (isTRUE(PreserveDecisions)) {
     compatibility <- .preserve_compatibility_decisions(compatibility, SchemaReviewPath)
+  }
+  if (ncol(compatibility) == 0L) {
+    #### Keep the hidden registry structurally valid even when no groups  ####
+    #### exist. Header-only sheets read cleanly and do not masquerade as  ####
+    #### user decisions during finalization.                              ####
+    compatibility <- data.table::data.table(
+      Scope = character(), Database = character(), Column = character(),
+      MergeGroup = character(), CurrentTypes = character(), Tables = character(),
+      RecommendedCommonType = character(), ApprovedCommonType = character(),
+      RecommendationReason = character(), SuggestedRole = character(),
+      Decision = character(), CompatibilitySignature = character(),
+      UserNotes = character())
   }
   normalize_decision <- function(x) {
     out <- tolower(trimws(as.character(x)))
@@ -6792,6 +6825,21 @@ WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = 
   n_compatibility_decisions <- nrow(compatibility_decisions)
   ready <- n_source_errors == 0L && n_column_decisions == 0L &&
     n_compatibility_decisions == 0L
+  column_overview_fields <- c(
+    "Database", "TableName", "DuckDBTable", "Column", "ObservedTypes",
+    "TypeHistory", "DataRecommendedType", "PolicyType", "RecommendedType",
+    "ApprovedType", "Risk", "RecommendationReason", "RequiresReview",
+    "Decision", "Role", "MergeGroup", "Confidence", "UserNotes")
+  column_overview <- registry[, intersect(column_overview_fields, names(registry)),
+                              with = FALSE]
+  compatibility_overview_fields <- c(
+    "Scope", "Database", "Column", "CurrentTypes", "Tables",
+    "RecommendedCommonType", "ApprovedCommonType", "RecommendationReason",
+    "SuggestedRole", "Decision", "MergeGroup", "UserNotes")
+  compatibility_overview <- compatibility[,
+    intersect(compatibility_overview_fields, names(compatibility)), with = FALSE]
+  type_history <- data.table::copy(data.table::as.data.table(
+    proposal$history %||% data.table::data.table()))
   start_here <- data.table::data.table(
     Step = c("Source validation", "Column schema decisions",
              "Cross-table compatibility", "Policy report", "Finalization"),
@@ -6823,36 +6871,90 @@ WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = 
               nrow(policy_report), nrow(source_issues), n_source_errors,
               format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"))
   )
+  workbook_guide <- data.table::data.table(
+    Worksheet = c(
+      "StartHere", "ColumnDecisions", "CompatibilityDecisions", "SourceIssues",
+      "ColumnOverview", "CompatibilityOverview", "TypeHistory", "PolicyReport",
+      "Registry", "CompatibilityRegistry", "Settings"),
+    Category = c(
+      "Guide", "Action", "Action", "Validation", "Reference", "Reference",
+      "Reference", "Reference", "System", "System", "System"),
+    Contains = c(
+      "Current workflow status, required actions, and this workbook guide.",
+      "Only columns whose recommended type needs an explicit decision.",
+      "Only cross-table or cross-database compatibility groups needing a decision.",
+      "Source read errors and warnings found during schema survey.",
+      "Every column, its observed type history, recommendation, and approved output type.",
+      "Every compatibility candidate and its proposed common type and role.",
+      "Detailed evidence for columns whose types changed or whose readers raised warnings.",
+      "Informational differences between data-derived recommendations and optional policies.",
+      "Complete machine-readable column registry used during finalization.",
+      "Complete machine-readable compatibility registry used during finalization.",
+      "Generation paths, counts, and timestamp."),
+    UserAction = c(
+      "Begin here and follow rows marked ACTION REQUIRED or BLOCKED.",
+      if (n_column_decisions > 0L) "Complete every row." else "None.",
+      if (n_compatibility_decisions > 0L) "Complete every row." else "None.",
+      if (n_source_errors > 0L) "Resolve blocking errors and rerun schema preparation." else
+        if (nrow(source_issues) > 0L) "Review warnings when useful." else "None.",
+      "Review how source types will be normalized; make decisions only in ColumnDecisions.",
+      "Review proposed shared types; make decisions only in CompatibilityDecisions.",
+      "Use for investigation; no edits are required.",
+      "Review when useful; no decisions are required here.",
+      "Do not edit.", "Do not edit.", "Do not edit."),
+    Status = c(
+      if (ready) "READY" else "ACTION REQUIRED",
+      if (n_column_decisions > 0L) "ACTION REQUIRED" else "COMPLETE",
+      if (n_compatibility_decisions > 0L) "ACTION REQUIRED" else "COMPLETE",
+      if (n_source_errors > 0L) "BLOCKED" else if (nrow(source_issues) > 0L) "WARNINGS" else "COMPLETE",
+      rep("REFERENCE", 4L), rep("HIDDEN", 3L)),
+    Rows = c(
+      nrow(start_here), n_column_decisions, n_compatibility_decisions,
+      nrow(source_issues), nrow(column_overview), nrow(compatibility_overview),
+      nrow(type_history), nrow(policy_report), nrow(registry),
+      nrow(compatibility), nrow(settings))
+  )
   dir.create(dirname(SchemaReviewPath), recursive = TRUE, showWarnings = FALSE)
   tmp <- tempfile(pattern = paste0(basename(SchemaReviewPath), ".tmp_"),
                   tmpdir = dirname(SchemaReviewPath), fileext = ".xlsx")
   wb <- openxlsx::createWorkbook()
   openxlsx::addWorksheet(wb, "StartHere", gridLines = FALSE, tabColour = "#70AD47")
-  openxlsx::mergeCells(wb, "StartHere", cols = 1:5, rows = 1)
+  openxlsx::mergeCells(wb, "StartHere", cols = 1:6, rows = 1)
   openxlsx::writeData(wb, "StartHere", "Schema Review", startRow = 1, startCol = 1)
-  openxlsx::mergeCells(wb, "StartHere", cols = 1:5, rows = 2)
+  openxlsx::mergeCells(wb, "StartHere", cols = 1:6, rows = 2)
   openxlsx::writeData(wb, "StartHere",
     paste0("Only rows marked ACTION REQUIRED or BLOCKED need attention. ",
-           "PolicyReport is informational; hidden sheets are system records."),
+           "Action tabs come first; overview tabs explain how columns will be formatted."),
     startRow = 2, startCol = 1)
-  openxlsx::mergeCells(wb, "StartHere", cols = 1:5, rows = 3)
+  openxlsx::mergeCells(wb, "StartHere", cols = 1:6, rows = 3)
   openxlsx::writeData(wb, "StartHere",
     paste0("Counts are a snapshot from workbook generation. After completing the visible ",
            "decision rows, run FinalizeSchemaRegistry(); another survey is not required."),
     startRow = 3, startCol = 1)
   openxlsx::writeDataTable(wb, "StartHere", start_here, startRow = 5,
                            tableStyle = "TableStyleMedium2")
+  guide_title_row <- 7L + nrow(start_here)
+  guide_table_row <- guide_title_row + 1L
+  openxlsx::mergeCells(wb, "StartHere", cols = 1:6, rows = guide_title_row)
+  openxlsx::writeData(wb, "StartHere", "Workbook Guide",
+                      startRow = guide_title_row, startCol = 1)
+  openxlsx::writeDataTable(wb, "StartHere", workbook_guide,
+                           startRow = guide_table_row,
+                           tableStyle = "TableStyleMedium2")
   openxlsx::freezePane(wb, "StartHere", firstActiveRow = 6)
-  openxlsx::setColWidths(wb, "StartHere", cols = 1:5,
-                         widths = c(26, 28, 12, 58, 28))
+  openxlsx::setColWidths(wb, "StartHere", cols = 1:6,
+                         widths = c(28, 24, 62, 58, 28, 12))
   title_style <- openxlsx::createStyle(fontSize = 18, fontColour = "#FFFFFF",
                                         fgFill = "#1F4E78", textDecoration = "bold",
                                         halign = "left", valign = "center")
   note_style <- openxlsx::createStyle(fontColour = "#404040", fgFill = "#D9EAF7",
                                        wrapText = TRUE, valign = "center")
-  openxlsx::addStyle(wb, "StartHere", title_style, rows = 1, cols = 1:5, gridExpand = TRUE)
-  openxlsx::addStyle(wb, "StartHere", note_style, rows = 2:3, cols = 1:5, gridExpand = TRUE)
+  openxlsx::addStyle(wb, "StartHere", title_style, rows = 1, cols = 1:6, gridExpand = TRUE)
+  openxlsx::addStyle(wb, "StartHere", note_style, rows = 2:3, cols = 1:6, gridExpand = TRUE)
+  openxlsx::addStyle(wb, "StartHere", title_style, rows = guide_title_row,
+                     cols = 1:6, gridExpand = TRUE)
   openxlsx::setRowHeights(wb, "StartHere", rows = c(1, 2, 3), heights = c(28, 34, 34))
+  openxlsx::setRowHeights(wb, "StartHere", rows = guide_title_row, heights = 24)
   status_styles <- list(
     green = openxlsx::createStyle(fgFill = "#E2F0D9", fontColour = "#385723", textDecoration = "bold"),
     yellow = openxlsx::createStyle(fgFill = "#FFF2CC", fontColour = "#7F6000", textDecoration = "bold"),
@@ -6869,19 +6971,52 @@ WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = 
     } else status_styles$gray
     openxlsx::addStyle(wb, "StartHere", style, rows = 5L + i, cols = 2, stack = TRUE)
   }
-  sheets <- list(ColumnDecisions = column_decisions,
-                 CompatibilityDecisions = compatibility_decisions,
-                 SourceIssues = source_issues,
-                 PolicyReport = policy_report,
+  openxlsx::addStyle(
+    wb, "StartHere", openxlsx::createStyle(wrapText = TRUE, valign = "top"),
+    rows = (guide_table_row + 1L):(guide_table_row + nrow(workbook_guide)),
+    cols = c(3, 4), gridExpand = TRUE, stack = TRUE)
+  for (i in seq_len(nrow(workbook_guide))) {
+    style <- if (workbook_guide$Status[i] %in% c("COMPLETE", "READY")) {
+      status_styles$green
+    } else if (workbook_guide$Status[i] %in% c("ACTION REQUIRED", "WARNINGS")) {
+      status_styles$yellow
+    } else if (workbook_guide$Status[i] == "BLOCKED") {
+      status_styles$red
+    } else status_styles$gray
+    openxlsx::addStyle(wb, "StartHere", style,
+                       rows = guide_table_row + i, cols = 5, stack = TRUE)
+  }
+  empty_display <- function(status, action) {
+    data.table::data.table(Status = status, RequiredAction = action)
+  }
+  column_decisions_display <- if (n_column_decisions > 0L) column_decisions else
+    empty_display("COMPLETE", "No column decisions are required.")
+  compatibility_decisions_display <- if (n_compatibility_decisions > 0L) compatibility_decisions else
+    empty_display("COMPLETE", "No compatibility decisions are required.")
+  source_issues_display <- if (nrow(source_issues) > 0L) source_issues else
+    empty_display("COMPLETE", "No source issues were identified.")
+  compatibility_overview_display <- if (nrow(compatibility_overview) > 0L) compatibility_overview else
+    empty_display("COMPLETE", "No compatibility candidates were identified.")
+  type_history_display <- if (nrow(type_history) > 0L) type_history else
+    empty_display("COMPLETE", "No changing types or reader warnings were identified.")
+  policy_report_display <- if (nrow(policy_report) > 0L) policy_report else
+    empty_display("INFORMATIONAL", "No policy conflicts were identified.")
+  sheets <- list(ColumnDecisions = column_decisions_display,
+                 CompatibilityDecisions = compatibility_decisions_display,
+                 SourceIssues = source_issues_display,
+                 ColumnOverview = column_overview,
+                 CompatibilityOverview = compatibility_overview_display,
+                 TypeHistory = type_history_display,
+                 PolicyReport = policy_report_display,
                  Registry = registry,
                  CompatibilityRegistry = compatibility,
-                 TypeHistory = proposal$history,
                  Settings = settings)
   header_style <- openxlsx::createStyle(fgFill = "#1F4E78", fontColour = "#FFFFFF",
                                         textDecoration = "bold", border = "bottom")
   for (sheet in names(sheets)) {
     tab_colour <- if (sheet %in% c("ColumnDecisions", "CompatibilityDecisions")) "#FFC000" else
       if (sheet == "SourceIssues" && n_source_errors > 0L) "#C00000" else
+      if (sheet %in% c("ColumnOverview", "CompatibilityOverview", "TypeHistory")) "#5B9BD5" else
       if (sheet == "PolicyReport") "#A5A5A5" else "#D9E1F2"
     openxlsx::addWorksheet(wb, sheet, gridLines = FALSE, tabColour = tab_colour)
     value <- data.table::as.data.table(sheets[[sheet]])
@@ -6943,7 +7078,7 @@ WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = 
                        gridExpand = TRUE, stack = TRUE)
   }
   sheet_order <- c("StartHere", names(sheets))
-  advanced <- c("Registry", "CompatibilityRegistry", "TypeHistory", "Settings")
+  advanced <- c("Registry", "CompatibilityRegistry", "Settings")
   visibility <- ifelse(sheet_order %in% advanced, "hidden", "visible")
   openxlsx::sheetVisibility(wb) <- visibility
   openxlsx::saveWorkbook(wb, tmp, overwrite = TRUE)
@@ -6963,26 +7098,27 @@ WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = 
 
 .overlay_schema_review <- function(registry, review) {
   if (is.null(review) || nrow(review) == 0L) return(registry)
+  required <- c("Database", "TableName", "Column")
+  if (!all(required %in% names(review))) return(registry)
   key <- function(x) paste(x$Database, x$TableName, x$Column, sep = "\r")
   idx <- match(key(registry), key(review))
   hit <- which(!is.na(idx))
-  for (field in intersect(c("ApprovedType", "Decision", "Role", "MergeGroup", "UserNotes"), names(review))) {
-    registry[hit, (field) := review[[field]][idx[hit]]]
-  }
-  registry
+  fields <- intersect(c("ApprovedType", "Decision", "Role", "MergeGroup", "UserNotes"),
+                      names(review))
+  .copy_review_character_fields(registry, review, hit, idx[hit], fields)
 }
 
 .overlay_compatibility_decisions <- function(compatibility, decisions) {
   if (is.null(decisions) || nrow(decisions) == 0L) return(compatibility)
+  required <- c("Scope", "Database", "Column")
+  if (!all(required %in% names(decisions))) return(compatibility)
   if (is.null(compatibility) || nrow(compatibility) == 0L) return(decisions)
   key <- function(x) paste(x$Scope, x$Database, x$Column, sep = "\r")
   idx <- match(key(compatibility), key(decisions))
   hit <- which(!is.na(idx))
-  for (field in intersect(c("ApprovedCommonType", "Decision", "SuggestedRole", "UserNotes"),
-                          names(decisions))) {
-    compatibility[hit, (field) := decisions[[field]][idx[hit]]]
-  }
-  compatibility
+  fields <- intersect(c("ApprovedCommonType", "Decision", "SuggestedRole", "UserNotes"),
+                      names(decisions))
+  .copy_review_character_fields(compatibility, decisions, hit, idx[hit], fields)
 }
 
 .apply_compatibility_review <- function(registry, compatibility, strict = TRUE) {
@@ -6998,6 +7134,7 @@ WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = 
     stop("The compatibility decision table is missing required columns: ", paste(missing, collapse = ", "))
   }
   decision <- tolower(trimws(as.character(compatibility$Decision)))
+  decision[is.na(decision)] <- ""
   unresolved <- !decision %in% c("accept", "override", "ignore")
   if (any(unresolved)) {
     examples <- utils::head(sprintf("%s/%s/%s", compatibility$Scope[unresolved],
@@ -7079,7 +7216,9 @@ FinalizeRepositorySchema <- function(SchemaReviewPath, TableSchemaPath, strict =
   #### change the proposal and its observation signatures.                  ####
   if ("SourceIssues" %in% sheets) {
     source_issues <- data.table::as.data.table(openxlsx::read.xlsx(SchemaReviewPath, sheet = "SourceIssues"))
-    source_errors <- tolower(as.character(source_issues$SurveyStatus)) == "error"
+    source_errors <- if ("SurveyStatus" %in% names(source_issues)) {
+      tolower(as.character(source_issues$SurveyStatus)) == "error"
+    } else logical(0)
     if (any(source_errors, na.rm = TRUE)) {
       error_rows <- which(source_errors %in% TRUE)
       examples <- utils::head(basename(as.character(source_issues$SourcePath[error_rows])), 5L)

@@ -88,7 +88,7 @@ test_that("approved compatibility groups unify types and persist merge intent", 
   }), sheets)
   expect_equal(nrow(workbook$CompatibilityDecisions), 1L)
   workbook$CompatibilityDecisions$Decision <- "Accept"
-  if (nrow(workbook$ColumnDecisions) > 0L) workbook$ColumnDecisions$Decision <- "Accept"
+  if ("Decision" %in% names(workbook$ColumnDecisions)) workbook$ColumnDecisions$Decision <- "Accept"
   openxlsx::write.xlsx(workbook, review_path, overwrite = TRUE)
 
   output <- utils::capture.output(final <- FinalizeSchemaRegistry(
@@ -124,6 +124,26 @@ test_that("ignored compatibility conflicts remain separate without later strict 
   expect_identical(schema$CanonicalType, c("integer", "character"))
   expect_equal(nrow(ValidateSchemaMergeKeys(schema, strict = FALSE)), 0L)
   expect_equal(nrow(discover_schema_relationships(schema)), 0L)
+})
+
+test_that("Excel-inferred numeric decision columns accept text overlays", {
+  internal <- function(name) get(name, envir = environment(PrepareSchemaRegistry))
+  compatibility <- data.table::data.table(
+    Scope = "cross_database", Database = "ALL", Column = "AGE",
+    MergeGroup = "ALL::AGE", RecommendedCommonType = "numeric",
+    ApprovedCommonType = "numeric", SuggestedRole = "compatible_column",
+    Decision = NA_real_, UserNotes = NA_real_)
+  decisions <- data.table::data.table(
+    Scope = "cross_database", Database = "ALL", Column = "AGE",
+    Decision = "Accept", ApprovedCommonType = "numeric",
+    SuggestedRole = "compatible_column", UserNotes = "Reviewed")
+
+  expect_warning(
+    overlaid <- internal(".overlay_compatibility_decisions")(compatibility, decisions),
+    NA)
+  expect_type(overlaid$Decision, "character")
+  expect_identical(overlaid$Decision, "Accept")
+  expect_identical(overlaid$UserNotes, "Reviewed")
 })
 
 test_that("legacy compatibility review workbooks still finalize", {

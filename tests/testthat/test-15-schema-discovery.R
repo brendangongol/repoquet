@@ -39,7 +39,7 @@ test_that("schema discovery produces observations, review, and finalized catalog
   workbook <- stats::setNames(lapply(sheet_names, function(sheet) {
     openxlsx::read.xlsx(review_path, sheet = sheet)
   }), sheet_names)
-  if (nrow(workbook$ColumnDecisions) > 0L) workbook$ColumnDecisions$Decision <- "Accept"
+  if ("Decision" %in% names(workbook$ColumnDecisions)) workbook$ColumnDecisions$Decision <- "Accept"
   openxlsx::write.xlsx(workbook, review_path, overwrite = TRUE)
 
   output <- utils::capture.output(finalized <- FinalizeSchemaRegistry(
@@ -85,17 +85,35 @@ test_that("schema proposal writes cleanly when no columns need review", {
     class = "RepositorySchemaProposal")
   output <- utils::capture.output(WriteSchemaProposal(proposal, path, PreserveDecisions = FALSE))
   expect_true(all(c("StartHere", "ColumnDecisions", "CompatibilityDecisions",
-                    "SourceIssues", "PolicyReport", "Registry",
-                    "CompatibilityRegistry", "TypeHistory", "Settings") %in%
+                    "SourceIssues", "ColumnOverview", "CompatibilityOverview",
+                    "TypeHistory", "PolicyReport", "Registry",
+                    "CompatibilityRegistry", "Settings") %in%
                     openxlsx::getSheetNames(path)))
+  expect_identical(openxlsx::getSheetNames(path)[1:8],
+                   c("StartHere", "ColumnDecisions", "CompatibilityDecisions",
+                     "SourceIssues", "ColumnOverview", "CompatibilityOverview",
+                     "TypeHistory", "PolicyReport"))
   wb <- openxlsx::loadWorkbook(path)
   visibility <- stats::setNames(openxlsx::sheetVisibility(wb),
                                 openxlsx::getSheetNames(path))
   expect_identical(unname(visibility["StartHere"]), "visible")
-  expect_true(all(visibility[c("Registry", "CompatibilityRegistry",
-                               "TypeHistory", "Settings")] == "hidden"))
+  expect_true(all(visibility[c("Registry", "CompatibilityRegistry", "Settings")] == "hidden"))
+  expect_true(all(visibility[c("ColumnOverview", "CompatibilityOverview",
+                               "TypeHistory", "PolicyReport")] == "visible"))
   start <- openxlsx::read.xlsx(path, sheet = "StartHere", startRow = 5)
   expect_identical(start$Status[start$Step == "Finalization"], "READY")
+  guide <- openxlsx::read.xlsx(path, sheet = "StartHere", startRow = 13)
+  expect_true(all(c("ColumnOverview", "ColumnDecisions", "Registry") %in%
+                  guide$Worksheet))
+  expect_match(guide$Contains[guide$Worksheet == "ColumnOverview"],
+               "observed type history")
+  expect_identical(guide$UserAction[guide$Worksheet == "Registry"], "Do not edit.")
+  column_status <- openxlsx::read.xlsx(path, sheet = "ColumnDecisions")
+  source_status <- openxlsx::read.xlsx(path, sheet = "SourceIssues")
+  expect_identical(column_status$Status, "COMPLETE")
+  expect_identical(column_status$RequiredAction, "No column decisions are required.")
+  expect_identical(source_status$Status, "COMPLETE")
+  expect_identical(source_status$RequiredAction, "No source issues were identified.")
 })
 
 test_that("the guided workbook exposes only unresolved decisions", {

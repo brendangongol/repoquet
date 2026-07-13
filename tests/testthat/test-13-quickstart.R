@@ -39,8 +39,8 @@ test_that("the synthetic example repository runs the full pipeline end-to-end", 
   review_wb <- stats::setNames(lapply(review_sheets, function(sheet) {
     openxlsx::read.xlsx(paths$SchemaReviewPath, sheet = sheet)
   }), review_sheets)
-  if (nrow(review_wb$ColumnDecisions) > 0L) review_wb$ColumnDecisions$Decision <- "Accept"
-  if (nrow(review_wb$CompatibilityDecisions) > 0L) review_wb$CompatibilityDecisions$Decision <- "Accept"
+  if ("Decision" %in% names(review_wb$ColumnDecisions)) review_wb$ColumnDecisions$Decision <- "Accept"
+  if ("Decision" %in% names(review_wb$CompatibilityDecisions)) review_wb$CompatibilityDecisions$Decision <- "Accept"
   openxlsx::write.xlsx(review_wb, paths$SchemaReviewPath, overwrite = TRUE)
   out <- utils::capture.output(FinalizeSchemaRegistry(
       paths$SchemaReviewPath, paths$TableSchemaPath, strict = TRUE))
