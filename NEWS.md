@@ -16,5 +16,8 @@
   numeric, and added explicit completion messages to empty review worksheets.
 - Restored full column, compatibility, and type-history overview tabs after the
   action tabs, with a sheet-by-sheet guide on `StartHere`.
+- Cross-database compatibility decisions now supersede narrower
+  within-database decisions, and the generic schema-policy registry is an empty
+  template rather than a collection of domain assumptions.
 - CSV readers now preserve leading-zero fields by default, with a per-source
   `KeepLeadingZeros` reader option for explicit control.

@@ -164,10 +164,14 @@ GetSchemaObservations(
 )
 ```
 
-`SchemaRegistryPath` remains the optional reusable policy-pattern file in this
-first release of the review workflow. `SchemaReviewPath` is the user-facing
-proposal; finalization writes the concrete approved schema to `TableSchemaPath`,
-which is the catalog consumed by the Parquet writer.
+`SchemaRegistryPath` is an optional reusable policy-pattern file. A generic
+project creates an empty template, so no meaning is inferred from names such as
+`ID`, `KEY`, or `CODE`; domain rules are opt-in. `SchemaReviewPath` is the
+user-facing proposal, and finalization writes the concrete approved schema to
+`TableSchemaPath`, which is the authoritative catalog consumed by the Parquet
+writer. When both paths are passed to `ParquetBackEndCreate()`, reviewed columns
+come from `TableSchemaPath`; `SchemaRegistryPath` is retained only for policy
+metadata and for genuinely new columns absent from the finalized catalog.
 
 Register and validate DuckDB views with the catalog's partition types:
 

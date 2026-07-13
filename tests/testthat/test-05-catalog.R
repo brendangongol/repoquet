@@ -49,7 +49,7 @@ test_that("invalid CanonicalType strings warn and fall back to character", {
 
 test_that("invalid registry CanonicalType values fail before loading", {
   fx <- catalog_fixture(); on.exit(unlink(fx$root, recursive = TRUE))
-  reg <- build_default_schema_registry()
+  reg <- build_default_schema_registry("hcup")
   reg$CanonicalType[1] <- "strng"
   data.table::fwrite(reg, fx$reg)
   expect_error(load_schema_registry(fx$reg), "invalid CanonicalType")

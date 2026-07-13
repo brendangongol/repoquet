@@ -3885,33 +3885,22 @@ audit_repository <- function(MDT, ParquetBasePath, CheckpointPath, ManifestPath 
 #' The registry is intentionally pattern-based and focused on merge keys,
 #' diagnosis/procedure/code columns, survey weights, and common analytic fields.
 #' It should remain small; ordinary table-specific columns are still inferred
-#' from the source files.
+#' from the source files. The generic profile is an empty template with no
+#' naming assumptions. Domain conventions are available only through explicit
+#' profiles such as code{"hcup"} or user-authored rows.
 #' @return data.table with ColumnPattern, CanonicalType, Role, AppliesTo, Notes.
 #' @export
-build_default_schema_registry <- function(profile = c("hcup", "generic")) {
+build_default_schema_registry <- function(profile = c("generic", "hcup")) {
   profile <- match.arg(profile)
-  #### "generic" is the domain-neutral core: identifier and code columns    ####
-  #### must survive as text in any domain, and weight columns stay numeric. ####
-  #### "hcup" layers the full HCUP conventions on top and remains this      ####
-  #### repository's default. New domains should start from "generic" and    ####
-  #### add their own patterns to the registry file.                         ####
+  #### Generic repositories must not inherit naming assumptions: ID, KEY,  ####
+  #### CODE, and WEIGHT can legitimately mean different things by domain.  ####
+  #### The empty template remains user-extensible; HCUP conventions are an ####
+  #### explicit opt-in profile.                                             ####
   if (profile == "generic") {
     return(data.table::data.table(
-      Profile = "generic",
-      ColumnPattern = c("^KEY$", "^KEY_[A-Z0-9]+$", "^ID$", "^[A-Z0-9]+_ID$",
-                        "^.*_CODE$", "^WEIGHT$", "^[A-Z0-9]+_?WT$"),
-      CanonicalType = c("character", "character", "character", "character",
-                        "character", "numeric", "numeric"),
-      Role = c("join_key", "join_key", "join_key", "join_key",
-               "code", "weight", "weight"),
-      AppliesTo = "all",
-      Notes = c("Record identifier; preserve exact formatting.",
-                "Namespaced record identifier; preserve exact formatting.",
-                "Record identifier; preserve exact formatting.",
-                "Namespaced identifier; preserve exact formatting.",
-                "Code/text field; preserve leading zeros and symbols.",
-                "Sampling/analysis weight.",
-                "Sampling/analysis weight.")))
+      Profile = character(), ColumnPattern = character(),
+      CanonicalType = character(), Role = character(),
+      AppliesTo = character(), Notes = character()))
   }
   data.table::data.table(
     Profile = "hcup",
@@ -3968,7 +3957,7 @@ build_default_schema_registry <- function(profile = c("hcup", "generic")) {
 
 #' Apply non-negotiable built-in schema policies
 #' @keywords internal
-apply_builtin_schema_registry_policies <- function(reg, profile = c("hcup", "generic")) {
+apply_builtin_schema_registry_policies <- function(reg, profile = c("generic", "hcup")) {
   profile <- match.arg(profile)
   reg <- data.table::as.data.table(reg)
   if ("Profile" %in% names(reg)) {
@@ -4023,7 +4012,7 @@ write_schema_registry <- function(reg, SchemaRegistryPath) {
 #' Read or create a schema registry workbook/csv
 #' @export
 load_schema_registry <- function(SchemaRegistryPath = NULL, create_if_missing = TRUE,
-                                 profile = c("hcup", "generic")) {
+                                 profile = c("generic", "hcup")) {
   profile <- match.arg(profile)
   if (is.null(SchemaRegistryPath) || !nzchar(SchemaRegistryPath)) {
     return(apply_builtin_schema_registry_policies(build_default_schema_registry(profile), profile = profile))
@@ -7123,6 +7112,11 @@ WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = 
 
 .apply_compatibility_review <- function(registry, compatibility, strict = TRUE) {
   registry <- data.table::copy(data.table::as.data.table(registry))
+  for (field in c("ApprovedType", "Role", "MergeGroup")) {
+    if (field %in% names(registry)) {
+      data.table::set(registry, j = field, value = as.character(registry[[field]]))
+    }
+  }
   if (!"MergeReviewed" %in% names(registry)) registry[, MergeReviewed := FALSE]
   if (!"CompatibilityApplied" %in% names(registry)) registry[, CompatibilityApplied := FALSE]
   if (is.null(compatibility) || nrow(compatibility) == 0L) return(registry)
@@ -7178,11 +7172,20 @@ WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = 
   }
   assigned <- data.table::rbindlist(assignments, fill = TRUE)
   if (nrow(assigned) > 0L) {
-    conflicts <- assigned[, .(NTypes = data.table::uniqueN(CanonicalType),
-                              Types = paste(sort(unique(CanonicalType)), collapse = ",")), by = Row][NTypes > 1L]
-    if (nrow(conflicts) > 0L) stop("Overlapping compatibility decisions assign different types to the same table column.")
-    data.table::setorder(assigned, Row, -Priority)
-    chosen <- assigned[!duplicated(Row)]
+    #### A cross-database decision intentionally supersedes a narrower     ####
+    #### within-database decision for the same physical column. Detect     ####
+    #### only disagreements among rules at the highest applicable scope.  ####
+    highest <- assigned[, .(Priority = max(Priority)), by = Row]
+    candidates <- assigned[highest, on = .(Row, Priority), nomatch = 0L]
+    conflicts <- candidates[, .(
+      NTypes = data.table::uniqueN(CanonicalType),
+      Types = paste(sort(unique(CanonicalType)), collapse = ",")),
+      by = Row][NTypes > 1L]
+    if (nrow(conflicts) > 0L) {
+      stop("Compatibility decisions at the same scope assign different types to the same table column.")
+    }
+    data.table::setorder(candidates, Row, -Priority)
+    chosen <- candidates[!duplicated(Row)]
     registry[chosen$Row, `:=`(
       ApprovedType = chosen$CanonicalType,
       MergeGroup = chosen$MergeGroup,

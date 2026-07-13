@@ -126,6 +126,39 @@ test_that("ignored compatibility conflicts remain separate without later strict 
   expect_equal(nrow(discover_schema_relationships(schema)), 0L)
 })
 
+test_that("cross-database compatibility decisions supersede narrower decisions", {
+  internal <- function(name) get(name, envir = environment(PrepareSchemaRegistry))
+  registry <- data.table::data.table(
+    Database = c("D1", "D1", "D2"), TableName = c("A", "B", "C"),
+    DuckDBTable = c("D1_A", "D1_B", "D2_C"), Column = "INC_KEY",
+    ApprovedType = c("int64", "int64", "character"),
+    RecommendedType = c("int64", "int64", "character"),
+    Role = "data", MergeGroup = NA_real_)
+  compatibility <- data.table::data.table(
+    Scope = c("within_database", "cross_database"),
+    Database = c("D1", "ALL"), Column = "INC_KEY",
+    MergeGroup = c("D1::INC_KEY", "ALL::INC_KEY"),
+    RecommendedCommonType = c("int64", "character"),
+    ApprovedCommonType = c("int64", "character"),
+    SuggestedRole = "join_key", Decision = "Accept")
+
+  expect_warning(
+    reviewed <- internal(".apply_compatibility_review")(
+      registry, compatibility, strict = TRUE),
+    NA)
+  expect_true(all(reviewed$ApprovedType == "character"))
+  expect_true(all(reviewed$MergeGroup == "ALL::INC_KEY"))
+  expect_true(all(reviewed$CompatibilityApplied))
+})
+
+test_that("generic registries contain no domain assumptions", {
+  generic <- build_default_schema_registry("generic")
+  hcup <- build_default_schema_registry("hcup")
+  expect_identical(nrow(generic), 0L)
+  expect_true(all(c("ColumnPattern", "CanonicalType", "Role") %in% names(generic)))
+  expect_gt(nrow(hcup), 0L)
+})
+
 test_that("Excel-inferred numeric decision columns accept text overlays", {
   internal <- function(name) get(name, envir = environment(PrepareSchemaRegistry))
   compatibility <- data.table::data.table(

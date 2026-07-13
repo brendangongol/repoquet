@@ -16,6 +16,7 @@ test_that("the scaffold creates a valid, parseable project", {
   expect_error(create_repository_project(dir), "already exists")
   #### Generic profile: no HCUP patterns in the registry.                   ####
   reg <- load_schema_registry(paths$SchemaRegistryPath, create_if_missing = FALSE)
+  expect_identical(nrow(reg), 0L)
   expect_false(any(grepl("HOSP_NIS|DISCWT", reg$ColumnPattern)))
 })
 
