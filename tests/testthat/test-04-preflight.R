@@ -64,14 +64,13 @@ test_that("AcceptPartial column is validated and surfaced", {
   expect_identical(iss2[iss2$Check == "accept_partial_rows", ]$Severity, "warning")
 })
 
-test_that("missing source files are caught when MasterDBPath is given", {
+test_that("structural preflight does not duplicate schema source scans", {
   fx <- new_repo_fixture(); on.exit(unlink(fx$root, recursive = TRUE))
   data.table::fwrite(data.table::data.table(AGE = 1), file.path(fx$src, "a.csv"))
   b <- base_mdt(); b$MDBDir <- "REG"
   iss <- quiet_preflight(b, strict = FALSE, MasterDBPath = fx$root)
-  expect_true("missing_source_files" %in% iss$Check)   # b.csv absent
-  iss2 <- quiet_preflight(b, strict = FALSE)            # no MasterDBPath -> skipped
-  expect_false("missing_source_files" %in% iss2$Check)
+  expect_false("missing_source_files" %in% iss$Check)
+  expect_false("bad_reader_options" %in% iss$Check)
 })
 
 test_that("duplicate identities are detected via the checkpoint key", {

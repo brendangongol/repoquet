@@ -34,7 +34,7 @@ test_that("an unconfigured short record remains a structural warning", {
   expect_true(recommendation$RequiresReview)
 })
 
-test_that("policy matches are visible and unsafe policies require explicit override", {
+test_that("unsafe policies remain visible but retain the safe data recommendation", {
   internal <- function(name) get(name, envir = environment(PrepareSchemaRegistry))
   rows <- data.table::data.table(
     ObservedType = "character", ReaderWarning = NA_character_,
@@ -50,7 +50,20 @@ test_that("policy matches are visible and unsafe policies require explicit overr
   expect_identical(resolved$PolicyType, "numeric")
   expect_identical(resolved$PolicyStatus, "explicit_override_required")
   expect_true(resolved$PolicyConflict)
-  expect_true(resolved$RequiresReview)
+  expect_false(resolved$RequiresReview)
+  expect_identical(resolved$Risk, "Lossless")
+})
+
+test_that("mixed character evidence is a lossless automatic promotion", {
+  internal <- function(name) get(name, envir = environment(PrepareSchemaRegistry))
+  rows <- data.table::data.table(
+    ObservedType = c("character", "integer"), ReaderWarning = NA_character_,
+    ReaderWarningSeverity = NA_character_, PrecisionRisk = FALSE,
+    FractionalCount = 0)
+  recommendation <- internal(".schema_recommendation_for_group")(rows)
+  expect_identical(recommendation$RecommendedType, "character")
+  expect_identical(recommendation$Risk, "Lossless")
+  expect_false(recommendation$RequiresReview)
 })
 
 test_that("approved compatibility groups unify types and persist merge intent", {
@@ -73,9 +86,9 @@ test_that("approved compatibility groups unify types and persist merge intent", 
   workbook <- stats::setNames(lapply(sheets, function(sheet) {
     openxlsx::read.xlsx(review_path, sheet = sheet)
   }), sheets)
-  expect_equal(nrow(workbook$CompatibilityReview), 1L)
-  workbook$CompatibilityReview$Decision <- "Accept"
-  if (nrow(workbook$Review) > 0L) workbook$Review$Decision <- "Accept"
+  expect_equal(nrow(workbook$CompatibilityDecisions), 1L)
+  workbook$CompatibilityDecisions$Decision <- "Accept"
+  if (nrow(workbook$ColumnDecisions) > 0L) workbook$ColumnDecisions$Decision <- "Accept"
   openxlsx::write.xlsx(workbook, review_path, overwrite = TRUE)
 
   output <- utils::capture.output(final <- FinalizeSchemaRegistry(
@@ -111,6 +124,30 @@ test_that("ignored compatibility conflicts remain separate without later strict 
   expect_identical(schema$CanonicalType, c("integer", "character"))
   expect_equal(nrow(ValidateSchemaMergeKeys(schema, strict = FALSE)), 0L)
   expect_equal(nrow(discover_schema_relationships(schema)), 0L)
+})
+
+test_that("legacy compatibility review workbooks still finalize", {
+  skip_if_not_installed("openxlsx")
+  path <- tempfile(fileext = ".xlsx"); on.exit(unlink(path))
+  out <- tempfile(fileext = ".xlsx"); on.exit(unlink(out), add = TRUE)
+  registry <- data.frame(
+    Database = c("D", "D"), TableName = c("A", "B"),
+    DuckDBTable = c("D_A", "D_B"), Column = c("KEY", "KEY"),
+    ObservedTypes = c("integer", "character"),
+    DataRecommendedType = c("integer", "character"),
+    RecommendedType = c("integer", "character"),
+    ApprovedType = c("integer", "character"), RequiresReview = FALSE,
+    Decision = "Auto-approved", Role = "data", MergeGroup = "",
+    PolicyStatus = "not_configured", PolicyPattern = NA_character_)
+  compatibility <- data.frame(
+    Scope = "within_database", Database = "D", Column = "KEY",
+    MergeGroup = "D::KEY", RecommendedCommonType = "character",
+    ApprovedCommonType = "character", SuggestedRole = "join_key",
+    Decision = "Accept")
+  openxlsx::write.xlsx(list(Registry = registry,
+                            CompatibilityReview = compatibility), path)
+  output <- utils::capture.output(final <- FinalizeSchemaRegistry(path, out, strict = TRUE))
+  expect_true(all(final$table_schema[Column == "KEY"]$CanonicalType == "character"))
 })
 
 test_that("clean healthcare schema workflow remains executable", {

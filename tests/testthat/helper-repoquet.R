@@ -79,6 +79,7 @@ run_loader <- function(fx, MDT, DBLoad, completed = character(0), ...) {
                                LogPath = fx$log, n_workers = 1,
                                SchemaRegistryPath = fx$reg, TableSchemaPath = fx$ts,
                                ManifestPath = fx$mf, StrictPreflight = FALSE,
-                               StopOnFileError = FALSE, SourceFingerprintMode = "none", ...))
+                               StopOnFileError = FALSE, SourceFingerprintMode = "none",
+                               UseSchemaCatalog = FALSE, ...))
   list(checkpoint = ck, output = out)
 }

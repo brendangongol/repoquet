@@ -135,7 +135,7 @@ ValidateMDTPreflight(MDT = MDT, strict = TRUE, logStatus = TRUE,
                      ParquetBasePath = ParquetBasePath,
                      MaxFileStemTruncate = TRUE,
                      TerminalHivePartition = FALSE,
-                     MasterDBPath = MasterDBPath, LogPath = LogPath, RunId = RunId)
+                     LogPath = LogPath, RunId = RunId)
 MDTCompleteStatus(MDT = MDT, CheckpointPath = CheckpointPath, verbose = TRUE, logStatus = TRUE)
 
 ###############################################################################
@@ -144,9 +144,9 @@ MDTCompleteStatus(MDT = MDT, CheckpointPath = CheckpointPath, verbose = TRUE, lo
 #### The survey reads every source through its configured reader and stores  ####
 #### detailed per-file/per-column evidence in SchemaObservations.parquet.    ####
 #### Recommendations are derived from those observations rather than HCUP    ####
-#### naming rules. SchemaReview.xlsx stays compact: Review contains only     ####
-#### decisions needing attention; Registry contains every proposed column;   ####
-#### History shows type drift; SourceIssues shows reader errors/warnings.     ####
+#### naming rules. Open StartHere first. ColumnDecisions and                  ####
+#### CompatibilityDecisions contain only unfinished work; PolicyReport is    ####
+#### informational. Advanced registries/history are hidden but available.     ####
 #### DBLoad derives from DBSetupV2.xlsx. Override it only for a staged load.  ####
 DBLoad <- sort(unique(MDT$Database))
 PrepareSchemaRegistry(
@@ -179,10 +179,14 @@ if (nrow(schema_issues) > 0L) print(schema_issues)
 ###############################################################################
 #### Schema review gate #######################################################
 ###############################################################################
-#### On the first run, open SchemaReviewPath and complete every Review row:  ####
+#### StartHere identifies every blocking item and its worksheet.              ####
+#### ColumnDecisions contains only genuinely ambiguous evidence or reader     ####
+#### warnings. Safe promotions are automatic; PolicyReport records policy     ####
+#### differences without forcing repetitive decisions. For every visible     ####
+#### ColumnDecisions row:                                                      ####
 ####   Decision = "Accept" keeps RecommendedType.                            ####
 ####   Decision = "Override" requires the desired ApprovedType.              ####
-#### CompatibilityReview contains only same-named cross-table conflicts:     ####
+#### CompatibilityDecisions contains unresolved same-named table conflicts:  ####
 ####   Accept   = use RecommendedCommonType for that approved merge group.   ####
 ####   Override = use ApprovedCommonType instead.                            ####
 ####   Ignore   = the similarly named fields are intentionally kept apart.   ####
@@ -191,7 +195,7 @@ if (nrow(schema_issues) > 0L) print(schema_issues)
 #### After review, run FinalizeSchemaRegistry below; a second survey is not  ####
 #### needed. Rerun the survey after fixing SourceIssues or changing sources. ####
 #### Existing decisions survive only while their observation signature is   ####
-#### unchanged, so changed evidence always returns to the Review sheet.      ####
+#### unchanged; changed evidence returns to the appropriate decision sheet. ####
 #### Finalization stops here until all required decisions are complete, then ####
 #### writes TableSchemas.xlsx in the exact format ParquetBackEndCreate uses. ####
 repository_catalog <- FinalizeSchemaRegistry(
@@ -223,9 +227,10 @@ run_result <- ParquetBackEndCreate(MDT = MDT,
                                               SchemaRegistryPath = SchemaRegistryPath,
                                               ManifestPath = ManifestPath,
                                               TableSchemaPath = TableSchemaPath,
+                                              UseSchemaCatalog = TRUE,
                                               StrictPreflight = TRUE,
                                               StrictSchemaValidation = TRUE,
-                                              RunPreflight = FALSE, # already validated explicitly above -- skips a second full network scan
+                                              RunPreflight = FALSE, # already validated structurally above
                                               SourceFingerprintMode = "metadata",
                                               StopOnFileError = TRUE,
                                               ReturnRunResult = TRUE,

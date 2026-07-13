@@ -31,7 +31,7 @@ test_that("schema discovery produces observations, review, and finalized catalog
   registry <- prepared$proposal$registry
   expect_identical(registry[Column == "VALUE"]$RecommendedType, "numeric")
   expect_identical(registry[Column == "CODE"]$RecommendedType, "character")
-  expect_true(registry[Column == "CODE"]$RequiresReview)
+  expect_false(registry[Column == "CODE"]$RequiresReview)
   expect_match(registry[Column == "VALUE"]$TypeHistory, "2023")
   expect_match(registry[Column == "VALUE"]$TypeHistory, "2024")
 
@@ -39,7 +39,7 @@ test_that("schema discovery produces observations, review, and finalized catalog
   workbook <- stats::setNames(lapply(sheet_names, function(sheet) {
     openxlsx::read.xlsx(review_path, sheet = sheet)
   }), sheet_names)
-  workbook$Review$Decision <- "Accept"
+  if (nrow(workbook$ColumnDecisions) > 0L) workbook$ColumnDecisions$Decision <- "Accept"
   openxlsx::write.xlsx(workbook, review_path, overwrite = TRUE)
 
   output <- utils::capture.output(finalized <- FinalizeSchemaRegistry(
@@ -84,8 +84,52 @@ test_that("schema proposal writes cleanly when no columns need review", {
     ObservationPath = "observations.parquet"),
     class = "RepositorySchemaProposal")
   output <- utils::capture.output(WriteSchemaProposal(proposal, path, PreserveDecisions = FALSE))
-  expect_true(all(c("Review", "Registry", "History", "Settings") %in%
+  expect_true(all(c("StartHere", "ColumnDecisions", "CompatibilityDecisions",
+                    "SourceIssues", "PolicyReport", "Registry",
+                    "CompatibilityRegistry", "TypeHistory", "Settings") %in%
                     openxlsx::getSheetNames(path)))
+  wb <- openxlsx::loadWorkbook(path)
+  visibility <- stats::setNames(openxlsx::sheetVisibility(wb),
+                                openxlsx::getSheetNames(path))
+  expect_identical(unname(visibility["StartHere"]), "visible")
+  expect_true(all(visibility[c("Registry", "CompatibilityRegistry",
+                               "TypeHistory", "Settings")] == "hidden"))
+  start <- openxlsx::read.xlsx(path, sheet = "StartHere", startRow = 5)
+  expect_identical(start$Status[start$Step == "Finalization"], "READY")
+})
+
+test_that("the guided workbook exposes only unresolved decisions", {
+  skip_if_not_installed("openxlsx")
+  path <- tempfile(fileext = ".xlsx"); on.exit(unlink(path))
+  registry <- data.table::data.table(
+    Database = "D", TableName = "T", DuckDBTable = "D_T", Column = "X",
+    ObservedTypes = "integer,character", TypeHistory = "YEAR=2023: integer; YEAR=2024: character",
+    DataRecommendedType = "character", RecommendedType = "character",
+    ApprovedType = "character", Risk = "Review",
+    RecommendationReason = "Reader warning requires confirmation.", Confidence = "sampled",
+    PolicyPattern = NA_character_, PolicyType = NA_character_, PolicyRole = NA_character_,
+    PolicyStatus = "not_configured", PolicyConflict = FALSE,
+    Role = "data", MergeGroup = "", RequiresReview = TRUE, Decision = "",
+    DecisionOrigin = "new", UserNotes = "", ObservationSignature = "sig")
+  proposal <- structure(list(
+    registry = registry,
+    compatibility = data.table::data.table(),
+    history = registry[0, ], source_issues = registry[0, ],
+    summary = data.table::data.table(Columns = 1L, AutoApproved = 0L,
+                                     NeedsReview = 1L, SourceIssues = 0L,
+                                     CompatibilityConflicts = 0L),
+    ObservationPath = "observations.parquet"),
+    class = "RepositorySchemaProposal")
+  output <- utils::capture.output(WriteSchemaProposal(proposal, path,
+                                                       PreserveDecisions = FALSE))
+  decisions <- openxlsx::read.xlsx(path, sheet = "ColumnDecisions")
+  expect_identical(nrow(decisions), 1L)
+  expect_identical(names(decisions)[1:4],
+                   c("Decision", "ApprovedType", "UserNotes", "RequiredAction"))
+  start <- openxlsx::read.xlsx(path, sheet = "StartHere", startRow = 5)
+  expect_identical(start$Status[start$Step == "Column schema decisions"],
+                   "ACTION REQUIRED")
+  expect_identical(start$Remaining[start$Step == "Column schema decisions"], 1)
 })
 
 test_that("schema finalization requires explicit, valid overrides", {

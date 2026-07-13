@@ -153,8 +153,23 @@ test_that("strict file failure is surfaced after run bookkeeping", {
     SAV_ROW_THRESHOLD = 10, SAV_CHUNK_SIZE = 10, LogPath = fx$log, n_workers = 1,
     SchemaRegistryPath = fx$reg, TableSchemaPath = fx$ts, ManifestPath = fx$mf,
     StrictPreflight = FALSE, StopOnFileError = TRUE, SourceFingerprintMode = "none",
-    LockRepository = FALSE, SnapshotState = FALSE), "failed for 1 source file")
+    LockRepository = FALSE, SnapshotState = FALSE, UseSchemaCatalog = FALSE),
+    "failed for 1 source file")
   expect_true(dir.exists(file.path(dirname(fx$mf), "RunSummaries")))
+})
+
+test_that("catalog mode cannot silently fall back to fresh inference", {
+  fx <- new_repo_fixture(); on.exit(unlink(fx$root, recursive = TRUE))
+  data.table::fwrite(data.table::data.table(ID = 1L), file.path(fx$src, "a.csv"))
+  M <- data.frame(Database = "REG", MDBDir = "REG", TableName = "T", Path = "a.csv",
+                  FileType = "csv", PartitionKey = "year", PartitionValue = "2024")
+  expect_error(ParquetBackEndCreate(
+    MDT = M, DBLoad = "REG", MasterDBPath = fx$root, completed_checkpoint = character(),
+    CheckpointPath = fx$cp, ParquetBasePath = fx$pq, PartitionBy = "NRows", RAMThreshold = 1,
+    SAV_ROW_THRESHOLD = 10, SAV_CHUNK_SIZE = 10, LogPath = fx$log, n_workers = 1,
+    SchemaRegistryPath = fx$reg, TableSchemaPath = fx$ts, ManifestPath = fx$mf,
+    RunPreflight = FALSE, LockRepository = FALSE, SnapshotState = FALSE,
+    UseSchemaCatalog = TRUE), "no finalized table schema catalog")
 })
 
 test_that("parallel metadata scans retry worker-only failures serially", {

@@ -115,8 +115,7 @@ paths <- RepositoryInitialize(cfg$FormattedDBPath, profile = "generic")
 MDT <- openxlsx::read.xlsx(cfg$MDTPath, sheet = "Sheet1")
 
 ValidateMDTPreflight(
-  MDT, strict = TRUE, MasterDBPath = cfg$MasterDBPath,
-  ParquetBasePath = paths$ParquetBasePath
+  MDT, strict = TRUE, ParquetBasePath = paths$ParquetBasePath
 )
 
 prepared <- PrepareSchemaRegistry(
@@ -126,7 +125,8 @@ prepared <- PrepareSchemaRegistry(
   n_workers = cfg$n_workers
 )
 
-# Review the compact Review sheet in paths$SchemaReviewPath, then finalize it.
+# Open StartHere. Complete only the visible rows in ColumnDecisions and
+# CompatibilityDecisions. PolicyReport is informational.
 FinalizeSchemaRegistry(
   SchemaReviewPath = paths$SchemaReviewPath,
   TableSchemaPath = paths$TableSchemaPath,

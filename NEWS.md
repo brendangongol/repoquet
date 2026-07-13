@@ -9,5 +9,8 @@
 - Added a user-guided schema workflow: detailed source observations are stored
   in Parquet, a compact Excel workbook exposes recommendations and type history,
   and approved decisions finalize into the existing writer catalog.
+- Redesigned `SchemaReview.xlsx` around a `StartHere` dashboard. Only unresolved
+  column and compatibility decisions remain visible; policy results are clearly
+  informational and advanced registries/history are hidden by default.
 - CSV readers now preserve leading-zero fields by default, with a per-source
   `KeepLeadingZeros` reader option for explicit control.

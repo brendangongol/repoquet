@@ -36,7 +36,8 @@ utils::globalVariables(c(
   "InferenceConfidence", "PartitionKey", "PartitionValue", "ApprovedType",
   "RecommendedType", "DataRecommendedType", "ObservedTypes", "MergeGroup",
   "MergeReviewed", "RequiresReview", "Decision", "PolicyPattern", "PolicyType",
-  "PolicyRole", "PolicyStatus", "PolicyConflict", "DecisionOrigin",
+  "PolicyRole", "PolicyStatus", "PolicyConflict", "PolicyApplied",
+  "DecisionOrigin", "RequiredAction", "ActionRequired", "Blocking", "Outcome",
   "CompatibilityApplied", "CompatibilitySignature",
   "RecommendedCommonType", "ApprovedCommonType", "SuggestedRole", "Scope",
   "DeclaredEncoding", "DetectedEncoding", "EncodingConfidence", "EncodingUsed",
@@ -5710,13 +5711,18 @@ create_repository_project <- function(dir, MasterDBPath = file.path(dir, "source
     "MDT <- openxlsx::read.xlsx(cfg$MDTPath, sheet = \"Sheet1\")",
     "# scan_for_new_source_files(cfg$MasterDBPath, MDT)   # propose rows for new files",
     "ValidateMDTPreflight(MDT, strict = TRUE, ParquetBasePath = paths$ParquetBasePath,",
-    "                     MasterDBPath = cfg$MasterDBPath, LogPath = paths$LogPath, RunId = RunId)",
+    "                     LogPath = paths$LogPath, RunId = RunId)",
     "",
-    "#### 2. Schema catalog: inferred types + registry, reviewable in xlsx ####",
-    "BuildRepositoryCatalog(MDT, MasterDBPath = cfg$MasterDBPath, n_workers = cfg$n_workers,",
-    "                       SchemaRegistryPath = paths$SchemaRegistryPath,",
-    "                       TableSchemaPath = paths$TableSchemaPath,",
-    "                       LogPath = paths$LogPath, RunId = RunId)",
+    "#### 2. Survey sources and write the compact review workbook ####",
+    "PrepareSchemaRegistry(MDT, MasterDBPath = cfg$MasterDBPath,",
+    "                      ObservationPath = paths$SchemaObservationPath,",
+    "                      SchemaReviewPath = paths$SchemaReviewPath,",
+    "                      n_workers = cfg$n_workers,",
+    "                      SchemaRegistryPath = paths$SchemaRegistryPath,",
+    "                      LogPath = paths$LogPath, RunId = RunId)",
+    "# Open StartHere. Complete ColumnDecisions and CompatibilityDecisions; PolicyReport is informational.",
+    "FinalizeSchemaRegistry(SchemaReviewPath = paths$SchemaReviewPath,",
+    "                       TableSchemaPath = paths$TableSchemaPath, strict = TRUE)",
     "",
     "#### 3. Load to hive-partitioned Parquet (checkpointed and resumable) ####",
     "run_result <- ParquetBackEndCreate(MDT = MDT, DBLoad = sort(unique(MDT$Database)),",
@@ -5734,6 +5740,7 @@ create_repository_project <- function(dir, MasterDBPath = file.path(dir, "source
     "                                  MaxCoerceNAPct = cfg$MaxCoerceNAPct,",
     "                                  SourceFingerprintMode = cfg$SourceFingerprintMode,",
     "                                  StopOnFileError = TRUE, ReturnRunResult = TRUE,",
+    "                                  UseSchemaCatalog = TRUE,",
     "                                  RunId = RunId,",
     "                                  RunPreflight = FALSE)",
     "print(run_result)",
@@ -5866,7 +5873,14 @@ RepositoryInitialize <- function(FormattedDBPath, ParquetBasePath = file.path(Fo
   paths
 }
 
-#' MDT preflight validation for schema/loader safety
+#' Validate MDT structure and output safety before schema discovery or loading
+#'
+#' This preflight deliberately does not open source files or execute reader
+#' options. Those checks belong to \code{\link{SurveyRepositorySchema}}, which
+#' records the detailed evidence and errors in the schema artifacts. Keeping
+#' this function structural avoids reading every large/network source twice.
+#' \code{MasterDBPath} remains accepted for backward compatibility but is not
+#' inspected.
 #' @export
 ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
                                  ParquetBasePath = NULL, MaxFileStemTruncate = TRUE,
@@ -5932,44 +5946,10 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
       add_issue("mixed_physical_table_name", "error",
                 "Rows for one Database/TableName must use one PhysicalTableName.", nrow(logical_physical))
     }
-    dup_path <- MDTdt[duplicated(Path) | duplicated(Path, fromLast = TRUE)]
-    if (nrow(dup_path) > 0L) add_issue("duplicate_path_only", "warning", "Path is not globally unique; checkpointing by Path alone can skip files if reused.", nrow(dup_path))
     bad_filetype <- !tolower(MDTdt$FileType) %in% supported_file_types()
     if (any(bad_filetype)) add_issue("bad_filetype", "error",
                                      sprintf("One or more MDT FileType values have no registered reader. Supported: %s.",
                                              paste(supported_file_types(), collapse = ", ")), sum(bad_filetype))
-    validate_row_options <- function(i) {
-      options <- reader_options_for_row(MDTdt[i, ])
-      if (tolower(as.character(MDTdt$FileType[i])) %in% c("csv", "tsv", "txt", "gz")) {
-        .delimited_repair_settings(options)
-      }
-      invisible(options)
-    }
-    option_rows <- which(vapply(seq_len(nrow(MDTdt)), function(i) {
-      inherits(tryCatch(validate_row_options(i), error = function(e) e), "error")
-    }, logical(1)))
-    if (length(option_rows) > 0L) {
-      first_error <- tryCatch({ validate_row_options(option_rows[1]); "" },
-                               error = function(e) conditionMessage(e))
-      add_issue("bad_reader_options", "error",
-                sprintf("Reader options are invalid for %d row(s); first row %d: %s",
-                        length(option_rows), option_rows[1], first_error), length(option_rows))
-    }
-    #### Source-file existence (optional; runs when MasterDBPath given).    ####
-    #### A missing file otherwise surfaces late, during the schema header   ####
-    #### scan, where it degrades that whole file's load -- catch it here    ####
-    #### before anything runs.                                              ####
-    if (!is.null(MasterDBPath) && nzchar(MasterDBPath)) {
-      full_paths <- file.path(MasterDBPath, MDTdt$MDBDir, MDTdt$Path)
-      missing_files <- !file.exists(full_paths)
-      if (any(missing_files)) {
-        shown <- utils::head(full_paths[missing_files], 5L)
-        add_issue("missing_source_files", "error",
-                  sprintf("%d source file(s) not found under MasterDBPath. First %d: %s",
-                          sum(missing_files), length(shown), paste(shown, collapse = " | ")),
-                  sum(missing_files))
-      }
-    }
     #### AcceptPartial (optional): per-row acknowledgment that a file's     ####
     #### verified truncation is accepted; such rows checkpoint with a       ####
     #### warning instead of failing on row-count mismatch.                  ####
@@ -6449,7 +6429,6 @@ GetSchemaObservations <- function(ObservationPath, Database = NULL, TableName = 
     if (fractional == 0 && "int64" %in% types && !precision_risk) {
       recommended <- "int64"
       reason <- "All sampled numeric values are integral; int64 avoids floating-point identifiers."
-      risk <- "Review"
     } else if (!precision_risk) {
       recommended <- "numeric"
       reason <- "Numeric storage safely accommodates the observed integer and fractional values."
@@ -6461,11 +6440,9 @@ GetSchemaObservations <- function(ObservationPath, Database = NULL, TableName = 
   } else if ("character" %in% types) {
     recommended <- "character"
     reason <- "Character storage preserves mixed textual and numeric representations."
-    risk <- "Review"
   } else if (all(types %in% c("Date", "POSIXct"))) {
     recommended <- "POSIXct"
     reason <- "Datetime storage preserves both dates and timestamps."
-    risk <- "Review"
   } else {
     recommended <- "character"
     reason <- sprintf("No automatic lossless promotion exists for: %s.", paste(types, collapse = ", "))
@@ -6504,16 +6481,16 @@ GetSchemaObservations <- function(ObservationPath, Database = NULL, TableName = 
   risk <- recommendation$Risk
   reason <- recommendation$Reason
   if (conflict) {
-    risk <- if (safe_policy) "Review" else "Potential loss"
+    risk <- recommendation$Risk
     reason <- paste0(reason, " Policy ", as.character(policy_hit$ColumnPattern[1]),
                      " proposes ", policy_type, "; ",
-                     if (safe_policy) "the promotion is lossless but remains visible for approval."
-                     else "the observed evidence does not support that coercion without explicit override.")
+                     if (safe_policy) "the lossless policy promotion was applied automatically and is recorded in PolicyReport."
+                     else "the observed evidence does not support that coercion, so the data-derived type was retained and the conflict is recorded in PolicyReport.")
   }
   list(
     DataRecommendedType = data_type, RecommendedType = final_type,
     Risk = risk, Reason = reason,
-    RequiresReview = isTRUE(recommendation$RequiresReview) || conflict,
+    RequiresReview = isTRUE(recommendation$RequiresReview),
     Role = if ("Role" %in% names(policy_hit)) as.character(policy_hit$Role[1]) else NULL,
     PolicyPattern = as.character(policy_hit$ColumnPattern[1]),
     PolicyType = policy_type,
@@ -6682,11 +6659,18 @@ RecommendRepositorySchema <- function(survey = NULL, ObservationPath = NULL,
 .preserve_schema_review_decisions <- function(registry, SchemaReviewPath) {
   if (!file.exists(SchemaReviewPath) || !is_excel_workbook_path(SchemaReviewPath)) return(registry)
   sheets <- tryCatch(openxlsx::getSheetNames(SchemaReviewPath), error = function(e) character(0))
-  old_parts <- lapply(intersect(c("Review", "Registry"), sheets), function(sheet) {
+  old_parts <- lapply(intersect(c("ColumnDecisions", "Review", "Registry"), sheets), function(sheet) {
     tryCatch(data.table::as.data.table(openxlsx::read.xlsx(SchemaReviewPath, sheet = sheet)), error = function(e) NULL)
   })
   old <- data.table::rbindlist(Filter(Negate(is.null), old_parts), fill = TRUE)
   if (nrow(old) == 0L || !all(c("Database", "TableName", "Column", "ObservationSignature") %in% names(old))) return(registry)
+  #### Preserve only deliberate user decisions. Blank rows from an older, ####
+  #### more conservative proposal must not replace a newly auto-approved   ####
+  #### decision when recommendation rules improve.                          ####
+  if (!"Decision" %in% names(old)) return(registry)
+  old_decision <- tolower(trimws(as.character(old$Decision)))
+  old <- old[old_decision %in% c("accept", "override")]
+  if (nrow(old) == 0L) return(registry)
   old <- old[!duplicated(paste(Database, TableName, Column, sep = "\r"))]
   current_key <- paste(registry$Database, registry$TableName, registry$Column, sep = "\r")
   old_key <- paste(old$Database, old$TableName, old$Column, sep = "\r")
@@ -6703,11 +6687,19 @@ RecommendRepositorySchema <- function(survey = NULL, ObservationPath = NULL,
   if (nrow(compatibility) == 0L || !file.exists(SchemaReviewPath) ||
       !is_excel_workbook_path(SchemaReviewPath)) return(compatibility)
   sheets <- tryCatch(openxlsx::getSheetNames(SchemaReviewPath), error = function(e) character(0))
-  if (!"CompatibilityReview" %in% sheets) return(compatibility)
-  old <- tryCatch(data.table::as.data.table(openxlsx::read.xlsx(
-    SchemaReviewPath, sheet = "CompatibilityReview")), error = function(e) NULL)
+  old_parts <- lapply(intersect(c("CompatibilityDecisions", "CompatibilityReview",
+                                  "CompatibilityRegistry"), sheets), function(sheet) {
+    tryCatch(data.table::as.data.table(openxlsx::read.xlsx(
+      SchemaReviewPath, sheet = sheet)), error = function(e) NULL)
+  })
+  old <- data.table::rbindlist(Filter(Negate(is.null), old_parts), fill = TRUE)
   required <- c("Scope", "Database", "Column", "CompatibilitySignature")
-  if (is.null(old) || !all(required %in% names(old))) return(compatibility)
+  if (nrow(old) == 0L || !all(required %in% names(old))) return(compatibility)
+  if (!"Decision" %in% names(old)) return(compatibility)
+  old_decision <- tolower(trimws(as.character(old$Decision)))
+  old <- old[old_decision %in% c("accept", "override", "ignore")]
+  if (nrow(old) == 0L) return(compatibility)
+  old <- old[!duplicated(paste(Scope, Database, Column, sep = "\r"))]
   key <- function(x) paste(x$Scope, x$Database, x$Column, sep = "\r")
   idx <- match(key(compatibility), key(old))
   same <- !is.na(idx) & compatibility$CompatibilitySignature == old$CompatibilitySignature[idx]
@@ -6722,32 +6714,176 @@ RecommendRepositorySchema <- function(survey = NULL, ObservationPath = NULL,
 WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = TRUE) {
   if (!inherits(proposal, "RepositorySchemaProposal")) stop("proposal must come from RecommendRepositorySchema().")
   registry <- data.table::copy(proposal$registry)
+  policy_defaults <- list(
+    DataRecommendedType = if ("RecommendedType" %in% names(registry)) registry$RecommendedType else NA_character_,
+    PolicyPattern = NA_character_, PolicyType = NA_character_, PolicyRole = NA_character_,
+    PolicyStatus = "not_configured", PolicyConflict = FALSE
+  )
+  for (field in names(policy_defaults)) {
+    if (!field %in% names(registry)) registry[, (field) := policy_defaults[[field]]]
+  }
   if (isTRUE(PreserveDecisions)) registry <- .preserve_schema_review_decisions(registry, SchemaReviewPath)
   compatibility <- data.table::copy(proposal$compatibility %||% data.table::data.table())
   if (isTRUE(PreserveDecisions)) {
     compatibility <- .preserve_compatibility_decisions(compatibility, SchemaReviewPath)
   }
-  review <- registry[RequiresReview == TRUE]
+  normalize_decision <- function(x) {
+    out <- tolower(trimws(as.character(x)))
+    out[is.na(out)] <- ""
+    out
+  }
+  column_unresolved <- registry$RequiresReview %in% TRUE &
+    !normalize_decision(registry$Decision) %in% c("accept", "override")
+  column_decisions <- data.table::copy(registry[column_unresolved])
+  if (nrow(column_decisions) > 0L) {
+    column_decisions[, RequiredAction :=
+      "Select Accept, or choose ApprovedType and select Override."]
+    first <- c("Decision", "ApprovedType", "UserNotes", "RequiredAction",
+               "Database", "TableName", "Column", "RecommendedType", "Risk",
+               "RecommendationReason", "ObservedTypes", "TypeHistory")
+    data.table::setcolorder(column_decisions,
+      c(intersect(first, names(column_decisions)), setdiff(names(column_decisions), first)))
+  }
+  compatibility_unresolved <- if (nrow(compatibility) > 0L) {
+    !normalize_decision(compatibility$Decision) %in% c("accept", "override", "ignore")
+  } else logical(0)
+  compatibility_decisions <- data.table::copy(compatibility[compatibility_unresolved])
+  if (nrow(compatibility_decisions) > 0L) {
+    compatibility_decisions[, RequiredAction := paste0(
+      "Select Accept, select Override after changing ApprovedCommonType, ",
+      "or select Ignore to keep the fields separate.")]
+    first <- c("Decision", "ApprovedCommonType", "UserNotes", "RequiredAction",
+               "Scope", "Database", "Column", "CurrentTypes",
+               "RecommendedCommonType", "RecommendationReason", "Tables")
+    data.table::setcolorder(compatibility_decisions,
+      c(intersect(first, names(compatibility_decisions)),
+        setdiff(names(compatibility_decisions), first)))
+  }
+  policy_report <- registry[PolicyConflict %in% TRUE, .(
+    ActionRequired = "No - informational only",
+    Database, TableName, DuckDBTable, Column, ObservedTypes,
+    DataRecommendedType, PolicyType, RecommendedType,
+    PolicyPattern, PolicyRole, PolicyStatus,
+    PolicyApplied = PolicyStatus == "lossless_policy_promotion",
+    Outcome = ifelse(PolicyStatus == "lossless_policy_promotion",
+                     "Lossless policy type applied automatically",
+                     "Policy not applied; data-derived type retained"),
+    RecommendationReason
+  )]
+  source_issues <- data.table::copy(data.table::as.data.table(
+    proposal$source_issues %||% data.table::data.table()))
+  source_errors <- if ("SurveyStatus" %in% names(source_issues)) {
+    tolower(trimws(as.character(source_issues$SurveyStatus))) == "error"
+  } else rep(FALSE, nrow(source_issues))
+  source_errors[is.na(source_errors)] <- FALSE
+  if (nrow(source_issues) > 0L) {
+    source_issues[, Blocking := ifelse(source_errors, "Yes", "No")]
+    source_issues[, RequiredAction := ifelse(
+      source_errors,
+      "Correct the MDT or reader configuration, then rerun PrepareSchemaRegistry().",
+      "Review the warning; any required column decision appears in ColumnDecisions.")]
+    first <- c("Blocking", "RequiredAction", "Database", "TableName", "SourcePath",
+               "SurveyStatus", "SurveyMessage", "ReaderWarning")
+    data.table::setcolorder(source_issues,
+      c(intersect(first, names(source_issues)), setdiff(names(source_issues), first)))
+  }
+  n_source_errors <- sum(source_errors)
+  n_column_decisions <- nrow(column_decisions)
+  n_compatibility_decisions <- nrow(compatibility_decisions)
+  ready <- n_source_errors == 0L && n_column_decisions == 0L &&
+    n_compatibility_decisions == 0L
+  start_here <- data.table::data.table(
+    Step = c("Source validation", "Column schema decisions",
+             "Cross-table compatibility", "Policy report", "Finalization"),
+    Status = c(
+      if (n_source_errors > 0L) "BLOCKED" else if (nrow(source_issues) > 0L) "COMPLETE - WARNINGS LOGGED" else "COMPLETE",
+      if (n_column_decisions > 0L) "ACTION REQUIRED" else "COMPLETE",
+      if (n_compatibility_decisions > 0L) "ACTION REQUIRED" else "COMPLETE",
+      "INFORMATIONAL",
+      if (ready) "READY" else "BLOCKED"),
+    Remaining = c(n_source_errors, n_column_decisions, n_compatibility_decisions,
+                  nrow(policy_report), n_source_errors + n_column_decisions + n_compatibility_decisions),
+    RequiredAction = c(
+      if (n_source_errors > 0L) "Resolve blocking rows and rerun PrepareSchemaRegistry()." else "None.",
+      if (n_column_decisions > 0L) "Complete every visible row." else "None.",
+      if (n_compatibility_decisions > 0L) "Complete every visible row." else "None.",
+      "No decision required; review only when useful.",
+      if (ready) "Run FinalizeSchemaRegistry()." else "Complete the blocking steps above."),
+    Worksheet = c("SourceIssues", "ColumnDecisions", "CompatibilityDecisions",
+                  "PolicyReport", "StartHere")
+  )
   settings <- data.table::data.table(
-    Setting = c("ObservationPath", "Columns", "AutoApproved", "NeedsReview",
-                "CompatibilityConflicts", "SourceIssues", "GeneratedUTC"),
+    Setting = c("ObservationPath", "Columns", "AutoApproved", "ColumnDecisions",
+                "CompatibilityDecisions", "CompatibilityGroups", "PolicyItems",
+                "SourceIssues", "BlockingSourceErrors", "GeneratedUTC"),
     Value = c(proposal$ObservationPath %||% "", proposal$summary$Columns,
-              proposal$summary$AutoApproved, proposal$summary$NeedsReview,
+              proposal$summary$AutoApproved, n_column_decisions,
+              n_compatibility_decisions,
               proposal$summary$CompatibilityConflicts %||% nrow(compatibility),
-              proposal$summary$SourceIssues,
+              nrow(policy_report), nrow(source_issues), n_source_errors,
               format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"))
   )
   dir.create(dirname(SchemaReviewPath), recursive = TRUE, showWarnings = FALSE)
   tmp <- tempfile(pattern = paste0(basename(SchemaReviewPath), ".tmp_"),
                   tmpdir = dirname(SchemaReviewPath), fileext = ".xlsx")
   wb <- openxlsx::createWorkbook()
-  sheets <- list(Review = review, CompatibilityReview = compatibility,
-                 Registry = registry, History = proposal$history, Settings = settings)
-  if (nrow(proposal$source_issues) > 0L) sheets$SourceIssues <- proposal$source_issues
+  openxlsx::addWorksheet(wb, "StartHere", gridLines = FALSE, tabColour = "#70AD47")
+  openxlsx::mergeCells(wb, "StartHere", cols = 1:5, rows = 1)
+  openxlsx::writeData(wb, "StartHere", "Schema Review", startRow = 1, startCol = 1)
+  openxlsx::mergeCells(wb, "StartHere", cols = 1:5, rows = 2)
+  openxlsx::writeData(wb, "StartHere",
+    paste0("Only rows marked ACTION REQUIRED or BLOCKED need attention. ",
+           "PolicyReport is informational; hidden sheets are system records."),
+    startRow = 2, startCol = 1)
+  openxlsx::mergeCells(wb, "StartHere", cols = 1:5, rows = 3)
+  openxlsx::writeData(wb, "StartHere",
+    paste0("Counts are a snapshot from workbook generation. After completing the visible ",
+           "decision rows, run FinalizeSchemaRegistry(); another survey is not required."),
+    startRow = 3, startCol = 1)
+  openxlsx::writeDataTable(wb, "StartHere", start_here, startRow = 5,
+                           tableStyle = "TableStyleMedium2")
+  openxlsx::freezePane(wb, "StartHere", firstActiveRow = 6)
+  openxlsx::setColWidths(wb, "StartHere", cols = 1:5,
+                         widths = c(26, 28, 12, 58, 28))
+  title_style <- openxlsx::createStyle(fontSize = 18, fontColour = "#FFFFFF",
+                                        fgFill = "#1F4E78", textDecoration = "bold",
+                                        halign = "left", valign = "center")
+  note_style <- openxlsx::createStyle(fontColour = "#404040", fgFill = "#D9EAF7",
+                                       wrapText = TRUE, valign = "center")
+  openxlsx::addStyle(wb, "StartHere", title_style, rows = 1, cols = 1:5, gridExpand = TRUE)
+  openxlsx::addStyle(wb, "StartHere", note_style, rows = 2:3, cols = 1:5, gridExpand = TRUE)
+  openxlsx::setRowHeights(wb, "StartHere", rows = c(1, 2, 3), heights = c(28, 34, 34))
+  status_styles <- list(
+    green = openxlsx::createStyle(fgFill = "#E2F0D9", fontColour = "#385723", textDecoration = "bold"),
+    yellow = openxlsx::createStyle(fgFill = "#FFF2CC", fontColour = "#7F6000", textDecoration = "bold"),
+    red = openxlsx::createStyle(fgFill = "#F4CCCC", fontColour = "#9C0006", textDecoration = "bold"),
+    gray = openxlsx::createStyle(fgFill = "#E7E6E6", fontColour = "#404040", textDecoration = "bold")
+  )
+  for (i in seq_len(nrow(start_here))) {
+    style <- if (start_here$Status[i] %in% c("COMPLETE", "COMPLETE - WARNINGS LOGGED", "READY")) {
+      status_styles$green
+    } else if (start_here$Status[i] == "ACTION REQUIRED") {
+      status_styles$yellow
+    } else if (start_here$Status[i] == "BLOCKED") {
+      status_styles$red
+    } else status_styles$gray
+    openxlsx::addStyle(wb, "StartHere", style, rows = 5L + i, cols = 2, stack = TRUE)
+  }
+  sheets <- list(ColumnDecisions = column_decisions,
+                 CompatibilityDecisions = compatibility_decisions,
+                 SourceIssues = source_issues,
+                 PolicyReport = policy_report,
+                 Registry = registry,
+                 CompatibilityRegistry = compatibility,
+                 TypeHistory = proposal$history,
+                 Settings = settings)
   header_style <- openxlsx::createStyle(fgFill = "#1F4E78", fontColour = "#FFFFFF",
                                         textDecoration = "bold", border = "bottom")
   for (sheet in names(sheets)) {
-    openxlsx::addWorksheet(wb, sheet)
+    tab_colour <- if (sheet %in% c("ColumnDecisions", "CompatibilityDecisions")) "#FFC000" else
+      if (sheet == "SourceIssues" && n_source_errors > 0L) "#C00000" else
+      if (sheet == "PolicyReport") "#A5A5A5" else "#D9E1F2"
+    openxlsx::addWorksheet(wb, sheet, gridLines = FALSE, tabColour = tab_colour)
     value <- data.table::as.data.table(sheets[[sheet]])
     if (nrow(value) > 0L) {
       openxlsx::writeDataTable(wb, sheet, value, tableStyle = "TableStyleMedium2")
@@ -6760,37 +6896,69 @@ WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = 
     if (ncol(value) > 0L) openxlsx::addStyle(wb, sheet, header_style, rows = 1, cols = seq_len(ncol(value)), gridExpand = TRUE)
     widths <- pmin(45, pmax(12, nchar(names(value)) + 2))
     if (ncol(value) > 0L) openxlsx::setColWidths(wb, sheet, cols = seq_len(ncol(value)), widths = widths)
+    wide_cols <- which(names(value) %in% c(
+      "RequiredAction", "RecommendationReason", "TypeHistory", "Tables",
+      "SourcePath", "SurveyMessage", "ReaderWarning", "Outcome"))
+    if (length(wide_cols) > 0L) {
+      openxlsx::setColWidths(wb, sheet, cols = wide_cols, widths = 45)
+      if (nrow(value) > 0L) {
+        openxlsx::addStyle(wb, sheet, openxlsx::createStyle(wrapText = TRUE, valign = "top"),
+                           rows = 2:(nrow(value) + 1L), cols = wide_cols,
+                           gridExpand = TRUE, stack = TRUE)
+      }
+    }
   }
-  if (nrow(review) > 0L) {
-    type_col <- match("ApprovedType", names(review))
-    decision_col <- match("Decision", names(review))
-    openxlsx::dataValidation(wb, "Review", cols = type_col, rows = 2:(nrow(review) + 1L),
+  edit_style <- openxlsx::createStyle(fgFill = "#FFF2CC", fontColour = "#000000")
+  if (nrow(column_decisions) > 0L) {
+    type_col <- match("ApprovedType", names(column_decisions))
+    decision_col <- match("Decision", names(column_decisions))
+    notes_col <- match("UserNotes", names(column_decisions))
+    openxlsx::dataValidation(wb, "ColumnDecisions", cols = type_col, rows = 2:(nrow(column_decisions) + 1L),
                              type = "list", value = paste0('"', paste(setdiff(allowed_canonical_types(), "decimal(p,s)"), collapse = ","), '"'))
-    openxlsx::dataValidation(wb, "Review", cols = decision_col, rows = 2:(nrow(review) + 1L),
+    openxlsx::dataValidation(wb, "ColumnDecisions", cols = decision_col, rows = 2:(nrow(column_decisions) + 1L),
                              type = "list", value = '"Accept,Override"')
-    risk_col <- match("Risk", names(review))
-    openxlsx::conditionalFormatting(wb, "Review", cols = risk_col, rows = 2:(nrow(review) + 1L),
+    openxlsx::addStyle(wb, "ColumnDecisions", edit_style,
+                       rows = 2:(nrow(column_decisions) + 1L),
+                       cols = c(decision_col, type_col, notes_col), gridExpand = TRUE, stack = TRUE)
+    risk_col <- match("Risk", names(column_decisions))
+    openxlsx::conditionalFormatting(wb, "ColumnDecisions", cols = risk_col, rows = 2:(nrow(column_decisions) + 1L),
                                     rule = '=="Potential loss"', style = openxlsx::createStyle(fgFill = "#F4CCCC"))
-    openxlsx::conditionalFormatting(wb, "Review", cols = risk_col, rows = 2:(nrow(review) + 1L),
+    openxlsx::conditionalFormatting(wb, "ColumnDecisions", cols = risk_col, rows = 2:(nrow(column_decisions) + 1L),
                                     rule = '=="Review"', style = openxlsx::createStyle(fgFill = "#FFF2CC"))
   }
-  if (nrow(compatibility) > 0L) {
-    type_col <- match("ApprovedCommonType", names(compatibility))
-    decision_col <- match("Decision", names(compatibility))
-    role_col <- match("SuggestedRole", names(compatibility))
-    rows <- 2:(nrow(compatibility) + 1L)
-    openxlsx::dataValidation(wb, "CompatibilityReview", cols = type_col, rows = rows,
+  if (nrow(compatibility_decisions) > 0L) {
+    type_col <- match("ApprovedCommonType", names(compatibility_decisions))
+    decision_col <- match("Decision", names(compatibility_decisions))
+    role_col <- match("SuggestedRole", names(compatibility_decisions))
+    notes_col <- match("UserNotes", names(compatibility_decisions))
+    rows <- 2:(nrow(compatibility_decisions) + 1L)
+    openxlsx::dataValidation(wb, "CompatibilityDecisions", cols = type_col, rows = rows,
                              type = "list", value = paste0('"', paste(setdiff(allowed_canonical_types(), "decimal(p,s)"), collapse = ","), '"'))
-    openxlsx::dataValidation(wb, "CompatibilityReview", cols = decision_col, rows = rows,
+    openxlsx::dataValidation(wb, "CompatibilityDecisions", cols = decision_col, rows = rows,
                              type = "list", value = '"Accept,Override,Ignore"')
-    openxlsx::dataValidation(wb, "CompatibilityReview", cols = role_col, rows = rows,
+    openxlsx::dataValidation(wb, "CompatibilityDecisions", cols = role_col, rows = rows,
                              type = "list", value = '"join_key,compatible_column,data"')
+    openxlsx::addStyle(wb, "CompatibilityDecisions", edit_style, rows = rows,
+                       cols = c(decision_col, type_col, notes_col),
+                       gridExpand = TRUE, stack = TRUE)
   }
+  sheet_order <- c("StartHere", names(sheets))
+  advanced <- c("Registry", "CompatibilityRegistry", "TypeHistory", "Settings")
+  visibility <- ifelse(sheet_order %in% advanced, "hidden", "visible")
+  openxlsx::sheetVisibility(wb) <- visibility
   openxlsx::saveWorkbook(wb, tmp, overwrite = TRUE)
   replace_file_safely(tmp, SchemaReviewPath)
-  log_msg(sprintf("[SCHEMA PROPOSAL] Wrote %s (%d columns; %d require review).",
-                  SchemaReviewPath, nrow(registry), nrow(review)))
-  invisible(SchemaReviewPath)
+  log_msg(sprintf(paste0("[SCHEMA PROPOSAL] Wrote %s (%d columns; %d column decision(s), ",
+                         "%d compatibility decision(s), %d blocking source error(s))."),
+                  SchemaReviewPath, nrow(registry), n_column_decisions,
+                  n_compatibility_decisions, n_source_errors))
+  result <- SchemaReviewPath
+  attr(result, "ReviewStatus") <- list(
+    ColumnDecisions = n_column_decisions,
+    CompatibilityDecisions = n_compatibility_decisions,
+    BlockingSourceErrors = n_source_errors,
+    ReadyToFinalize = ready)
+  invisible(result)
 }
 
 .overlay_schema_review <- function(registry, review) {
@@ -6804,6 +6972,19 @@ WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = 
   registry
 }
 
+.overlay_compatibility_decisions <- function(compatibility, decisions) {
+  if (is.null(decisions) || nrow(decisions) == 0L) return(compatibility)
+  if (is.null(compatibility) || nrow(compatibility) == 0L) return(decisions)
+  key <- function(x) paste(x$Scope, x$Database, x$Column, sep = "\r")
+  idx <- match(key(compatibility), key(decisions))
+  hit <- which(!is.na(idx))
+  for (field in intersect(c("ApprovedCommonType", "Decision", "SuggestedRole", "UserNotes"),
+                          names(decisions))) {
+    compatibility[hit, (field) := decisions[[field]][idx[hit]]]
+  }
+  compatibility
+}
+
 .apply_compatibility_review <- function(registry, compatibility, strict = TRUE) {
   registry <- data.table::copy(data.table::as.data.table(registry))
   if (!"MergeReviewed" %in% names(registry)) registry[, MergeReviewed := FALSE]
@@ -6814,12 +6995,17 @@ WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = 
                 "ApprovedCommonType", "SuggestedRole", "Decision")
   missing <- setdiff(required, names(compatibility))
   if (length(missing) > 0L) {
-    stop("CompatibilityReview is missing required columns: ", paste(missing, collapse = ", "))
+    stop("The compatibility decision table is missing required columns: ", paste(missing, collapse = ", "))
   }
   decision <- tolower(trimws(as.character(compatibility$Decision)))
   unresolved <- !decision %in% c("accept", "override", "ignore")
   if (any(unresolved)) {
-    message <- sprintf("%d compatibility decision(s) remain unresolved.", sum(unresolved))
+    examples <- utils::head(sprintf("%s/%s/%s", compatibility$Scope[unresolved],
+                                    compatibility$Database[unresolved],
+                                    compatibility$Column[unresolved]), 5L)
+    message <- sprintf(paste0(
+      "%d compatibility decision(s) remain unresolved in CompatibilityDecisions. ",
+      "First unresolved: %s"), sum(unresolved), paste(examples, collapse = ", "))
     if (isTRUE(strict)) stop(message) else log_msg(paste("[SCHEMA REVIEW WARNING]", message))
   }
   active <- which(!unresolved)
@@ -6830,7 +7016,7 @@ WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = 
     if (any(is.na(raw) | !nzchar(raw))) stop("ApprovedCommonType is blank for an accepted compatibility group.")
     approved[typed] <- vapply(raw, normalize_type_name, character(1))
     if (any(!is_allowed_canonical_type(approved[typed]))) {
-      stop("CompatibilityReview contains an invalid ApprovedCommonType.")
+      stop("CompatibilityDecisions contains an invalid ApprovedCommonType.")
     }
     recommended <- vapply(compatibility$RecommendedCommonType[typed], normalize_type_name, character(1))
     bad_override <- approved[typed] != recommended & decision[typed] != "override"
@@ -6877,17 +7063,46 @@ FinalizeRepositorySchema <- function(SchemaReviewPath, TableSchemaPath, strict =
   sheets <- openxlsx::getSheetNames(SchemaReviewPath)
   if (!"Registry" %in% sheets) stop("Schema review workbook is missing the Registry sheet.")
   registry <- data.table::as.data.table(openxlsx::read.xlsx(SchemaReviewPath, sheet = "Registry"))
-  review <- if ("Review" %in% sheets) data.table::as.data.table(openxlsx::read.xlsx(SchemaReviewPath, sheet = "Review")) else NULL
+  review_sheet <- if ("ColumnDecisions" %in% sheets) "ColumnDecisions" else
+    if ("Review" %in% sheets) "Review" else NA_character_
+  review <- if (!is.na(review_sheet)) {
+    data.table::as.data.table(openxlsx::read.xlsx(SchemaReviewPath, sheet = review_sheet))
+  } else NULL
   required <- c("Database", "TableName", "DuckDBTable", "Column", "ObservedTypes",
                 "RecommendedType", "ApprovedType", "RequiresReview", "Decision", "Role", "MergeGroup")
   missing <- setdiff(required, names(registry))
   if (length(missing) > 0L) {
     stop("Schema review Registry sheet is missing required columns: ", paste(missing, collapse = ", "))
   }
+  #### Source errors invalidate downstream decisions. Report these before  ####
+  #### asking for column review, because a corrected/resurveyed source can ####
+  #### change the proposal and its observation signatures.                  ####
+  if ("SourceIssues" %in% sheets) {
+    source_issues <- data.table::as.data.table(openxlsx::read.xlsx(SchemaReviewPath, sheet = "SourceIssues"))
+    source_errors <- tolower(as.character(source_issues$SurveyStatus)) == "error"
+    if (any(source_errors, na.rm = TRUE)) {
+      error_rows <- which(source_errors %in% TRUE)
+      examples <- utils::head(basename(as.character(source_issues$SourcePath[error_rows])), 5L)
+      message <- sprintf(paste0(
+        "Schema survey contains %d source error(s) in SourceIssues: %s. Update the MDT or reader configuration, ",
+        "then rerun PrepareSchemaRegistry() before finalizing."),
+        sum(source_errors, na.rm = TRUE), paste(examples, collapse = ", "))
+      if (isTRUE(strict)) stop(message) else log_msg(paste("[SCHEMA REVIEW WARNING]", message))
+    }
+  }
   registry <- .overlay_schema_review(registry, review)
-  compatibility <- if ("CompatibilityReview" %in% sheets) {
-    data.table::as.data.table(openxlsx::read.xlsx(SchemaReviewPath, sheet = "CompatibilityReview"))
+  compatibility_sheet <- if ("CompatibilityRegistry" %in% sheets) "CompatibilityRegistry" else
+    if ("CompatibilityReview" %in% sheets) "CompatibilityReview" else
+      if ("CompatibilityDecisions" %in% sheets) "CompatibilityDecisions" else NA_character_
+  compatibility <- if (!is.na(compatibility_sheet)) {
+    data.table::as.data.table(openxlsx::read.xlsx(SchemaReviewPath, sheet = compatibility_sheet))
   } else NULL
+  if ("CompatibilityDecisions" %in% sheets &&
+      !identical(compatibility_sheet, "CompatibilityDecisions")) {
+    compatibility_decisions <- data.table::as.data.table(openxlsx::read.xlsx(
+      SchemaReviewPath, sheet = "CompatibilityDecisions"))
+    compatibility <- .overlay_compatibility_decisions(compatibility, compatibility_decisions)
+  }
   parse_review_flag <- function(x) {
     text <- tolower(trimws(as.character(x)))
     out <- rep(NA, length(text))
@@ -6898,9 +7113,15 @@ FinalizeRepositorySchema <- function(SchemaReviewPath, TableSchemaPath, strict =
   needs_review <- parse_review_flag(registry$RequiresReview)
   if (anyNA(needs_review)) stop("RequiresReview contains blank or invalid logical values.")
   decision <- tolower(trimws(as.character(registry$Decision)))
+  decision[is.na(decision)] <- ""
   unresolved <- needs_review & !decision %in% c("accept", "override")
   if (any(unresolved)) {
-    message <- sprintf("%d schema decision(s) remain unresolved in the Review sheet.", sum(unresolved))
+    examples <- utils::head(sprintf("%s/%s/%s", registry$Database[unresolved],
+                                    registry$TableName[unresolved], registry$Column[unresolved]), 5L)
+    message <- sprintf(paste0(
+      "%d schema decision(s) remain unresolved in ColumnDecisions. Set Decision to Accept, ",
+      "or choose ApprovedType and set Decision to Override. First unresolved: %s"),
+      sum(unresolved), paste(examples, collapse = ", "))
     if (isTRUE(strict)) stop(message) else log_msg(paste("[SCHEMA REVIEW WARNING]", message))
   }
   raw_approved <- trimws(as.character(registry$ApprovedType))
@@ -6913,12 +7134,8 @@ FinalizeRepositorySchema <- function(SchemaReviewPath, TableSchemaPath, strict =
   recommended <- vapply(registry$RecommendedType, normalize_type_name, character(1))
   changed_without_override <- approved != recommended & decision != "override"
   if (any(changed_without_override)) stop("Rows whose ApprovedType differs from RecommendedType must use Decision='Override'.")
-  if ("SourceIssues" %in% sheets) {
-    source_issues <- data.table::as.data.table(openxlsx::read.xlsx(SchemaReviewPath, sheet = "SourceIssues"))
-    source_errors <- tolower(as.character(source_issues$SurveyStatus)) == "error"
-    if (any(source_errors) && isTRUE(strict)) stop(sprintf("Schema survey contains %d unresolved source error(s); repair and resurvey before finalizing.", sum(source_errors)))
-  }
   registry[, ApprovedType := approved]
+  registry[, Decision := decision]
   registry <- .apply_compatibility_review(registry, compatibility, strict = strict)
   merge_group <- toupper(trimws(as.character(registry$MergeGroup)))
   registry[, MergeGroup := merge_group]
@@ -6943,7 +7160,7 @@ FinalizeRepositorySchema <- function(SchemaReviewPath, TableSchemaPath, strict =
     RegistryPattern = PolicyPattern,
     MergeGroup, MergeReviewed,
     Source = ifelse(CompatibilityApplied, "user_approved",
-             ifelse(tolower(Decision) == "auto-approved" & PolicyStatus == "not_configured",
+             ifelse(tolower(Decision) == "auto-approved" & ApprovedType == DataRecommendedType,
                     "auto_approved",
                     ifelse(tolower(Decision) == "auto-approved", "policy_approved", "user_approved")))
   )]
@@ -6971,11 +7188,14 @@ PrepareSchemaRegistry <- function(MDT, MasterDBPath, ObservationPath, SchemaRevi
   proposal <- RecommendRepositorySchema(
     survey = survey, SchemaRegistryPath = SchemaRegistryPath,
     schema_registry = schema_registry, SchemaProfile = match.arg(SchemaProfile))
-  WriteSchemaProposal(proposal, SchemaReviewPath)
-  log_msg(sprintf(paste0("[SCHEMA READY] %d column(s) resolved automatically; %d require column review; ",
-                         "%d cross-table compatibility conflict(s) require review in %s."),
-                  proposal$summary$AutoApproved, proposal$summary$NeedsReview,
-                  proposal$summary$CompatibilityConflicts, SchemaReviewPath))
+  written <- WriteSchemaProposal(proposal, SchemaReviewPath)
+  review_status <- attr(written, "ReviewStatus")
+  log_msg(sprintf(paste0("[SCHEMA READY] Open StartHere in %s: %d column decision(s), ",
+                         "%d compatibility decision(s), %d blocking source error(s)."),
+                  SchemaReviewPath,
+                  review_status$ColumnDecisions %||% proposal$summary$NeedsReview,
+                  review_status$CompatibilityDecisions %||% proposal$summary$CompatibilityConflicts,
+                  review_status$BlockingSourceErrors %||% proposal$summary$SourceIssues))
   invisible(list(survey = survey, proposal = proposal,
                  ObservationPath = ObservationPath, SchemaReviewPath = SchemaReviewPath))
 }
@@ -8067,9 +8287,8 @@ ParquetBackEndCreate <- function(MDT, DBLoad, MasterDBPath, completed_checkpoint
                               TableSchemaPath = TableSchemaPath, SchemaRegistryPath = SchemaRegistryPath,
                               BackupDir = StateBackupDir, keep_last = SnapshotKeep)
   }
-  #### RunPreflight = FALSE skips the loader's own validation pass when the  ####
-  #### caller has already run ValidateMDTPreflight explicitly (the demo      ####
-  #### does) -- avoids a second full network existence scan of every file.   ####
+  #### RunPreflight = FALSE skips the loader's own structural MDT/output     ####
+  #### validation pass when the caller has already run it explicitly.        ####
   if (isTRUE(RunPreflight)) {
     ValidateMDTPreflight(MDT, strict = StrictPreflight, logStatus = TRUE,
                          ParquetBasePath = ParquetBasePath,
@@ -8082,9 +8301,10 @@ ParquetBackEndCreate <- function(MDT, DBLoad, MasterDBPath, completed_checkpoint
   schema_registry <- load_schema_registry(SchemaRegistryPath, create_if_missing = TRUE)
   catalog <- if (isTRUE(UseSchemaCatalog)) load_table_schema_catalog(TableSchemaPath, strict = TRUE) else NULL
   if (!is.null(catalog)) {
-    log_msg(sprintf("[SCHEMA CATALOG] Using column types from %s -- run BuildRepositoryCatalog to refresh it.", TableSchemaPath), log_path = LogPath)
+    log_msg(sprintf("[SCHEMA CATALOG] Using reviewed column types from %s.", TableSchemaPath), log_path = LogPath)
   } else if (isTRUE(UseSchemaCatalog)) {
-    log_msg("[SCHEMA CATALOG] No catalog on disk -- column types will be inferred per database. Run BuildRepositoryCatalog first to enable review and manual curation.", log_path = LogPath)
+    stop(paste0("UseSchemaCatalog=TRUE but no finalized table schema catalog exists at ",
+                TableSchemaPath, ". Run PrepareSchemaRegistry() and FinalizeSchemaRegistry() before loading."))
   }
   all_schema_rows <- list()
   database_failures <- list()

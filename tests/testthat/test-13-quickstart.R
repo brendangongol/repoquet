@@ -28,11 +28,22 @@ test_that("the synthetic example repository runs the full pipeline end-to-end", 
   expect_identical(sort(unique(MDT$Database)), c("SALES", "SENSORS", "STUDY"))
 
   out <- utils::capture.output(iss <- ValidateMDTPreflight(MDT, strict = FALSE,
-      ParquetBasePath = paths$ParquetBasePath, MasterDBPath = cfg$MasterDBPath))
+      ParquetBasePath = paths$ParquetBasePath))
   expect_false(any(iss$Severity == "error"))
-  out <- utils::capture.output(BuildRepositoryCatalog(MDT, MasterDBPath = cfg$MasterDBPath,
-      n_workers = 1, SchemaRegistryPath = paths$SchemaRegistryPath,
-      TableSchemaPath = paths$TableSchemaPath))
+  out <- utils::capture.output(PrepareSchemaRegistry(
+      MDT, MasterDBPath = cfg$MasterDBPath,
+      ObservationPath = paths$SchemaObservationPath,
+      SchemaReviewPath = paths$SchemaReviewPath, n_workers = 1,
+      SchemaRegistryPath = paths$SchemaRegistryPath))
+  review_sheets <- openxlsx::getSheetNames(paths$SchemaReviewPath)
+  review_wb <- stats::setNames(lapply(review_sheets, function(sheet) {
+    openxlsx::read.xlsx(paths$SchemaReviewPath, sheet = sheet)
+  }), review_sheets)
+  if (nrow(review_wb$ColumnDecisions) > 0L) review_wb$ColumnDecisions$Decision <- "Accept"
+  if (nrow(review_wb$CompatibilityDecisions) > 0L) review_wb$CompatibilityDecisions$Decision <- "Accept"
+  openxlsx::write.xlsx(review_wb, paths$SchemaReviewPath, overwrite = TRUE)
+  out <- utils::capture.output(FinalizeSchemaRegistry(
+      paths$SchemaReviewPath, paths$TableSchemaPath, strict = TRUE))
   out <- utils::capture.output(completed <- ParquetBackEndCreate(MDT = MDT,
       DBLoad = sort(unique(MDT$Database)), MasterDBPath = cfg$MasterDBPath,
       completed_checkpoint = load_checkpoint(paths$CheckpointPath),
