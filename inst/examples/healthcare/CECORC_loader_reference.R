@@ -10,7 +10,7 @@ library(ComplexHeatmap); library(RColorBrewer); library(circlize)
 #### Set REPOQUET_SOURCE on another machine instead of editing package code. ####
 RepoquetSourcePath <- Sys.getenv(
   "REPOQUET_SOURCE",
-  unset = "C:/Users/breng/Dropbox/github/repoquet/R/repoquet.R"
+  unset = "C:/Users/e282219/Downloads/github/repoquet/R/repoquet.R"
 )
 if (!file.exists(RepoquetSourcePath)) {
   stop("repoquet development source not found: ", RepoquetSourcePath,
