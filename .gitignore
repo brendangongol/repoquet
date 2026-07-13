@@ -14,4 +14,5 @@ renv/staging/
 .r-lib/
 .package-build/
 repoquet_*.tar.gz
+~$*
 inst/Misc/DBSetupV2_broken_backup_*.xlsx

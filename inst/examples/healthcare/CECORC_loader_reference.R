@@ -5,12 +5,11 @@
 library(data.table); library(openxlsx); library(DBI); library(duckdb);
 library(haven); library(arrow); library(glue); library(future); library(future.apply)
 library(ComplexHeatmap); library(RColorBrewer); library(circlize)
+library(repoquet)
 
 ################################################################################
 #### Configuration #############################################################
 ################################################################################
-DBSourceFilePath <- "C:/Users/e282219/Downloads/github/repoquet/R/repoquet.R"
-source(DBSourceFilePath)
 MasterDBPath <- "X:/National Databases"
 FormattedDBPath <- "X:/Brendan/NationalDatabases/formattedDatabases"
 ParquetBasePath <- file.path(FormattedDBPath, "parquet")
@@ -112,6 +111,15 @@ MDT <- openxlsx::read.xlsx("C:/Users/e282219/Downloads/github/repoquet/inst/extd
 #### paste the rows into DBSetupV2.xlsx -- nothing is written automatically. ####
 # new_files <- scan_for_new_source_files(MasterDBPath = MasterDBPath, MDT = MDT,
 #                                        OutputPath = file.path(FormattedDBPath, "NewSourceFiles.xlsx"))
+#### Delimited input is structurally strict. For a VERIFIED one-field line  ####
+#### that continues the preceding record, configure only that workbook row: ####
+#### ReaderOptions =                                                     ####
+#### {"MalformedRowPolicy":"append_previous",                          ####
+####  "ContinuationColumn":"AIS_DESCRIPTION","ContinuationJoin":" "} ####
+#### Use the actual destination column for each source (for example AISDESC ####
+#### in a differently named table). Schema discovery and final loading use  ####
+#### the same bounded logical-record reader; source files remain read-only, ####
+#### and no cleaned CSV or staging cache is created.                        ####
 ValidateMDTPreflight(MDT = MDT, strict = TRUE, logStatus = TRUE,
                      ParquetBasePath = ParquetBasePath,
                      MaxFileStemTruncate = TRUE,
@@ -139,6 +147,11 @@ PrepareSchemaRegistry(
   n_workers = n_workers,
   SourceFingerprintMode = "metadata",
   StrictReaders = FALSE,
+  #### This policy workbook is optional and visible. The survey remains     ####
+  #### data-derived; matched HCUP policies and conflicts appear explicitly  ####
+  #### in SchemaReview.xlsx instead of being applied invisibly.             ####
+  SchemaRegistryPath = SchemaRegistryPath,
+  SchemaProfile = "hcup",
   LogPath = LogPath,
   RunId = RunId
 )
@@ -158,7 +171,12 @@ if (nrow(schema_issues) > 0L) print(schema_issues)
 #### On the first run, open SchemaReviewPath and complete every Review row:  ####
 ####   Decision = "Accept" keeps RecommendedType.                            ####
 ####   Decision = "Override" requires the desired ApprovedType.              ####
-#### MergeGroup may identify columns that must share one type across tables. ####
+#### CompatibilityReview contains only same-named cross-table conflicts:     ####
+####   Accept   = use RecommendedCommonType for that approved merge group.   ####
+####   Override = use ApprovedCommonType instead.                            ####
+####   Ignore   = the similarly named fields are intentionally kept apart.   ####
+#### PolicyPattern/PolicyType show every SchemaRegistry.xlsx match, including ####
+#### cases where the observed data makes the policy potentially lossy.       ####
 #### After review, run FinalizeSchemaRegistry below; a second survey is not  ####
 #### needed. Rerun the survey after fixing SourceIssues or changing sources. ####
 #### Existing decisions survive only while their observation signature is   ####

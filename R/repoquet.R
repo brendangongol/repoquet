@@ -20,18 +20,25 @@ NULL
 
 utils::globalVariables(c(
   ".", "AppliesTo", "Candidate", "CandidateMergeKey", "CanonicalColumn",
-  "CanonicalType", "ChunkStem", "Column", "ColumnPattern", "Database", "Dir",
+  "CanonicalType", "ChunkStem", "Column", "Column_Left", "Column_Right",
+  "ColumnPattern", "Database", "Dir",
   "DirKey", "DuckDBTable", "DuckDBTable_Left", "DuckDBTable_Right", "Enabled",
-  "ExplicitMergeKey", "FileType", "FileTypeLower", "FromClass", "InferredType",
+  "ExplicitMergeKey", "ExplicitGroup", "FileType", "FileTypeLower", "FromClass", "InferredType",
   "KeySet", "MemBurden", "N", "NDestroyed", "NLogical", "NPhysical",
   "NPresent", "NTypes", "Normalized", "Notes", "OutputStem", "ParquetPath",
   "PartitionsOnDisk", "Path", "PctOutOfDomain", "PhysicalTable",
-  "PhysicalTableName", "Profile", "Raw", "RegistryOverride", "RegistryPattern",
-  "RepositoryKey", "Role", "RoleNormalized", "Role_Left", "Role_Right", "Rule",
+  "PhysicalTableName", "Priority", "Profile", "Raw", "RegistryOverride", "RegistryPattern", "Row",
+  "RelationGroup", "RepositoryKey", "Role", "RoleNormalized", "Role_Left", "Role_Right", "Rule",
   "Severity", "Source", "SourcePath", "Status", "SurveyStatus", "SurveyMessage",
-  "ReaderWarning", "ObservationKind", "IsPartitionColumn", "ObservedType",
+  "ReaderWarning", "ReaderWarningClass", "ReaderWarningSeverity",
+  "ReaderRepairCount", "ReaderRepairLines", "ReaderRepairPolicy",
+  "ObservationKind", "IsPartitionColumn", "ObservedType",
   "InferenceConfidence", "PartitionKey", "PartitionValue", "ApprovedType",
-  "RecommendedType", "ObservedTypes", "MergeGroup", "RequiresReview", "Decision",
+  "RecommendedType", "DataRecommendedType", "ObservedTypes", "MergeGroup",
+  "MergeReviewed", "RequiresReview", "Decision", "PolicyPattern", "PolicyType",
+  "PolicyRole", "PolicyStatus", "PolicyConflict", "DecisionOrigin",
+  "CompatibilityApplied", "CompatibilitySignature",
+  "RecommendedCommonType", "ApprovedCommonType", "SuggestedRole", "Scope",
   "DeclaredEncoding", "DetectedEncoding", "EncodingConfidence", "EncodingUsed",
   "EncodingDetectionMethod", "EncodingValidationStatus",
   "SourceFingerprint", "TableName", "ToClass",
@@ -1803,7 +1810,8 @@ reader_options_for_row <- function(row_meta) {
   out <- if ("ReaderOptions" %in% names(row_meta)) parse_reader_options_json(row_meta$ReaderOptions[1]) else list()
   fields <- c("Encoding", "Delimiter", "Quote", "NAStrings", "DecimalMark",
               "DateFormat", "DateTimeFormat", "Timezone", "ReadMode",
-              "KeepLeadingZeros")
+              "KeepLeadingZeros", "MalformedRowPolicy", "ContinuationColumn",
+              "ContinuationJoin")
   for (field in fields) {
     if (!field %in% names(row_meta)) next
     value <- row_meta[[field]][1]
@@ -1862,6 +1870,332 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
   args[!vapply(args, is.null, logical(1))]
 }
 
+.delimited_repair_settings <- function(reader_options = list()) {
+  policy <- tolower(trimws(as.character(reader_options$MalformedRowPolicy %||% "error")[1]))
+  policy <- gsub("-", "_", policy, fixed = TRUE)
+  if (policy %in% c("append", "append_to_previous")) policy <- "append_previous"
+  if (!policy %in% c("error", "append_previous")) {
+    stop("MalformedRowPolicy must be 'error' or 'append_previous'.")
+  }
+  column <- trimws(as.character(reader_options$ContinuationColumn %||% "")[1])
+  if (policy == "append_previous" && !nzchar(column)) {
+    stop("ContinuationColumn is required when MalformedRowPolicy='append_previous'.")
+  }
+  join <- as.character(reader_options$ContinuationJoin %||% " ")[1]
+  if (is.na(join)) join <- " "
+  list(Policy = policy, Column = column, Join = join)
+}
+
+.uses_delimited_logical_stream <- function(reader_options = list()) {
+  identical(.delimited_repair_settings(reader_options)$Policy, "append_previous")
+}
+
+.fread_with_structural_errors <- function(args, path) {
+  structural_warning <- NULL
+  out <- withCallingHandlers(
+    do.call(data.table::fread, args),
+    warning = function(w) {
+      message <- conditionMessage(w)
+      if (grepl("Stopped early on line [0-9]+\\. Expected [0-9]+ fields", message, perl = TRUE)) {
+        structural_warning <<- message
+        invokeRestart("muffleWarning")
+      }
+    }
+  )
+  if (!is.null(structural_warning)) {
+    stop(sprintf(paste0("Delimited structure error in %s: %s. The source was not modified. ",
+                        "For a verified continuation line, set MalformedRowPolicy='append_previous' ",
+                        "and ContinuationColumn in ReaderOptions."),
+                 basename(path), structural_warning), call. = FALSE)
+  }
+  out
+}
+
+.delimited_record_shape <- function(record, delimiter, quote_char = "\"") {
+  if (nchar(delimiter, type = "chars") != 1L) stop("Delimited readers require a one-character delimiter.")
+  quote_enabled <- !is.null(quote_char) && length(quote_char) > 0L &&
+    !is.na(quote_char[1]) && nzchar(quote_char[1])
+  quote_char <- if (quote_enabled) substr(as.character(quote_char[1]), 1L, 1L) else ""
+  n <- nchar(record, type = "chars")
+  fields <- 1L
+  in_quotes <- FALSE
+  field_start <- TRUE
+  i <- 1L
+  while (i <= n) {
+    ch <- substr(record, i, i)
+    if (quote_enabled && ch == quote_char) {
+      if (in_quotes) {
+        if (i < n && substr(record, i + 1L, i + 1L) == quote_char) {
+          i <- i + 2L
+          field_start <- FALSE
+          next
+        }
+        in_quotes <- FALSE
+        field_start <- FALSE
+      } else if (field_start) {
+        in_quotes <- TRUE
+      } else {
+        field_start <- FALSE
+      }
+    } else if (!in_quotes && ch == delimiter) {
+      fields <- fields + 1L
+      field_start <- TRUE
+    } else if (in_quotes || !ch %in% c(" ", "\t")) {
+      field_start <- FALSE
+    }
+    i <- i + 1L
+  }
+  list(Fields = fields, Balanced = !in_quotes)
+}
+
+.detect_delimited_separator <- function(header_line, path, reader_options = list()) {
+  configured <- reader_options$Delimiter %||% NULL
+  if (identical(configured, "\\t")) configured <- "\t"
+  if (!is.null(configured) && nzchar(as.character(configured[1]))) {
+    configured <- as.character(configured[1])
+    if (nchar(configured, type = "chars") != 1L) stop("Delimiter must be exactly one character.")
+    return(configured)
+  }
+  if (grepl("\\.tsv(?:\\.(?:gz|gzip))?$", path, ignore.case = TRUE)) return("\t")
+  quote_char <- reader_options$Quote %||% "\""
+  candidates <- c(",", "\t", "|", ";", ":")
+  counts <- vapply(candidates, function(sep) {
+    .delimited_record_shape(header_line, sep, quote_char)$Fields
+  }, integer(1))
+  best <- which.max(counts)
+  if (counts[best] <= 1L) {
+    stop(sprintf("Unable to determine a multi-column delimiter from the header of %s.", basename(path)))
+  }
+  candidates[best]
+}
+
+.open_delimited_text_connection <- function(path, encoding) {
+  if (grepl("\\.(gz|gzip)$", path, ignore.case = TRUE)) {
+    gzfile(path, open = "rt", encoding = encoding)
+  } else if (grepl("\\.bz2$", path, ignore.case = TRUE)) {
+    bzfile(path, open = "rt", encoding = encoding)
+  } else {
+    file(path, open = "rt", encoding = encoding)
+  }
+}
+
+.delimited_header_info <- function(path, reader_options = list()) {
+  reader_options <- .resolve_delimited_reader_options(path, reader_options)
+  con <- .open_delimited_text_connection(path, reader_options$.EncodingInfo$EncodingUsed)
+  on.exit(close(con), add = TRUE)
+  physical_line <- 0L
+  header_line <- NULL
+  repeat {
+    line <- readLines(con, n = 1L, warn = FALSE)
+    if (length(line) == 0L) break
+    physical_line <- physical_line + 1L
+    if (nzchar(trimws(line[1]))) {
+      header_line <- line[1]
+      break
+    }
+  }
+  if (is.null(header_line)) stop("Delimited source has no non-empty header: ", path)
+  delimiter <- .detect_delimited_separator(header_line, path, reader_options)
+  args <- delimited_fread_args(reader_options)
+  args$sep <- delimiter
+  args$colClasses <- NULL
+  header_df <- .fread_with_structural_errors(
+    c(list(text = header_line, nrows = 0L, header = TRUE), args), path)
+  header_df <- normalize_character_encoding(header_df, "UTF-8")
+  header <- names(header_df)
+  if (length(header) < 2L) stop("Delimited source header resolved to fewer than two columns: ", path)
+  list(Header = header, HeaderLine = header_line, HeaderPhysicalLine = physical_line,
+       Delimiter = delimiter, ReaderOptions = reader_options)
+}
+
+.decode_continuation_value <- function(record, delimiter, reader_options, path) {
+  args <- delimited_fread_args(reader_options)
+  args$sep <- delimiter
+  args$colClasses <- NULL
+  value <- .fread_with_structural_errors(
+    c(list(text = record, header = FALSE, nrows = 1L), args), path)
+  if (nrow(value) != 1L || ncol(value) != 1L) {
+    stop("Continuation repair expected exactly one text field.")
+  }
+  as.character(value[[1]][1])
+}
+
+.parse_delimited_logical_batch <- function(header_info, records, continuations,
+                                           col_classes = NULL, path) {
+  if (length(records) == 0L) return(data.table::data.table())
+  options <- header_info$ReaderOptions
+  repair <- .delimited_repair_settings(options)
+  parse_classes <- col_classes
+  if (!is.null(parse_classes)) {
+    names(parse_classes) <- canonical_colnames(names(parse_classes))
+    parse_classes[[canonical_colnames(repair$Column)]] <- "character"
+  }
+  args <- delimited_fread_args(options, col_classes = parse_classes,
+                               header = header_info$Header)
+  args$sep <- header_info$Delimiter
+  text <- paste(c(header_info$HeaderLine, records), collapse = "\n")
+  df <- .fread_with_structural_errors(c(list(text = text, header = TRUE), args), path)
+  if (nrow(df) != length(records)) {
+    stop(sprintf("Logical-record parser produced %d rows from %d assembled records in %s.",
+                 nrow(df), length(records), basename(path)))
+  }
+  target <- match(canonical_colnames(repair$Column), canonical_colnames(names(df)))
+  if (is.na(target)) {
+    stop(sprintf("ContinuationColumn '%s' is not present in %s.", repair$Column, basename(path)))
+  }
+  if (!is.character(df[[target]])) data.table::set(df, j = target, value = as.character(df[[target]]))
+  repaired_rows <- which(lengths(continuations) > 0L)
+  for (i in repaired_rows) {
+    addition <- paste(as.character(continuations[[i]]), collapse = repair$Join)
+    current <- df[[target]][i]
+    combined <- if (is.na(current) || !nzchar(current)) addition else paste0(current, repair$Join, addition)
+    data.table::set(df, i = i, j = target, value = combined)
+  }
+  df <- normalize_character_encoding(df, "UTF-8")
+  canonicalize_dataframe_names(df)
+}
+
+.stream_delimited_logical_records <- function(path, reader_options = list(),
+                                               chunk_size = 1000000L,
+                                               max_rows = Inf, col_classes = NULL,
+                                               callback) {
+  if (!is.function(callback)) stop("Logical-record streaming requires a callback function.")
+  header_info <- .delimited_header_info(path, reader_options)
+  options <- header_info$ReaderOptions
+  repair <- .delimited_repair_settings(options)
+  if (repair$Policy != "append_previous") {
+    stop("Logical-record streaming currently requires MalformedRowPolicy='append_previous'.")
+  }
+  chunk_size <- max(1L, as.integer(chunk_size))
+  max_rows <- if (is.infinite(max_rows)) Inf else max(0, as.numeric(max_rows))
+  expected_fields <- length(header_info$Header)
+  quote_char <- options$Quote %||% "\""
+  con <- .open_delimited_text_connection(path, options$.EncodingInfo$EncodingUsed)
+  on.exit(close(con), add = TRUE)
+
+  records <- character(0)
+  continuations <- list()
+  pending_record <- NULL
+  pending_continuations <- character(0)
+  pending_line <- NA_integer_
+  current_record <- NULL
+  current_start <- NA_integer_
+  physical_line <- 0L
+  logical_rows <- 0L
+  repair_lines <- integer(0)
+  done <- FALSE
+
+  flush_records <- function() {
+    if (length(records) == 0L || done) return(invisible(NULL))
+    remaining <- if (is.infinite(max_rows)) length(records) else
+      min(length(records), max(0, as.integer(max_rows - logical_rows)))
+    if (remaining <= 0L) {
+      done <<- TRUE
+      return(invisible(NULL))
+    }
+    selected <- seq_len(remaining)
+    df <- .parse_delimited_logical_batch(header_info, records[selected],
+                                         continuations[selected], col_classes, path)
+    callback(df)
+    logical_rows <<- logical_rows + nrow(df)
+    if (remaining < length(records)) {
+      records <<- records[-selected]
+      continuations <<- continuations[-selected]
+    } else {
+      records <<- character(0)
+      continuations <<- list()
+    }
+    if (!is.infinite(max_rows) && logical_rows >= max_rows) done <<- TRUE
+    invisible(NULL)
+  }
+
+  finalize_pending <- function() {
+    if (is.null(pending_record) || done) return(invisible(NULL))
+    records <<- c(records, pending_record)
+    continuations[[length(records)]] <<- pending_continuations
+    pending_record <<- NULL
+    pending_continuations <<- character(0)
+    pending_line <<- NA_integer_
+    if (length(records) >= chunk_size) flush_records()
+    invisible(NULL)
+  }
+
+  repeat {
+    lines <- readLines(con, n = 10000L, warn = FALSE)
+    if (length(lines) == 0L || done) break
+    for (line in lines) {
+      physical_line <- physical_line + 1L
+      if (physical_line <= header_info$HeaderPhysicalLine) next
+      if (is.null(current_record) && !nzchar(trimws(line))) next
+      if (is.null(current_record)) {
+        current_record <- line
+        current_start <- physical_line
+      } else {
+        current_record <- paste(current_record, line, sep = "\n")
+      }
+      shape <- .delimited_record_shape(current_record, header_info$Delimiter, quote_char)
+      if (!shape$Balanced) next
+      complete <- current_record
+      start_line <- current_start
+      current_record <- NULL
+      current_start <- NA_integer_
+
+      if (shape$Fields == expected_fields) {
+        finalize_pending()
+        if (done) break
+        pending_record <- complete
+        pending_line <- start_line
+      } else if (shape$Fields == 1L && !is.null(pending_record)) {
+        value <- .decode_continuation_value(complete, header_info$Delimiter, options, path)
+        pending_continuations <- c(pending_continuations, value)
+        repair_lines <- c(repair_lines, start_line)
+      } else {
+        stop(sprintf(paste0("Malformed delimited record at physical line %d in %s: expected %d fields, found %d. ",
+                            "Automatic repair only accepts a one-field continuation following a complete record."),
+                     start_line, basename(path), expected_fields, shape$Fields), call. = FALSE)
+      }
+    }
+  }
+  if (!done && !is.null(current_record)) {
+    stop(sprintf("Unclosed quoted field beginning at physical line %d in %s.",
+                 current_start, basename(path)), call. = FALSE)
+  }
+  if (!done) {
+    finalize_pending()
+    flush_records()
+  }
+  list(
+    Header = header_info$Header,
+    LogicalRows = as.numeric(logical_rows),
+    PhysicalLinesRead = as.numeric(physical_line),
+    RepairCount = as.numeric(length(repair_lines)),
+    RepairLines = repair_lines,
+    RepairPolicy = repair$Policy,
+    ContinuationColumn = repair$Column,
+    EncodingInfo = options$.EncodingInfo
+  )
+}
+
+.collect_delimited_logical_records <- function(path, reader_options = list(),
+                                               max_rows = Inf, col_classes = NULL) {
+  chunks <- list()
+  diagnostics <- .stream_delimited_logical_records(
+    path, reader_options = reader_options,
+    chunk_size = if (is.infinite(max_rows)) 100000L else max(1L, min(100000L, as.integer(max_rows))),
+    max_rows = max_rows, col_classes = col_classes,
+    callback = function(df) chunks[[length(chunks) + 1L]] <<- df)
+  out <- if (length(chunks) == 0L) {
+    header <- .delimited_header_info(path, reader_options)$Header
+    data.table::as.data.table(stats::setNames(replicate(length(header), character(), simplify = FALSE),
+                                              canonical_colnames(header)))
+  } else {
+    data.table::rbindlist(chunks, use.names = TRUE)
+  }
+  attr(out, "repoquet_encoding_info") <- diagnostics$EncodingInfo
+  attr(out, "repoquet_delimited_diagnostics") <- diagnostics
+  out
+}
+
 #### Shared implementations ##################################################
 #### Haven-family full read: strip label classes, sanitize encodings. Errors ####
 #### propagate to the caller.                                                ####
@@ -1878,31 +2212,51 @@ read_sav_with_options <- function(path, reader_options = list(), ...) {
 
 read_delimited_full <- function(path, col_classes = NULL, reader_options = list()) {
   reader_options <- .resolve_delimited_reader_options(path, reader_options)
+  if (.uses_delimited_logical_stream(reader_options)) {
+    return(.collect_delimited_logical_records(path, reader_options, Inf, col_classes))
+  }
   args <- c(list(file = path), delimited_fread_args(reader_options, col_classes = col_classes))
-  df <- do.call(data.table::fread, args)
+  df <- .fread_with_structural_errors(args, path)
   df <- .normalize_delimited_frame(df, reader_options, path)
   canonicalize_dataframe_names(df)
 }
 
 .read_delimited_header <- function(path, reader_options = list()) {
   reader_options <- .resolve_delimited_reader_options(path, reader_options)
-  df <- do.call(data.table::fread,
-                c(list(file = path, nrows = 0L), delimited_fread_args(reader_options)))
+  if (.uses_delimited_logical_stream(reader_options)) {
+    info <- .delimited_header_info(path, reader_options)
+    header <- info$Header
+    attr(header, "repoquet_encoding_info") <- info$ReaderOptions$.EncodingInfo
+    return(header)
+  }
+  df <- .fread_with_structural_errors(
+    c(list(file = path, nrows = 0L), delimited_fread_args(reader_options)), path)
   df <- .normalize_delimited_frame(df, reader_options, path)
   names(df)
 }
 
 .read_delimited_sample <- function(path, reader_options = list()) {
   reader_options <- .resolve_delimited_reader_options(path, reader_options)
-  df <- do.call(data.table::fread,
-                c(list(file = path, nrows = 100000L), delimited_fread_args(reader_options)))
-  .normalize_delimited_frame(df, reader_options, path)
+  if (.uses_delimited_logical_stream(reader_options)) {
+    return(.collect_delimited_logical_records(path, reader_options, 100000L))
+  }
+  df <- .fread_with_structural_errors(
+    c(list(file = path, nrows = 100000L), delimited_fread_args(reader_options)), path)
+  df <- .normalize_delimited_frame(df, reader_options, path)
+  canonicalize_dataframe_names(df)
 }
 
 .count_delimited_rows <- function(path, reader_options = list()) {
   reader_options <- .resolve_delimited_reader_options(path, reader_options)
-  nrow(do.call(data.table::fread,
-               c(list(file = path, select = 1L), delimited_fread_args(reader_options))))
+  if (.uses_delimited_logical_stream(reader_options)) {
+    count <- 0
+    .stream_delimited_logical_records(
+      path, reader_options = reader_options, chunk_size = 100000L,
+      callback = function(df) count <<- count + nrow(df))
+    return(as.numeric(count))
+  }
+  nrow(.fread_with_structural_errors(
+    c(list(file = path, select = 1L), delimited_fread_args(reader_options)), path))
 }
 
 .read_delimited_chunk <- function(path, offset, n_max, header, col_classes = NULL,
@@ -1910,10 +2264,11 @@ read_delimited_full <- function(path, col_classes = NULL, reader_options = list(
   reader_options <- .resolve_delimited_reader_options(path, reader_options)
   args <- delimited_fread_args(reader_options)
   args$colClasses <- fread_col_classes_positional(col_classes, header)
-  df <- do.call(data.table::fread,
-                c(list(file = path, skip = offset + 1L, nrows = n_max,
-                       header = FALSE, col.names = header), args))
-  .normalize_delimited_frame(df, reader_options, path)
+  df <- .fread_with_structural_errors(
+    c(list(file = path, skip = offset + 1L, nrows = n_max,
+           header = FALSE, col.names = header), args), path)
+  df <- .normalize_delimited_frame(df, reader_options, path)
+  canonicalize_dataframe_names(df)
 }
 
 register_builtin_file_readers <- function() {
@@ -2130,8 +2485,17 @@ align_columns <- function(df, all_cols, comprehensive_sample = NULL, max_coerce_
   if (!any(failed)) return(results)
 
   retry_indices <- which(failed)
+  failure_messages <- unique(vapply(results[retry_indices], function(result) {
+    if (is.list(result) && !is.null(result$error) && length(result$error) > 0L) {
+      as.character(result$error[1])
+    } else {
+      "unknown worker failure"
+    }
+  }, character(1)))
   log_msg(sprintf("[PARALLEL FALLBACK] %s failed for %d item(s); retrying those item(s) serially in the main R process.",
                   context, length(retry_indices)))
+  log_msg(sprintf("[PARALLEL FALLBACK] First worker error(s): %s",
+                  paste(utils::head(failure_messages, 3L), collapse = " | ")))
   retried <- lapply(items[retry_indices], scan_one)
   results[retry_indices] <- retried
   recovered <- !vapply(retried, is_failure, logical(1))
@@ -2688,9 +3052,10 @@ safe_read_sav_chunked <- function(path, chunk_size = 1000000L, TerminalHiveParti
 #' reconcile against, and a chunk read error fails the file rather than
 #' entering a shrink-retry loop.
 #'
-#' Limitation: chunk boundaries are line-based (\code{fread(skip=)}), so
-#' fields containing embedded newlines are not supported in chunked mode --
-#' such files should stay under the row threshold and load directly.
+#' Standard sources retain the fast line-offset reader. Sources configured
+#' with \code{MalformedRowPolicy="append_previous"} use the same logical-record
+#' stream as schema discovery, so quoted multiline fields and verified
+#' one-field continuations remain memory bounded without intermediate files.
 #' @export
 read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
                                    all_cols = NULL, col_classes = NULL, year_val = NULL,
@@ -2706,10 +3071,14 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
   if (!is.null(all_cols)) all_cols <- unique(canonical_colnames(all_cols))
   rd <- get_file_reader(reader)
   if (is.null(rd$read_chunk)) stop(sprintf("Reader '%s' has no read_chunk callback.", reader))
+  logical_stream <- .uses_delimited_logical_stream(reader_options)
   header <- call_reader(rd, "read_header", path, reader_options = reader_options)
-  total_rows <- as.numeric(call_reader(rd, "count_rows", path, reader_options = reader_options))
-  log_msg(sprintf("[CHUNKED-DELIM] %s: %s rows (chunk_size=%d)", basename(path),
-                  formatC(total_rows, format = "d", big.mark = ","), as.integer(chunk_size)))
+  total_rows <- if (logical_stream) NA_real_ else
+    as.numeric(call_reader(rd, "count_rows", path, reader_options = reader_options))
+  log_msg(sprintf("[CHUNKED-DELIM] %s: %s (chunk_size=%d)", basename(path),
+                  if (logical_stream) "streaming repaired logical records" else
+                    paste(formatC(total_rows, format = "d", big.mark = ","), "rows"),
+                  as.integer(chunk_size)))
   #### Pin fread's column types per chunk from the agreed classes. Without  ####
   #### this fread re-infers per chunk, so e.g. a character column that is   ####
   #### entirely empty within one chunk types as logical there (empty -> NA) ####
@@ -2758,69 +3127,83 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
   }
   ref_schema <- NULL
   offset <- 0L; chunk_num <- 1L; total_written <- 0L
-  tryCatch({
-    while (offset < total_rows) {
-      touch_repository_lock(RepositoryLock)
-      n_this <- min(as.integer(chunk_size), total_rows - offset)
-      #### skip = offset + 1 skips the header line plus the rows already    ####
-      #### written; column names come from the header read above.           ####
-      df_chunk <- call_reader(rd, "read_chunk", path, reader_options = reader_options,
-                              offset = offset, n_max = n_this, header = header,
-                              col_classes = col_classes)
-      if (!is.data.frame(df_chunk)) stop(sprintf("Reader '%s' read_chunk() did not return a data frame.", reader))
-      data.table::setDT(df_chunk)
-      #### Built-in delimited callbacks already return strict UTF-8. This   ####
-      #### second pass enforces that reader contract without reinterpreting ####
-      #### the normalized values as their original source encoding.         ####
-      df_chunk <- normalize_character_encoding(df_chunk, "UTF-8")
-      if (!is.null(year_val) && "YEAR" %in% partition_keys) df_chunk <- add_year_if_missing(df_chunk, year_val)
-      if (!is.null(all_cols)) df_chunk <- align_columns(df_chunk, all_cols, col_classes,
-                                                        max_coerce_na_pct = max_coerce_na_pct)
-      num_cols <- names(df_chunk)[sapply(df_chunk, is.numeric)]
-      for (col in num_cols) {
-        bad_idx <- which(!is.finite(df_chunk[[col]]) & !is.na(df_chunk[[col]]))
-        if (length(bad_idx) > 0L) data.table::set(df_chunk, i = bad_idx, j = col, value = NA_real_)
-      }
-      validate_partition_column_values(df_chunk, partition_keys, partition_values,
-                                       source_label = basename(path))
-      for (pk in intersect(partition_keys, names(df_chunk))) df_chunk[, (pk) := NULL]
-      arrow_tbl <- arrow::as_arrow_table(df_chunk)
-      rm(df_chunk)
-      if (is.null(ref_schema)) {
-        #### Pin every chunk to the agreed physical types: fread re-infers  ####
-        #### per chunk, so without this a text value appearing only in a    ####
-        #### later chunk would change that chunk's schema.                  ####
-        if (!is.null(col_classes)) {
-          ref_schema <- arrow_schema_from_classes(arrow_tbl, col_classes)
-        } else {
-          ref_schema <- arrow_tbl$schema
-        }
-      }
-      arrow_tbl <- arrow_tbl$cast(ref_schema)
-      chunk_file <- if (TerminalHivePartition) {
-        bd <- file.path(year_dir, sprintf("batch_id=%s_%05d", file_stem, chunk_num))
-        dir.create(bd, recursive = TRUE, showWarnings = FALSE)
-        file.path(bd, "data.parquet")
+  process_chunk <- function(df_chunk) {
+    if (!is.data.frame(df_chunk)) stop(sprintf("Reader '%s' did not return a data frame chunk.", reader))
+    data.table::setDT(df_chunk)
+    #### Built-in delimited callbacks already return strict UTF-8. This   ####
+    #### second pass enforces that reader contract without reinterpreting ####
+    #### the normalized values as their original source encoding.         ####
+    df_chunk <- normalize_character_encoding(df_chunk, "UTF-8")
+    if (!is.null(year_val) && "YEAR" %in% partition_keys) df_chunk <- add_year_if_missing(df_chunk, year_val)
+    if (!is.null(all_cols)) df_chunk <- align_columns(df_chunk, all_cols, col_classes,
+                                                      max_coerce_na_pct = max_coerce_na_pct)
+    num_cols <- names(df_chunk)[sapply(df_chunk, is.numeric)]
+    for (col in num_cols) {
+      bad_idx <- which(!is.finite(df_chunk[[col]]) & !is.na(df_chunk[[col]]))
+      if (length(bad_idx) > 0L) data.table::set(df_chunk, i = bad_idx, j = col, value = NA_real_)
+    }
+    validate_partition_column_values(df_chunk, partition_keys, partition_values,
+                                     source_label = basename(path))
+    for (pk in intersect(partition_keys, names(df_chunk))) df_chunk[, (pk) := NULL]
+    arrow_tbl <- arrow::as_arrow_table(df_chunk)
+    rm(df_chunk)
+    if (is.null(ref_schema)) {
+      if (!is.null(col_classes)) {
+        ref_schema <<- arrow_schema_from_classes(arrow_tbl, col_classes)
       } else {
-        file.path(year_dir, sprintf("%s_%05d.parquet", file_stem, chunk_num))
+        ref_schema <<- arrow_tbl$schema
       }
-      write_arrow_table_safely(arrow_tbl, chunk_file)
-      written_files <- unique(c(written_files, chunk_file))
-      n_written <- arrow_tbl$num_rows
-      rm(arrow_tbl)
-      update_parquet_manifest(ManifestPath = ManifestPath, Database = Database, TableName = TableName,
-                              DuckDBTable = DuckDBTable, Year = year_val, SourcePath = SourcePath %||% path,
-                              ParquetPath = chunk_file, NRows = n_written,
-                              SchemaHash = SchemaHash, Status = "written",
-                              Notes = sprintf("chunk_%05d", chunk_num),
-                              PartitionKey = partition_keys, PartitionValue = partition_values)
-      total_written <- total_written + n_written
-      log_msg(sprintf("[CHUNKED-DELIM] %s chunk %d: %d rows -> %s", basename(path), chunk_num,
-                      n_written, basename(chunk_file)))
-      offset <- offset + n_this
-      chunk_num <- chunk_num + 1L
-      touch_repository_lock(RepositoryLock)
-      gc(verbose = FALSE)
+    }
+    arrow_tbl <- arrow_tbl$cast(ref_schema)
+    chunk_file <- if (TerminalHivePartition) {
+      bd <- file.path(year_dir, sprintf("batch_id=%s_%05d", file_stem, chunk_num))
+      dir.create(bd, recursive = TRUE, showWarnings = FALSE)
+      file.path(bd, "data.parquet")
+    } else {
+      file.path(year_dir, sprintf("%s_%05d.parquet", file_stem, chunk_num))
+    }
+    write_arrow_table_safely(arrow_tbl, chunk_file)
+    written_files <<- unique(c(written_files, chunk_file))
+    n_written <- arrow_tbl$num_rows
+    rm(arrow_tbl)
+    update_parquet_manifest(ManifestPath = ManifestPath, Database = Database, TableName = TableName,
+                            DuckDBTable = DuckDBTable, Year = year_val, SourcePath = SourcePath %||% path,
+                            ParquetPath = chunk_file, NRows = n_written,
+                            SchemaHash = SchemaHash, Status = "written",
+                            Notes = sprintf("chunk_%05d", chunk_num),
+                            PartitionKey = partition_keys, PartitionValue = partition_values)
+    total_written <<- total_written + n_written
+    log_msg(sprintf("[CHUNKED-DELIM] %s chunk %d: %d rows -> %s", basename(path), chunk_num,
+                    n_written, basename(chunk_file)))
+    chunk_num <<- chunk_num + 1L
+    touch_repository_lock(RepositoryLock)
+    gc(verbose = FALSE)
+    invisible(NULL)
+  }
+  tryCatch({
+    if (logical_stream) {
+      diagnostics <- .stream_delimited_logical_records(
+        path, reader_options = reader_options, chunk_size = chunk_size,
+        col_classes = col_classes, callback = process_chunk)
+      total_rows <- diagnostics$LogicalRows
+      if (diagnostics$RepairCount > 0L) {
+        log_msg(sprintf("[DELIMITED REPAIR] %s: appended %d continuation line(s) to %s (physical lines: %s)",
+                        basename(path), as.integer(diagnostics$RepairCount),
+                        diagnostics$ContinuationColumn,
+                        paste(diagnostics$RepairLines, collapse = ",")))
+      }
+    } else {
+      while (offset < total_rows) {
+        touch_repository_lock(RepositoryLock)
+        n_this <- min(as.integer(chunk_size), total_rows - offset)
+        #### skip = offset + 1 skips the header line plus the rows already  ####
+        #### written; column names come from the header read above.         ####
+        df_chunk <- call_reader(rd, "read_chunk", path, reader_options = reader_options,
+                                offset = offset, n_max = n_this, header = header,
+                                col_classes = col_classes)
+        process_chunk(df_chunk)
+        offset <- offset + n_this
+      }
     }
     if (total_written != total_rows) {
       stop(sprintf("file=%s | issue=row_count_mismatch | counted=%d | rows_written=%d",
@@ -5189,18 +5572,27 @@ discover_schema_relationships <- function(table_schema, include_candidates = TRU
   required <- c("DuckDBTable", "Column", "CanonicalType")
   if (!all(required %in% names(ts)) || nrow(ts) == 0L) return(data.table::data.table())
   if (!"Role" %in% names(ts)) ts[, Role := NA_character_]
+  if (!"MergeGroup" %in% names(ts)) ts[, MergeGroup := NA_character_]
+  if (!"MergeReviewed" %in% names(ts)) ts[, MergeReviewed := FALSE]
   ts[, Column := canonical_colnames(Column)]
   ts[, CanonicalType := vapply(CanonicalType, normalize_type_name, character(1))]
-  ts[, Candidate := tolower(as.character(Role)) %in% c("join_key", "partition") |
-       (isTRUE(include_candidates) & vapply(Column, merge_key_name_candidate, logical(1)))]
+  ts[, MergeGroup := toupper(trimws(as.character(MergeGroup)))]
+  ts[, MergeReviewed := as.logical(MergeReviewed)]
+  ts[is.na(MergeReviewed), MergeReviewed := FALSE]
+  ts[, ExplicitGroup := !is.na(MergeGroup) & nzchar(MergeGroup)]
+  ts[, Candidate := ExplicitGroup | (!MergeReviewed &
+       (tolower(as.character(Role)) %in% c("join_key", "partition") |
+        (isTRUE(include_candidates) & vapply(Column, merge_key_name_candidate, logical(1)))))]
+  ts[, RelationGroup := ifelse(ExplicitGroup, MergeGroup, paste0("CANDIDATE::", Column))]
   keys <- ts[Candidate %in% TRUE]
-  pairs <- merge(keys, keys, by = c("Column", "CanonicalType"), allow.cartesian = TRUE,
+  pairs <- merge(keys, keys, by = c("RelationGroup", "CanonicalType"), allow.cartesian = TRUE,
                  suffixes = c("_Left", "_Right"))
   pairs <- pairs[DuckDBTable_Left < DuckDBTable_Right]
   unique(pairs[, .(LeftTable = DuckDBTable_Left, RightTable = DuckDBTable_Right,
-                   Column, CanonicalType,
-                   Detection = ifelse(tolower(as.character(Role_Left)) == "join_key" |
-                                        tolower(as.character(Role_Right)) == "join_key", "declared", "candidate"))])
+                   Column = Column_Left, CanonicalType,
+                   Detection = ifelse(!grepl("^CANDIDATE::", RelationGroup), "approved_group",
+                                      ifelse(tolower(as.character(Role_Left)) == "join_key" |
+                                         tolower(as.character(Role_Right)) == "join_key", "declared", "candidate")))])
 }
 
 #' Initialize a versioned repository directory layout
@@ -5295,8 +5687,10 @@ create_repository_project <- function(dir, MasterDBPath = file.path(dir, "source
                              PartitionType = character(), PhysicalTableName = character(),
                              Encoding = character(), Delimiter = character(), Quote = character(),
                              NAStrings = character(), DecimalMark = character(),
-                             DateFormat = character(), DateTimeFormat = character(), Timezone = character(),
-                             ReaderOptions = character(), ReadMode = character(), AcceptPartial = logical())
+                              DateFormat = character(), DateTimeFormat = character(), Timezone = character(),
+                              MalformedRowPolicy = character(), ContinuationColumn = character(),
+                              ContinuationJoin = character(), ReaderOptions = character(),
+                              ReadMode = character(), AcceptPartial = logical())
   wb <- openxlsx::createWorkbook(); openxlsx::addWorksheet(wb, "Sheet1")
   openxlsx::writeData(wb, "Sheet1", mdt_template)
   openxlsx::saveWorkbook(wb, paths$MDTPath, overwrite = TRUE)
@@ -5438,7 +5832,7 @@ RepositoryInitialize <- function(FormattedDBPath, ParquetBasePath = file.path(Fo
                                  SchemaReviewPath = file.path(FormattedDBPath, "Schema", "SchemaReview.xlsx"),
                                  ManifestPath = NULL,
                                  DataContractPath = file.path(FormattedDBPath, "Schema", "DataContracts.xlsx"),
-                                 create = TRUE, profile = c("hcup", "generic")) {
+                                  create = TRUE, profile = c("generic", "hcup")) {
   profile <- match.arg(profile)
   if (is.null(ManifestPath)) {
     legacy_manifest <- file.path(FormattedDBPath, "Manifest", "ParquetManifest.csv")
@@ -5544,12 +5938,19 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
     if (any(bad_filetype)) add_issue("bad_filetype", "error",
                                      sprintf("One or more MDT FileType values have no registered reader. Supported: %s.",
                                              paste(supported_file_types(), collapse = ", ")), sum(bad_filetype))
+    validate_row_options <- function(i) {
+      options <- reader_options_for_row(MDTdt[i, ])
+      if (tolower(as.character(MDTdt$FileType[i])) %in% c("csv", "tsv", "txt", "gz")) {
+        .delimited_repair_settings(options)
+      }
+      invisible(options)
+    }
     option_rows <- which(vapply(seq_len(nrow(MDTdt)), function(i) {
-      inherits(tryCatch(reader_options_for_row(MDTdt[i, ]), error = function(e) e), "error")
+      inherits(tryCatch(validate_row_options(i), error = function(e) e), "error")
     }, logical(1)))
     if (length(option_rows) > 0L) {
-      first_error <- tryCatch({ reader_options_for_row(MDTdt[option_rows[1], ]); "" },
-                              error = function(e) conditionMessage(e))
+      first_error <- tryCatch({ validate_row_options(option_rows[1]); "" },
+                               error = function(e) conditionMessage(e))
       add_issue("bad_reader_options", "error",
                 sprintf("Reader options are invalid for %d row(s); first row %d: %s",
                         length(option_rows), option_rows[1], first_error), length(option_rows))
@@ -5710,6 +6111,24 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
 #### User-guided schema discovery workflow ####################################
 ################################################################################
 
+.classify_schema_reader_warnings <- function(warnings, rows_sampled = NA_integer_) {
+  warnings <- unique(as.character(warnings))
+  warnings <- warnings[!is.na(warnings) & nzchar(trimws(warnings))]
+  if (length(warnings) == 0L) {
+    return(list(Text = NA_character_, Class = NA_character_, Severity = NA_character_))
+  }
+  if (all(startsWith(warnings, "[READER REPAIR]"))) {
+    return(list(Text = paste(warnings, collapse = " | "),
+                Class = "continuation_repaired", Severity = "info"))
+  }
+  if (any(grepl("Stopped early on line [0-9]+\\. Expected [0-9]+ fields", warnings))) {
+    return(list(Text = paste(warnings, collapse = " | "),
+                Class = "structural_mismatch", Severity = "warning"))
+  }
+  list(Text = paste(warnings, collapse = " | "),
+       Class = "reader_warning", Severity = "warning")
+}
+
 .schema_observation_issue_row <- function(row_meta, full_path, message, encoding_info = NULL) {
   pspec <- tryCatch(partition_spec_for_row(row_meta), error = function(e) list(keys = NA_character_, values = NA_character_))
   data.table::data.table(
@@ -5728,6 +6147,9 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
     NumericParseFailureCount = NA_real_, Minimum = NA_character_, Maximum = NA_character_,
     MaximumTextLength = NA_real_, PrecisionRisk = NA,
     InferenceConfidence = "unavailable", ReaderWarning = NA_character_,
+    ReaderWarningClass = NA_character_, ReaderWarningSeverity = NA_character_,
+    ReaderRepairCount = NA_real_, ReaderRepairLines = NA_character_,
+    ReaderRepairPolicy = NA_character_,
     SurveyStatus = "error", SurveyMessage = as.character(message),
     SourceSize = suppressWarnings(as.numeric(file.info(full_path)$size[1])),
     SourceModifiedUTC = NA_character_, SourceFingerprint = NA_character_,
@@ -5818,15 +6240,25 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
                                            reader_options = options))
     sample_encoding_info <- attr(sample, "repoquet_encoding_info")
     if (!is.null(sample_encoding_info)) encoding_info <- sample_encoding_info
+    repair_info <- attr(sample, "repoquet_delimited_diagnostics")
+    if (!is.null(repair_info) && isTRUE(repair_info$RepairCount > 0L)) {
+      warnings_seen <- unique(c(
+        warnings_seen,
+        sprintf("[READER REPAIR] Appended %d continuation line(s) to %s at physical line(s): %s",
+                as.integer(repair_info$RepairCount), repair_info$ContinuationColumn,
+                paste(repair_info$RepairLines, collapse = ","))
+      ))
+    }
     sample <- strip_haven(sample)
     data.table::setDT(sample)
+    warning_info <- .classify_schema_reader_warnings(warnings_seen, nrow(sample))
     pspec <- partition_spec_for_row(row_meta)
     ptypes <- partition_types_for_row(row_meta)
     fingerprint <- source_fingerprint(full_path, mode = SourceFingerprintMode)
     original_header <- as.character(original_header)
     header_map <- split(original_header, canonical_colnames(original_header))
     confidence <- if (reader_type %in% c("csv", "tsv", "txt", "gz")) "sampled" else "declared_or_stored"
-    warning_text <- if (length(warnings_seen) == 0L) NA_character_ else paste(warnings_seen, collapse = " | ")
+    warning_text <- warning_info$Text
     base <- list(
       Database = as.character(row_meta$Database[1]),
       TableName = as.character(row_meta$TableName[1]),
@@ -5843,7 +6275,11 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
       EncodingConfidence = encoding_info$EncodingConfidence %||% NA_real_,
       EncodingUsed = encoding_info$EncodingUsed %||% NA_character_,
       EncodingDetectionMethod = encoding_info$DetectionMethod %||% NA_character_,
-      EncodingValidationStatus = if (is.null(encoding_info)) NA_character_ else "sample_valid_utf8"
+      EncodingValidationStatus = if (is.null(encoding_info)) NA_character_ else "sample_valid_utf8",
+      ReaderRepairCount = repair_info$RepairCount %||% 0,
+      ReaderRepairLines = if (is.null(repair_info) || length(repair_info$RepairLines) == 0L) NA_character_ else
+        paste(repair_info$RepairLines, collapse = ","),
+      ReaderRepairPolicy = repair_info$RepairPolicy %||% "error"
     )
     rows <- lapply(names(sample), function(column) {
       stats <- .schema_observation_stats(sample[[column]])
@@ -5855,6 +6291,8 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
         IsPartitionColumn = column %in% canonical_colnames(pspec$keys),
         InferenceConfidence = confidence,
         ReaderWarning = warning_text,
+        ReaderWarningClass = warning_info$Class,
+        ReaderWarningSeverity = warning_info$Severity,
         SurveyStatus = "ok",
         SurveyMessage = NA_character_
       ), stats))
@@ -5871,7 +6309,9 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
         FractionalCount = 0, LeadingZeroCount = 0, NumericParseFailureCount = 0,
         Minimum = NA_character_, Maximum = NA_character_, MaximumTextLength = NA_real_,
         PrecisionRisk = FALSE, InferenceConfidence = "configured_partition",
-        ReaderWarning = warning_text, SurveyStatus = "ok", SurveyMessage = NA_character_
+        ReaderWarning = warning_text, ReaderWarningClass = warning_info$Class,
+        ReaderWarningSeverity = warning_info$Severity,
+        SurveyStatus = "ok", SurveyMessage = NA_character_
       )))
     }
     list(ok = TRUE, path = full_path,
@@ -5910,10 +6350,17 @@ SurveyRepositorySchema <- function(MDT, MasterDBPath, ObservationPath,
   MDTdt <- data.table::as.data.table(MDT)
   if (!is.null(DBLoad)) MDTdt <- MDTdt[as.character(Database) %in% as.character(DBLoad)]
   if (nrow(MDTdt) == 0L) stop("Schema survey has no MDT rows to inspect.")
-  scan_one <- function(i) .survey_schema_source(MDTdt[i, ], MasterDBPath, SourceFingerprintMode)
+  scan_one <- function(i) {
+    #### Multisession workers do not inherit callbacks stored inside the    ####
+    #### main process's reader-registry environment when repoquet.R was     ####
+    #### sourced directly. Re-registering is cheap and makes both installed ####
+    #### package and development/source execution deterministic.            ####
+    register_builtin_file_readers()
+    .survey_schema_source(MDTdt[i, ], MasterDBPath, SourceFingerprintMode)
+  }
   results <- .parallel_scan_with_serial_retry(
     seq_len(nrow(MDTdt)), scan_one, n_workers = n_workers,
-    future_packages = c("data.table", "haven", "arrow", "bit64", "openxlsx"),
+    future_packages = c("data.table", "haven", "arrow", "bit64", "openxlsx", "stringi"),
     is_failure = function(x) !is.list(x) || !isTRUE(x$ok),
     context = "repository schema survey"
   )
@@ -5977,7 +6424,12 @@ GetSchemaObservations <- function(ObservationPath, Database = NULL, TableName = 
 
 .schema_recommendation_for_group <- function(rows) {
   types <- sort(unique(rows$ObservedType[!is.na(rows$ObservedType) & rows$ObservedType != "unknown"]))
-  has_warning <- any(!is.na(rows$ReaderWarning) & nzchar(rows$ReaderWarning))
+  warning_severity <- if ("ReaderWarningSeverity" %in% names(rows)) {
+    tolower(trimws(as.character(rows$ReaderWarningSeverity)))
+  } else {
+    ifelse(!is.na(rows$ReaderWarning) & nzchar(rows$ReaderWarning), "warning", NA_character_)
+  }
+  has_warning <- any(warning_severity %in% c("warning", "error"), na.rm = TRUE)
   risk <- "Lossless"
   if (length(types) == 0L) {
     recommended <- "character"; risk <- "Review"
@@ -6025,9 +6477,110 @@ GetSchemaObservations <- function(ObservationPath, Database = NULL, TableName = 
        Reason = reason, RequiresReview = risk != "Lossless")
 }
 
+.schema_policy_resolution <- function(rows, recommendation, policy_hit = NULL) {
+  data_type <- normalize_type_name(recommendation$RecommendedType)
+  if (is.null(policy_hit) || nrow(policy_hit) == 0L) {
+    return(list(
+      DataRecommendedType = data_type, RecommendedType = data_type,
+      Risk = recommendation$Risk, Reason = recommendation$Reason,
+      RequiresReview = recommendation$RequiresReview, Role = NULL,
+      PolicyPattern = NA_character_, PolicyType = NA_character_,
+      PolicyRole = NA_character_, PolicyStatus = "not_configured",
+      PolicyConflict = FALSE
+    ))
+  }
+  policy_type <- normalize_type_name(policy_hit$CanonicalType[1])
+  observed <- unique(rows$ObservedType[!is.na(rows$ObservedType) & rows$ObservedType != "unknown"])
+  safe_policy <- identical(promote_types(c(observed, policy_type)), policy_type)
+  conflict <- !identical(policy_type, data_type)
+  status <- if (!conflict) {
+    "matched"
+  } else if (safe_policy) {
+    "lossless_policy_promotion"
+  } else {
+    "explicit_override_required"
+  }
+  final_type <- if (safe_policy) policy_type else data_type
+  risk <- recommendation$Risk
+  reason <- recommendation$Reason
+  if (conflict) {
+    risk <- if (safe_policy) "Review" else "Potential loss"
+    reason <- paste0(reason, " Policy ", as.character(policy_hit$ColumnPattern[1]),
+                     " proposes ", policy_type, "; ",
+                     if (safe_policy) "the promotion is lossless but remains visible for approval."
+                     else "the observed evidence does not support that coercion without explicit override.")
+  }
+  list(
+    DataRecommendedType = data_type, RecommendedType = final_type,
+    Risk = risk, Reason = reason,
+    RequiresReview = isTRUE(recommendation$RequiresReview) || conflict,
+    Role = if ("Role" %in% names(policy_hit)) as.character(policy_hit$Role[1]) else NULL,
+    PolicyPattern = as.character(policy_hit$ColumnPattern[1]),
+    PolicyType = policy_type,
+    PolicyRole = if ("Role" %in% names(policy_hit)) as.character(policy_hit$Role[1]) else NA_character_,
+    PolicyStatus = status, PolicyConflict = conflict
+  )
+}
+
+.schema_compatibility_review <- function(registry) {
+  registry <- data.table::as.data.table(registry)
+  empty <- data.table::data.table(
+    Scope = character(), Database = character(), Column = character(),
+    MergeGroup = character(), Tables = character(), Databases = character(),
+    CurrentTypes = character(), RecommendedCommonType = character(),
+    ApprovedCommonType = character(), SuggestedRole = character(),
+    RecommendationReason = character(), Decision = character(),
+    UserNotes = character(), CompatibilitySignature = character())
+  build_row <- function(rows, scope, database) {
+    types <- sort(unique(vapply(rows$RecommendedType, normalize_type_name, character(1))))
+    if (length(types) <= 1L || data.table::uniqueN(rows$DuckDBTable) <= 1L) return(NULL)
+    column <- rows$Column[1]
+    common <- promote_types(types, column)
+    suggested_role <- if (any(tolower(rows$Role) == "join_key", na.rm = TRUE) ||
+                          isTRUE(merge_key_name_candidate(column))) "join_key" else "compatible_column"
+    group <- if (scope == "cross_database") paste("ALL", column, sep = "::") else
+      paste(database, column, sep = "::")
+    signature <- paste("compatibility_v1", scope, database, column,
+                       paste(sort(paste(rows$DuckDBTable, rows$RecommendedType, sep = "=")), collapse = "|"),
+                       sep = "||")
+    data.table::data.table(
+      Scope = scope, Database = database, Column = column, MergeGroup = group,
+      Tables = paste(sort(unique(rows$DuckDBTable)), collapse = "; "),
+      Databases = paste(sort(unique(rows$Database)), collapse = "; "),
+      CurrentTypes = paste(types, collapse = ","),
+      RecommendedCommonType = common, ApprovedCommonType = common,
+      SuggestedRole = suggested_role,
+      RecommendationReason = sprintf("%s preserves the compatible values represented by: %s.",
+                                     common, paste(types, collapse = ", ")),
+      Decision = "", UserNotes = "",
+      CompatibilitySignature = digest::digest(signature, algo = "sha256", serialize = FALSE)
+    )
+  }
+  within <- lapply(split(registry, paste(registry$Database, registry$Column, sep = "\r")),
+                   function(rows) build_row(rows, "within_database", rows$Database[1]))
+  cross <- lapply(split(registry, registry$Column), function(rows) {
+    if (data.table::uniqueN(rows$Database) <= 1L) return(NULL)
+    build_row(rows, "cross_database", "ALL")
+  })
+  out <- data.table::rbindlist(c(within, cross), fill = TRUE)
+  if (nrow(out) == 0L) return(empty)
+  data.table::setorder(out, Scope, Database, Column)
+  out
+}
+
 #' Recommend canonical table schemas from observed evidence
 #' @export
-RecommendRepositorySchema <- function(survey = NULL, ObservationPath = NULL) {
+RecommendRepositorySchema <- function(survey = NULL, ObservationPath = NULL,
+                                      SchemaRegistryPath = NULL, schema_registry = NULL,
+                                      SchemaProfile = c("none", "generic", "hcup")) {
+  SchemaProfile <- match.arg(SchemaProfile)
+  if (is.null(schema_registry) && !is.null(SchemaRegistryPath) && nzchar(SchemaRegistryPath)) {
+    if (!file.exists(SchemaRegistryPath)) stop("Schema policy workbook not found: ", SchemaRegistryPath)
+    schema_registry <- load_schema_registry(SchemaRegistryPath, create_if_missing = FALSE,
+                                            profile = if (SchemaProfile == "none") "generic" else SchemaProfile)
+  } else if (is.null(schema_registry) && SchemaProfile != "none") {
+    schema_registry <- load_schema_registry(NULL, create_if_missing = FALSE, profile = SchemaProfile)
+  }
   observations <- if (inherits(survey, "RepositorySchemaSurvey")) {
     data.table::copy(survey$observations)
   } else {
@@ -6042,10 +6595,22 @@ RecommendRepositorySchema <- function(survey = NULL, ObservationPath = NULL) {
   for (field in names(encoding_defaults)) {
     if (!field %in% names(observations)) observations[, (field) := encoding_defaults[[field]]]
   }
+  if (!"ReaderWarningClass" %in% names(observations)) observations[, ReaderWarningClass := NA_character_]
+  if (!"ReaderWarningSeverity" %in% names(observations)) {
+    observations[, ReaderWarningSeverity := ifelse(!is.na(ReaderWarning) & nzchar(ReaderWarning),
+                                                    "warning", NA_character_)]
+  }
+  repair_defaults <- list(ReaderRepairCount = 0, ReaderRepairLines = NA_character_,
+                          ReaderRepairPolicy = "error")
+  for (field in names(repair_defaults)) {
+    if (!field %in% names(observations)) observations[, (field) := repair_defaults[[field]]]
+  }
   source_issues <- unique(observations[
     SurveyStatus != "ok" | (!is.na(ReaderWarning) & nzchar(ReaderWarning)),
     .(Database, TableName, SourcePath, FileType, PartitionKey, PartitionValue,
-      SurveyStatus, ReaderWarning, SurveyMessage, DeclaredEncoding,
+      SurveyStatus, ReaderWarning, ReaderWarningClass, ReaderWarningSeverity,
+      ReaderRepairCount, ReaderRepairLines, ReaderRepairPolicy,
+      SurveyMessage, DeclaredEncoding,
       DetectedEncoding, EncodingConfidence, EncodingUsed,
       EncodingDetectionMethod, EncodingValidationStatus)
   ])
@@ -6057,36 +6622,58 @@ RecommendRepositorySchema <- function(survey = NULL, ObservationPath = NULL) {
   groups <- split(usable, split_key)
   registry <- data.table::rbindlist(lapply(groups, function(rows) {
     recommendation <- .schema_recommendation_for_group(rows)
+    policy_hit <- schema_registry_match(rows$Column[1], schema_registry,
+                                        database = rows$Database[1], table_name = rows$TableName[1])
+    resolved <- .schema_policy_resolution(rows, recommendation, policy_hit)
     observed_types <- paste(sort(unique(rows$ObservedType)), collapse = ",")
-    role <- if (all(rows$ObservationKind == "hive_partition")) "partition" else "data"
-    signature_text <- paste(sort(unique(paste(rows$SourceFingerprint, rows$PartitionValue,
-                                               rows$ObservedType, sep = "|"))), collapse = "||")
+    role <- if (all(rows$ObservationKind == "hive_partition")) "partition" else
+      resolved$Role %||% "data"
+    signature_text <- paste(
+      "schema_proposal_v2",
+      paste(sort(unique(paste(rows$SourceFingerprint, rows$PartitionValue,
+                              rows$ObservedType, rows$ReaderWarningClass,
+                               rows$ReaderWarningSeverity, rows$EncodingUsed,
+                               rows$ReaderRepairCount, rows$ReaderRepairLines,
+                               rows$ReaderRepairPolicy,
+                               rows$LeadingZeroCount, rows$NumericParseFailureCount,
+                              rows$PrecisionRisk, sep = "|"))), collapse = "||"),
+      resolved$PolicyPattern, resolved$PolicyType, resolved$PolicyStatus, sep = "||")
     data.table::data.table(
       Database = rows$Database[1], TableName = rows$TableName[1],
       DuckDBTable = rows$DuckDBTable[1], Column = rows$Column[1],
       ObservedTypes = observed_types, TypeHistory = .schema_type_history(rows),
-      RecommendedType = recommendation$RecommendedType,
-      ApprovedType = recommendation$RecommendedType,
-      Risk = recommendation$Risk, RecommendationReason = recommendation$Reason,
+      DataRecommendedType = resolved$DataRecommendedType,
+      RecommendedType = resolved$RecommendedType,
+      ApprovedType = resolved$RecommendedType,
+      Risk = resolved$Risk, RecommendationReason = resolved$Reason,
       Confidence = paste(sort(unique(rows$InferenceConfidence)), collapse = ","),
-      Role = role, MergeGroup = "", RequiresReview = recommendation$RequiresReview,
-      Decision = if (recommendation$RequiresReview) "" else "Auto-approved",
+      PolicyPattern = resolved$PolicyPattern, PolicyType = resolved$PolicyType,
+      PolicyRole = resolved$PolicyRole, PolicyStatus = resolved$PolicyStatus,
+      PolicyConflict = resolved$PolicyConflict,
+      Role = role, MergeGroup = "", RequiresReview = resolved$RequiresReview,
+      Decision = if (resolved$RequiresReview) "" else "Auto-approved",
+      DecisionOrigin = if (resolved$RequiresReview) "new" else "automatic",
       UserNotes = "", ObservationSignature = digest::digest(signature_text, algo = "sha256", serialize = FALSE)
     )
   }), fill = TRUE)
   data.table::setorder(registry, Database, TableName, Column)
+  compatibility <- .schema_compatibility_review(registry)
   history <- unique(usable[, .(Database, TableName, DuckDBTable, Column,
                                PartitionKey, PartitionValue, ObservedType,
-                               InferenceConfidence, ReaderWarning)])
+                               InferenceConfidence, ReaderWarning,
+                               ReaderWarningClass, ReaderWarningSeverity,
+                               ReaderRepairCount, ReaderRepairLines, ReaderRepairPolicy)])
   type_counts <- history[, .(NTypes = data.table::uniqueN(ObservedType)),
                          by = .(Database, TableName, Column)]
   history <- merge(history, type_counts, by = c("Database", "TableName", "Column"), all.x = TRUE)
   history <- history[NTypes > 1L | (!is.na(ReaderWarning) & nzchar(ReaderWarning))]
   summary <- data.table::data.table(
     Columns = nrow(registry), AutoApproved = sum(!registry$RequiresReview),
-    NeedsReview = sum(registry$RequiresReview), SourceIssues = nrow(source_issues)
+    NeedsReview = sum(registry$RequiresReview), SourceIssues = nrow(source_issues),
+    CompatibilityConflicts = nrow(compatibility)
   )
-  structure(list(registry = registry, history = history, source_issues = source_issues,
+  structure(list(registry = registry, compatibility = compatibility,
+                 history = history, source_issues = source_issues,
                  summary = summary,
                  ObservationPath = ObservationPath %||% survey$ObservationPath),
             class = "RepositorySchemaProposal")
@@ -6107,7 +6694,27 @@ RecommendRepositorySchema <- function(survey = NULL, ObservationPath = NULL) {
   same <- !is.na(idx) & registry$ObservationSignature == old$ObservationSignature[idx]
   fields <- intersect(c("ApprovedType", "Decision", "Role", "MergeGroup", "UserNotes"), names(old))
   for (field in fields) registry[same, (field) := old[[field]][idx[same]]]
+  registry[same & RequiresReview == TRUE & nzchar(trimws(as.character(Decision))),
+           DecisionOrigin := "preserved"]
   registry
+}
+
+.preserve_compatibility_decisions <- function(compatibility, SchemaReviewPath) {
+  if (nrow(compatibility) == 0L || !file.exists(SchemaReviewPath) ||
+      !is_excel_workbook_path(SchemaReviewPath)) return(compatibility)
+  sheets <- tryCatch(openxlsx::getSheetNames(SchemaReviewPath), error = function(e) character(0))
+  if (!"CompatibilityReview" %in% sheets) return(compatibility)
+  old <- tryCatch(data.table::as.data.table(openxlsx::read.xlsx(
+    SchemaReviewPath, sheet = "CompatibilityReview")), error = function(e) NULL)
+  required <- c("Scope", "Database", "Column", "CompatibilitySignature")
+  if (is.null(old) || !all(required %in% names(old))) return(compatibility)
+  key <- function(x) paste(x$Scope, x$Database, x$Column, sep = "\r")
+  idx <- match(key(compatibility), key(old))
+  same <- !is.na(idx) & compatibility$CompatibilitySignature == old$CompatibilitySignature[idx]
+  for (field in intersect(c("ApprovedCommonType", "Decision", "SuggestedRole", "UserNotes"), names(old))) {
+    compatibility[same, (field) := old[[field]][idx[same]]]
+  }
+  compatibility
 }
 
 #' Write a compact, user-reviewable schema proposal workbook
@@ -6116,11 +6723,17 @@ WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = 
   if (!inherits(proposal, "RepositorySchemaProposal")) stop("proposal must come from RecommendRepositorySchema().")
   registry <- data.table::copy(proposal$registry)
   if (isTRUE(PreserveDecisions)) registry <- .preserve_schema_review_decisions(registry, SchemaReviewPath)
+  compatibility <- data.table::copy(proposal$compatibility %||% data.table::data.table())
+  if (isTRUE(PreserveDecisions)) {
+    compatibility <- .preserve_compatibility_decisions(compatibility, SchemaReviewPath)
+  }
   review <- registry[RequiresReview == TRUE]
   settings <- data.table::data.table(
-    Setting = c("ObservationPath", "Columns", "AutoApproved", "NeedsReview", "SourceIssues", "GeneratedUTC"),
+    Setting = c("ObservationPath", "Columns", "AutoApproved", "NeedsReview",
+                "CompatibilityConflicts", "SourceIssues", "GeneratedUTC"),
     Value = c(proposal$ObservationPath %||% "", proposal$summary$Columns,
               proposal$summary$AutoApproved, proposal$summary$NeedsReview,
+              proposal$summary$CompatibilityConflicts %||% nrow(compatibility),
               proposal$summary$SourceIssues,
               format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"))
   )
@@ -6128,8 +6741,8 @@ WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = 
   tmp <- tempfile(pattern = paste0(basename(SchemaReviewPath), ".tmp_"),
                   tmpdir = dirname(SchemaReviewPath), fileext = ".xlsx")
   wb <- openxlsx::createWorkbook()
-  sheets <- list(Review = review, Registry = registry, History = proposal$history,
-                 Settings = settings)
+  sheets <- list(Review = review, CompatibilityReview = compatibility,
+                 Registry = registry, History = proposal$history, Settings = settings)
   if (nrow(proposal$source_issues) > 0L) sheets$SourceIssues <- proposal$source_issues
   header_style <- openxlsx::createStyle(fgFill = "#1F4E78", fontColour = "#FFFFFF",
                                         textDecoration = "bold", border = "bottom")
@@ -6161,6 +6774,18 @@ WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = 
     openxlsx::conditionalFormatting(wb, "Review", cols = risk_col, rows = 2:(nrow(review) + 1L),
                                     rule = '=="Review"', style = openxlsx::createStyle(fgFill = "#FFF2CC"))
   }
+  if (nrow(compatibility) > 0L) {
+    type_col <- match("ApprovedCommonType", names(compatibility))
+    decision_col <- match("Decision", names(compatibility))
+    role_col <- match("SuggestedRole", names(compatibility))
+    rows <- 2:(nrow(compatibility) + 1L)
+    openxlsx::dataValidation(wb, "CompatibilityReview", cols = type_col, rows = rows,
+                             type = "list", value = paste0('"', paste(setdiff(allowed_canonical_types(), "decimal(p,s)"), collapse = ","), '"'))
+    openxlsx::dataValidation(wb, "CompatibilityReview", cols = decision_col, rows = rows,
+                             type = "list", value = '"Accept,Override,Ignore"')
+    openxlsx::dataValidation(wb, "CompatibilityReview", cols = role_col, rows = rows,
+                             type = "list", value = '"join_key,compatible_column,data"')
+  }
   openxlsx::saveWorkbook(wb, tmp, overwrite = TRUE)
   replace_file_safely(tmp, SchemaReviewPath)
   log_msg(sprintf("[SCHEMA PROPOSAL] Wrote %s (%d columns; %d require review).",
@@ -6175,6 +6800,72 @@ WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = 
   hit <- which(!is.na(idx))
   for (field in intersect(c("ApprovedType", "Decision", "Role", "MergeGroup", "UserNotes"), names(review))) {
     registry[hit, (field) := review[[field]][idx[hit]]]
+  }
+  registry
+}
+
+.apply_compatibility_review <- function(registry, compatibility, strict = TRUE) {
+  registry <- data.table::copy(data.table::as.data.table(registry))
+  if (!"MergeReviewed" %in% names(registry)) registry[, MergeReviewed := FALSE]
+  if (!"CompatibilityApplied" %in% names(registry)) registry[, CompatibilityApplied := FALSE]
+  if (is.null(compatibility) || nrow(compatibility) == 0L) return(registry)
+  compatibility <- data.table::as.data.table(compatibility)
+  required <- c("Scope", "Database", "Column", "MergeGroup", "RecommendedCommonType",
+                "ApprovedCommonType", "SuggestedRole", "Decision")
+  missing <- setdiff(required, names(compatibility))
+  if (length(missing) > 0L) {
+    stop("CompatibilityReview is missing required columns: ", paste(missing, collapse = ", "))
+  }
+  decision <- tolower(trimws(as.character(compatibility$Decision)))
+  unresolved <- !decision %in% c("accept", "override", "ignore")
+  if (any(unresolved)) {
+    message <- sprintf("%d compatibility decision(s) remain unresolved.", sum(unresolved))
+    if (isTRUE(strict)) stop(message) else log_msg(paste("[SCHEMA REVIEW WARNING]", message))
+  }
+  active <- which(!unresolved)
+  approved <- rep(NA_character_, nrow(compatibility))
+  typed <- active[decision[active] %in% c("accept", "override")]
+  if (length(typed) > 0L) {
+    raw <- trimws(as.character(compatibility$ApprovedCommonType[typed]))
+    if (any(is.na(raw) | !nzchar(raw))) stop("ApprovedCommonType is blank for an accepted compatibility group.")
+    approved[typed] <- vapply(raw, normalize_type_name, character(1))
+    if (any(!is_allowed_canonical_type(approved[typed]))) {
+      stop("CompatibilityReview contains an invalid ApprovedCommonType.")
+    }
+    recommended <- vapply(compatibility$RecommendedCommonType[typed], normalize_type_name, character(1))
+    bad_override <- approved[typed] != recommended & decision[typed] != "override"
+    if (any(bad_override)) {
+      stop("Compatibility rows whose ApprovedCommonType differs from RecommendedCommonType must use Decision='Override'.")
+    }
+  }
+  assignments <- list()
+  for (i in active) {
+    scope <- tolower(trimws(as.character(compatibility$Scope[i])))
+    column <- canonical_colnames(compatibility$Column[i])
+    target <- which(registry$Column == column &
+      (scope == "cross_database" | registry$Database == as.character(compatibility$Database[i])))
+    if (length(target) == 0L) next
+    registry[target, MergeReviewed := TRUE]
+    if (decision[i] == "ignore") next
+    assignments[[length(assignments) + 1L]] <- data.table::data.table(
+      Row = target, CanonicalType = approved[i],
+      MergeGroup = toupper(trimws(as.character(compatibility$MergeGroup[i]))),
+      Role = trimws(as.character(compatibility$SuggestedRole[i])),
+      Priority = if (scope == "cross_database") 2L else 1L)
+  }
+  assigned <- data.table::rbindlist(assignments, fill = TRUE)
+  if (nrow(assigned) > 0L) {
+    conflicts <- assigned[, .(NTypes = data.table::uniqueN(CanonicalType),
+                              Types = paste(sort(unique(CanonicalType)), collapse = ",")), by = Row][NTypes > 1L]
+    if (nrow(conflicts) > 0L) stop("Overlapping compatibility decisions assign different types to the same table column.")
+    data.table::setorder(assigned, Row, -Priority)
+    chosen <- assigned[!duplicated(Row)]
+    registry[chosen$Row, `:=`(
+      ApprovedType = chosen$CanonicalType,
+      MergeGroup = chosen$MergeGroup,
+      Role = ifelse(is.na(chosen$Role) | !nzchar(chosen$Role), Role, chosen$Role),
+      CompatibilityApplied = TRUE
+    )]
   }
   registry
 }
@@ -6194,6 +6885,9 @@ FinalizeRepositorySchema <- function(SchemaReviewPath, TableSchemaPath, strict =
     stop("Schema review Registry sheet is missing required columns: ", paste(missing, collapse = ", "))
   }
   registry <- .overlay_schema_review(registry, review)
+  compatibility <- if ("CompatibilityReview" %in% sheets) {
+    data.table::as.data.table(openxlsx::read.xlsx(SchemaReviewPath, sheet = "CompatibilityReview"))
+  } else NULL
   parse_review_flag <- function(x) {
     text <- tolower(trimws(as.character(x)))
     out <- rep(NA, length(text))
@@ -6225,6 +6919,7 @@ FinalizeRepositorySchema <- function(SchemaReviewPath, TableSchemaPath, strict =
     if (any(source_errors) && isTRUE(strict)) stop(sprintf("Schema survey contains %d unresolved source error(s); repair and resurvey before finalizing.", sum(source_errors)))
   }
   registry[, ApprovedType := approved]
+  registry <- .apply_compatibility_review(registry, compatibility, strict = strict)
   merge_group <- toupper(trimws(as.character(registry$MergeGroup)))
   registry[, MergeGroup := merge_group]
   declared <- registry[!is.na(MergeGroup) & nzchar(MergeGroup)]
@@ -6234,15 +6929,25 @@ FinalizeRepositorySchema <- function(SchemaReviewPath, TableSchemaPath, strict =
     if (nrow(conflicts) > 0L) stop("Approved merge groups contain incompatible types: ",
                                     paste(sprintf("%s (%s)", conflicts$MergeGroup, conflicts$Types), collapse = "; "))
   }
+  if (!"DataRecommendedType" %in% names(registry)) registry[, DataRecommendedType := RecommendedType]
+  if (!"PolicyPattern" %in% names(registry)) registry[, PolicyPattern := NA_character_]
+  if (!"PolicyStatus" %in% names(registry)) registry[, PolicyStatus := "not_configured"]
+  if (!"MergeReviewed" %in% names(registry)) registry[, MergeReviewed := FALSE]
+  if (!"CompatibilityApplied" %in% names(registry)) registry[, CompatibilityApplied := FALSE]
   table_schema <- registry[, .(
     Database, TableName, DuckDBTable, Column,
     CanonicalType = ApprovedType,
     InferredType = ObservedTypes,
-    RegistryOverride = ApprovedType != RecommendedType,
+    RegistryOverride = ApprovedType != DataRecommendedType,
     Role = ifelse(is.na(Role) | !nzchar(Role), "data", Role),
-    RegistryPattern = NA_character_,
-    Source = ifelse(tolower(Decision) == "auto-approved", "auto_approved", "user_approved")
+    RegistryPattern = PolicyPattern,
+    MergeGroup, MergeReviewed,
+    Source = ifelse(CompatibilityApplied, "user_approved",
+             ifelse(tolower(Decision) == "auto-approved" & PolicyStatus == "not_configured",
+                    "auto_approved",
+                    ifelse(tolower(Decision) == "auto-approved", "policy_approved", "user_approved")))
   )]
+  ValidateSchemaMergeKeys(table_schema, strict = strict)
   write_table_schema_catalog(table_schema, TableSchemaPath)
   log_msg(sprintf("[SCHEMA FINALIZED] Wrote %d approved column definitions to %s.",
                   nrow(table_schema), TableSchemaPath))
@@ -6254,16 +6959,23 @@ FinalizeRepositorySchema <- function(SchemaReviewPath, TableSchemaPath, strict =
 PrepareSchemaRegistry <- function(MDT, MasterDBPath, ObservationPath, SchemaReviewPath,
                                   DBLoad = NULL, n_workers = 1,
                                   SourceFingerprintMode = c("metadata", "sha256", "none"),
-                                  StrictReaders = FALSE, LogPath = NULL, RunId = NULL) {
+                                  StrictReaders = FALSE, SchemaRegistryPath = NULL,
+                                  schema_registry = NULL,
+                                  SchemaProfile = c("none", "generic", "hcup"),
+                                  LogPath = NULL, RunId = NULL) {
   survey <- SurveyRepositorySchema(MDT = MDT, MasterDBPath = MasterDBPath,
                                    ObservationPath = ObservationPath, DBLoad = DBLoad,
                                    n_workers = n_workers,
                                    SourceFingerprintMode = match.arg(SourceFingerprintMode),
                                    StrictReaders = StrictReaders, LogPath = LogPath, RunId = RunId)
-  proposal <- RecommendRepositorySchema(survey = survey)
+  proposal <- RecommendRepositorySchema(
+    survey = survey, SchemaRegistryPath = SchemaRegistryPath,
+    schema_registry = schema_registry, SchemaProfile = match.arg(SchemaProfile))
   WriteSchemaProposal(proposal, SchemaReviewPath)
-  log_msg(sprintf("[SCHEMA READY] %d column(s) resolved automatically; %d require review in %s.",
-                  proposal$summary$AutoApproved, proposal$summary$NeedsReview, SchemaReviewPath))
+  log_msg(sprintf(paste0("[SCHEMA READY] %d column(s) resolved automatically; %d require column review; ",
+                         "%d cross-table compatibility conflict(s) require review in %s."),
+                  proposal$summary$AutoApproved, proposal$summary$NeedsReview,
+                  proposal$summary$CompatibilityConflicts, SchemaReviewPath))
   invisible(list(survey = survey, proposal = proposal,
                  ObservationPath = ObservationPath, SchemaReviewPath = SchemaReviewPath))
 }
@@ -6299,7 +7011,13 @@ write_table_schema_catalog <- function(table_schema, TableSchemaPath, label_cata
   if (is_excel_workbook_path(TableSchemaPath)) {
     sheets <- list(TableSchemas = table_schema)
     if (nrow(table_schema) > 0L) {
-      merge_keys <- table_schema[Role %in% c("join_key", "partition"), .(Database, TableName, DuckDBTable, Column, CanonicalType, Role, RegistryOverride)]
+      if (!"MergeGroup" %in% names(table_schema)) table_schema[, MergeGroup := NA_character_]
+      if (!"MergeReviewed" %in% names(table_schema)) table_schema[, MergeReviewed := FALSE]
+      merge_keys <- table_schema[Role %in% c("join_key", "partition") |
+                                   (!is.na(MergeGroup) & nzchar(MergeGroup)),
+                                 .(Database, TableName, DuckDBTable, Column,
+                                   CanonicalType, Role, MergeGroup, MergeReviewed,
+                                   RegistryOverride)]
       column_inventory <- table_schema[, .(Tables = paste(sort(unique(DuckDBTable)), collapse = "; "), Databases = paste(sort(unique(Database)), collapse = "; "), Types = paste(sort(unique(CanonicalType)), collapse = "; "), Roles = paste(sort(unique(Role)), collapse = "; ")), by = Column]
       sheets$MergeKeys <- merge_keys
       sheets$ColumnInventory <- column_inventory
@@ -6914,17 +7632,35 @@ ValidateSchemaMergeKeys <- function(table_schema, strict = FALSE) {
   if (is.null(table_schema) || nrow(table_schema) == 0L) return(invisible(data.table::data.table()))
   ts <- data.table::copy(data.table::as.data.table(table_schema))
   if (!"Role" %in% names(ts)) ts[, Role := NA_character_]
+  if (!"MergeGroup" %in% names(ts)) ts[, MergeGroup := NA_character_]
+  if (!"MergeReviewed" %in% names(ts)) ts[, MergeReviewed := FALSE]
   if (!"DuckDBTable" %in% names(ts) && all(c("Database", "TableName") %in% names(ts))) {
     ts[, DuckDBTable := paste(Database, TableName, sep = "_")]
   }
   ts[, Column := canonical_colnames(Column)]
   ts[, CanonicalType := vapply(CanonicalType, normalize_type_name, character(1))]
   ts[, RoleNormalized := tolower(trimws(as.character(Role)))]
+  ts[, MergeGroup := toupper(trimws(as.character(MergeGroup)))]
+  ts[, MergeReviewed := as.logical(MergeReviewed)]
+  ts[is.na(MergeReviewed), MergeReviewed := FALSE]
+  ts[, ExplicitGroup := !is.na(MergeGroup) & nzchar(MergeGroup)]
   ts[, ExplicitMergeKey := RoleNormalized %in% c("join_key", "partition")]
   ts[, CandidateMergeKey := ExplicitMergeKey | vapply(Column, merge_key_name_candidate, logical(1))]
+  issues_groups <- ts[ExplicitGroup == TRUE,
+    .(Scope = "approved_merge_group", Database = "GROUP", Column = MergeGroup,
+      Types = paste(sort(unique(CanonicalType)), collapse = ","),
+      NTypes = data.table::uniqueN(CanonicalType),
+      Tables = paste(sort(unique(DuckDBTable)), collapse = "; "),
+      Databases = paste(sort(unique(Database)), collapse = "; "),
+      Detection = "approved_compatibility"),
+    by = MergeGroup][NTypes > 1L]
   #### Parentheses force data.table to read this as a logical filter on the ####
   #### column rather than a variable lookup in calling scope.               ####
-  keys <- ts[(CandidateMergeKey)]
+  #### Once a candidate has been reviewed, only its approved MergeGroup is ####
+  #### authoritative. This permits a user to approve within-database groups ####
+  #### while explicitly keeping identically named cross-database fields     ####
+  #### separate.                                                             ####
+  keys <- ts[(CandidateMergeKey) & !MergeReviewed & !ExplicitGroup]
   issues_within_db <- keys[, .(Scope = "within_database",
                                Types = paste(sort(unique(CanonicalType)), collapse = ","),
                                NTypes = data.table::uniqueN(CanonicalType),
@@ -6939,7 +7675,7 @@ ValidateSchemaMergeKeys <- function(table_schema, strict = FALSE) {
                               Databases = paste(sort(unique(Database)), collapse = "; "),
                               Detection = if (any(ExplicitMergeKey)) "registry/catalog" else "name_candidate"),
                           by = Column][NTypes > 1L]
-  issues <- data.table::rbindlist(list(issues_within_db, issues_cross_db), fill = TRUE)
+  issues <- data.table::rbindlist(list(issues_groups, issues_within_db, issues_cross_db), fill = TRUE)
   if (nrow(issues) > 0L) {
     for (i in seq_len(nrow(issues))) log_msg(sprintf("[SCHEMA WARNING] Merge key %s/%s (%s; detected by %s) has incompatible resolved types: %s across %s",
                                                      issues$Database[i], issues$Column[i], issues$Scope[i], issues$Detection[i],

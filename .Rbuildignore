@@ -14,3 +14,4 @@
 ^\.r-lib($|/)
 ^\.package-build($|/)
 ^repoquet_.*\.tar\.gz$
+^.*~\$.*$

@@ -67,7 +67,9 @@ Optional general-purpose columns include:
 - `PhysicalTableName`: explicit Parquet directory and DuckDB view name
 - `Encoding`, `Delimiter`, `Quote`, `NAStrings`, and `DecimalMark`
 - `DateFormat`, `DateTimeFormat`, and `Timezone`
-- `ReaderOptions`: a JSON object passed to a compatible custom reader
+- `MalformedRowPolicy`, `ContinuationColumn`, and `ContinuationJoin` for an
+  explicitly verified unquoted continuation line
+- `ReaderOptions`: a JSON object passed to the selected reader
 - `AcceptPartial`: explicit acceptance of a verified truncated SAV source
 
 Nested partitions use matching semicolon-separated values, for example
@@ -77,6 +79,18 @@ Nested partitions use matching semicolon-separated values, for example
 `ValidateMDTPreflight()` checks paths, partition definitions, physical table
 identity, output filename collisions, reader options, and custom file types
 before any Parquet is written.
+
+Delimited sources are strict by default. If a vendor file contains a verified
+one-field line that continues the preceding record, configure that source row
+without editing the source itself:
+
+```json
+{"MalformedRowPolicy":"append_previous","ContinuationColumn":"DESCRIPTION","ContinuationJoin":" "}
+```
+
+The same memory-bounded logical-record reader is then used for schema discovery
+and repository loading. Corrected records flow directly to schema inference or
+Parquet chunks; repoquet does not create a cleaned CSV or overwrite the source.
 
 The installed package includes the real-world workbook used while developing
 the multi-table healthcare workflow:
