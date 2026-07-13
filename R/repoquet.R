@@ -32,6 +32,8 @@ utils::globalVariables(c(
   "ReaderWarning", "ObservationKind", "IsPartitionColumn", "ObservedType",
   "InferenceConfidence", "PartitionKey", "PartitionValue", "ApprovedType",
   "RecommendedType", "ObservedTypes", "MergeGroup", "RequiresReview", "Decision",
+  "DeclaredEncoding", "DetectedEncoding", "EncodingConfidence", "EncodingUsed",
+  "EncodingDetectionMethod", "EncodingValidationStatus",
   "SourceFingerprint", "TableName", "ToClass",
   "TypeSet", "code", "column_name", "database_table", "diagnosis_column",
   "n_keysets", "n_raw", "n_rows", "n_typesets", "pct_of_table"
@@ -1331,24 +1333,174 @@ coerce_to_class <- function(x, target_class) {
          stop(sprintf("Unsupported canonical type: %s", target_class)))
 }
 
+.canonical_encoding_name <- function(encoding) {
+  if (is.null(encoding) || length(encoding) == 0L || is.na(encoding[1]) ||
+      !nzchar(trimws(as.character(encoding[1])))) return("auto")
+  value <- toupper(gsub("_", "-", trimws(as.character(encoding[1]))))
+  switch(value,
+         "AUTO" = "auto",
+         "UTF8" = "UTF-8", "UTF-8" = "UTF-8", "ASCII" = "UTF-8",
+         "WINDOWS-1252" = "windows-1252", "CP1252" = "windows-1252",
+         "WINDOWS1252" = "windows-1252",
+         "LATIN1" = "ISO-8859-1", "LATIN-1" = "ISO-8859-1",
+         "ISO8859-1" = "ISO-8859-1", "ISO-8859-1" = "ISO-8859-1",
+         trimws(as.character(encoding[1])))
+}
+
+.delimited_binary_connection <- function(path) {
+  if (grepl("\\.(gz|gzip)$", path, ignore.case = TRUE)) gzfile(path, open = "rb") else file(path, open = "rb")
+}
+
+.read_encoding_sample <- function(path, sample_bytes = 4L * 1024L^2L) {
+  con <- .delimited_binary_connection(path)
+  on.exit(close(con), add = TRUE)
+  readBin(con, what = "raw", n = as.integer(sample_bytes))
+}
+
+#' Resolve a delimited source file's character encoding without modifying it
+#'
+#' Reads a bounded raw-byte sample from a source opened read-only. An explicit
+#' encoding wins; otherwise a BOM, strict UTF-8 validation, and ICU detection
+#' are used in that order. The returned encoding is used to convert parsed text
+#' in memory, while the source file remains byte-for-byte unchanged.
+.resolve_source_encoding <- function(path, declared_encoding = NULL,
+                                     sample_bytes = 4L * 1024L^2L) {
+  if (!file.exists(path)) stop("Source file not found while resolving encoding: ", path)
+  declared <- .canonical_encoding_name(declared_encoding)
+  bytes <- .read_encoding_sample(path, sample_bytes = sample_bytes)
+  bom <- if (length(bytes) >= 3L && identical(bytes[1:3], as.raw(c(0xEF, 0xBB, 0xBF)))) {
+    "UTF-8"
+  } else if (length(bytes) >= 2L && identical(bytes[1:2], as.raw(c(0xFF, 0xFE)))) {
+    "UTF-16LE"
+  } else if (length(bytes) >= 2L && identical(bytes[1:2], as.raw(c(0xFE, 0xFF)))) {
+    "UTF-16BE"
+  } else {
+    NA_character_
+  }
+  if (declared != "auto") {
+    return(list(DeclaredEncoding = declared, DetectedEncoding = bom,
+                EncodingConfidence = 1, EncodingUsed = declared,
+                DetectionMethod = "declared"))
+  }
+  if (!is.na(bom)) {
+    if (bom != "UTF-8") {
+      stop(sprintf("Delimited source %s uses %s. UTF-16 delimited input is not byte-compatible with fread; declare a custom reader for this source.",
+                   basename(path), bom))
+    }
+    return(list(DeclaredEncoding = "auto", DetectedEncoding = bom,
+                EncodingConfidence = 1, EncodingUsed = bom,
+                DetectionMethod = "bom"))
+  }
+  if (length(bytes) == 0L || isTRUE(stringi::stri_enc_isutf8(list(bytes))[1])) {
+    return(list(DeclaredEncoding = "auto", DetectedEncoding = "UTF-8",
+                EncodingConfidence = 1, EncodingUsed = "UTF-8",
+                DetectionMethod = "strict_utf8"))
+  }
+  detected <- stringi::stri_enc_detect(list(bytes))[[1]]
+  if (is.null(detected) || nrow(detected) == 0L) {
+    stop("Unable to detect the source encoding for: ", path)
+  }
+  control_bytes <- as.integer(bytes) >= 0x80L & as.integer(bytes) <= 0x9FL
+  if (any(control_bytes) && any(tolower(detected$Encoding) == "windows-1252")) {
+    chosen <- detected[tolower(detected$Encoding) == "windows-1252", , drop = FALSE][1, ]
+  } else {
+    chosen <- detected[which.max(detected$Confidence), , drop = FALSE]
+  }
+  encoding <- .canonical_encoding_name(chosen$Encoding[1])
+  if (toupper(encoding) %in% c("UTF-16LE", "UTF-16BE", "UTF-32LE", "UTF-32BE")) {
+    stop(sprintf("Detected %s for %s. This encoding requires a custom delimited reader.", encoding, basename(path)))
+  }
+  list(DeclaredEncoding = "auto", DetectedEncoding = encoding,
+       EncodingConfidence = as.numeric(chosen$Confidence[1]),
+       EncodingUsed = encoding, DetectionMethod = "icu")
+}
+
+.resolve_delimited_reader_options <- function(path, reader_options = list()) {
+  if (!is.null(reader_options$.EncodingInfo)) return(reader_options)
+  info <- .resolve_source_encoding(path, reader_options$Encoding %||% "auto")
+  reader_options$.EncodingInfo <- info
+  reader_options$Encoding <- info$EncodingUsed
+  reader_options
+}
+
+.normalize_utf8_vector <- function(x, source_encoding = "UTF-8", context = "character data") {
+  if (!is.character(x)) return(x)
+  from <- .canonical_encoding_name(source_encoding)
+  if (from == "auto") stop("An unresolved 'auto' encoding reached UTF-8 normalization.")
+  converted <- suppressWarnings(iconv(x, from = from, to = "UTF-8", sub = NA_character_))
+  failed <- !is.na(x) & is.na(converted)
+  if (any(failed)) {
+    first <- which(failed)[1]
+    stop(sprintf("UTF-8 conversion failed for %s at value %d using source encoding %s.",
+                 context, first, from))
+  }
+  valid <- is.na(converted) | validUTF8(converted)
+  if (any(!valid)) {
+    stop(sprintf("UTF-8 validation failed for %s after conversion from %s.", context, from))
+  }
+  Encoding(converted[!is.na(converted)]) <- "UTF-8"
+  converted
+}
+
 normalize_character_encoding <- function(df, source_encoding = NULL) {
   if (!data.table::is.data.table(df)) data.table::setDT(df)
-  enc <- if (is.null(source_encoding) || length(source_encoding) == 0L ||
-             is.na(source_encoding[1]) || !nzchar(trimws(source_encoding[1]))) {
-    "UTF-8"
-  } else {
-    trimws(as.character(source_encoding[1]))
-  }
+  enc <- .canonical_encoding_name(source_encoding)
+  if (enc == "auto") enc <- "UTF-8"
   char_cols <- names(df)[vapply(df, is.character, logical(1))]
-  for (col in char_cols) {
-    value <- if (toupper(enc) %in% c("UTF-8", "UTF8")) {
-      enc2utf8(df[[col]])
-    } else {
-      iconv(df[[col]], from = enc, to = "UTF-8", sub = "byte")
-    }
-    data.table::set(df, j = col, value = value)
-  }
+  #### Convert everything first, then mutate the table. A failed conversion ####
+  #### therefore leaves the original bytes intact for an automatic retry.  ####
+  new_names <- .normalize_utf8_vector(names(df), enc, "column names")
+  converted <- lapply(char_cols, function(col) {
+    .normalize_utf8_vector(df[[col]], enc, sprintf("column %s", col))
+  })
+  names(converted) <- char_cols
+  names(df) <- new_names
+  for (col in char_cols) data.table::set(df, j = col, value = converted[[col]])
   df
+}
+
+.detect_character_data_encoding <- function(df) {
+  char_cols <- names(df)[vapply(df, is.character, logical(1))]
+  candidates <- c(list(names(df)), unname(as.list(df[, char_cols, with = FALSE])))
+  raw_values <- list()
+  for (values in candidates) {
+    bad <- !is.na(values) & !validUTF8(values)
+    if (!any(bad)) next
+    selected <- utils::head(values[bad], 100L)
+    raw_values <- c(raw_values, lapply(selected, charToRaw))
+    if (length(raw_values) >= 100L) break
+  }
+  if (length(raw_values) == 0L) return(NULL)
+  bytes <- do.call(c, raw_values)
+  detected <- stringi::stri_enc_detect(list(bytes))[[1]]
+  if (is.null(detected) || nrow(detected) == 0L) return(NULL)
+  control_bytes <- as.integer(bytes) >= 0x80L & as.integer(bytes) <= 0x9FL
+  if (any(control_bytes) && any(tolower(detected$Encoding) == "windows-1252")) {
+    chosen <- detected[tolower(detected$Encoding) == "windows-1252", , drop = FALSE][1, ]
+  } else {
+    chosen <- detected[which.max(detected$Confidence), , drop = FALSE]
+  }
+  list(Encoding = .canonical_encoding_name(chosen$Encoding[1]),
+       Confidence = as.numeric(chosen$Confidence[1]))
+}
+
+.normalize_delimited_frame <- function(df, reader_options, path) {
+  info <- reader_options$.EncodingInfo
+  attempt <- tryCatch(normalize_character_encoding(df, info$EncodingUsed), error = identity)
+  if (!inherits(attempt, "error")) {
+    attr(attempt, "repoquet_encoding_info") <- info
+    return(attempt)
+  }
+  if (!identical(info$DeclaredEncoding, "auto")) stop(attempt)
+  fallback <- .detect_character_data_encoding(df)
+  if (is.null(fallback) || fallback$Encoding == "UTF-8") stop(attempt)
+  converted <- normalize_character_encoding(df, fallback$Encoding)
+  info$DetectedEncoding <- fallback$Encoding
+  info$EncodingUsed <- fallback$Encoding
+  info$EncodingConfidence <- fallback$Confidence
+  info$DetectionMethod <- "content_retry"
+  attr(converted, "repoquet_encoding_info") <- info
+  converted
 }
 
 canonicalize_dataframe_names <- function(df) {
@@ -1691,14 +1843,6 @@ fread_col_classes_positional <- function(col_classes, header) {
 }
 
 delimited_fread_args <- function(reader_options = list(), col_classes = NULL, header = NULL) {
-  encoding <- reader_options$Encoding %||% "UTF-8"
-  fread_encoding <- if (toupper(encoding) %in% c("UTF-8", "UTF8")) {
-    "UTF-8"
-  } else if (toupper(encoding) %in% c("LATIN-1", "LATIN1", "ISO-8859-1")) {
-    "Latin-1"
-  } else {
-    "unknown"
-  }
   sep <- reader_options$Delimiter %||% NULL
   if (identical(sep, "\\t")) sep <- "\t"
   keep_leading_zeros <- reader_options$KeepLeadingZeros %||% TRUE
@@ -1706,7 +1850,10 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
     keep_leading_zeros <- tolower(trimws(keep_leading_zeros[1])) %in% c("true", "t", "yes", "y", "1")
   }
   args <- list(na.strings = reader_options$NAStrings %||% c("NA", "NULL"),
-               encoding = fread_encoding,
+               #### fread parses ASCII delimiters from the original bytes. ####
+               #### Character values are decoded strictly and normalized   ####
+               #### to UTF-8 immediately after parsing.                    ####
+               encoding = "unknown",
                colClasses = fread_col_classes(col_classes, header),
                keepLeadingZeros = isTRUE(keep_leading_zeros))
   if (!is.null(sep) && nzchar(sep)) args$sep <- sep
@@ -1730,10 +1877,43 @@ read_sav_with_options <- function(path, reader_options = list(), ...) {
 }
 
 read_delimited_full <- function(path, col_classes = NULL, reader_options = list()) {
+  reader_options <- .resolve_delimited_reader_options(path, reader_options)
   args <- c(list(file = path), delimited_fread_args(reader_options, col_classes = col_classes))
   df <- do.call(data.table::fread, args)
-  df <- normalize_character_encoding(df, reader_options$Encoding %||% NULL)
+  df <- .normalize_delimited_frame(df, reader_options, path)
   canonicalize_dataframe_names(df)
+}
+
+.read_delimited_header <- function(path, reader_options = list()) {
+  reader_options <- .resolve_delimited_reader_options(path, reader_options)
+  df <- do.call(data.table::fread,
+                c(list(file = path, nrows = 0L), delimited_fread_args(reader_options)))
+  df <- .normalize_delimited_frame(df, reader_options, path)
+  names(df)
+}
+
+.read_delimited_sample <- function(path, reader_options = list()) {
+  reader_options <- .resolve_delimited_reader_options(path, reader_options)
+  df <- do.call(data.table::fread,
+                c(list(file = path, nrows = 100000L), delimited_fread_args(reader_options)))
+  .normalize_delimited_frame(df, reader_options, path)
+}
+
+.count_delimited_rows <- function(path, reader_options = list()) {
+  reader_options <- .resolve_delimited_reader_options(path, reader_options)
+  nrow(do.call(data.table::fread,
+               c(list(file = path, select = 1L), delimited_fread_args(reader_options))))
+}
+
+.read_delimited_chunk <- function(path, offset, n_max, header, col_classes = NULL,
+                                  reader_options = list()) {
+  reader_options <- .resolve_delimited_reader_options(path, reader_options)
+  args <- delimited_fread_args(reader_options)
+  args$colClasses <- fread_col_classes_positional(col_classes, header)
+  df <- do.call(data.table::fread,
+                c(list(file = path, skip = offset + 1L, nrows = n_max,
+                       header = FALSE, col.names = header), args))
+  .normalize_delimited_frame(df, reader_options, path)
 }
 
 register_builtin_file_readers <- function() {
@@ -1743,18 +1923,11 @@ register_builtin_file_readers <- function() {
   for (tp in c("csv", "tsv", "txt", "gz")) {
     register_file_reader(tp,
       read_full   = function(p, col_classes = NULL, reader_options = list()) read_delimited_full(p, col_classes, reader_options),
-      read_header = function(p, reader_options = list()) names(do.call(data.table::fread,
-        c(list(file = p, nrows = 0L), delimited_fread_args(reader_options)))),
-      read_sample = function(p, reader_options = list()) do.call(data.table::fread,
-        c(list(file = p, nrows = 100000L), delimited_fread_args(reader_options))),
-      count_rows  = function(p, reader_options = list()) nrow(do.call(data.table::fread,
-        c(list(file = p, select = 1L), delimited_fread_args(reader_options)))),
-      read_chunk = function(p, offset, n_max, header, col_classes = NULL, reader_options = list()) {
-        args <- delimited_fread_args(reader_options)
-        args$colClasses <- fread_col_classes_positional(col_classes, header)
-        do.call(data.table::fread, c(list(file = p, skip = offset + 1L, nrows = n_max,
-                                          header = FALSE, col.names = header), args))
-      },
+      read_header = function(p, reader_options = list()) .read_delimited_header(p, reader_options),
+      read_sample = function(p, reader_options = list()) .read_delimited_sample(p, reader_options),
+      count_rows  = function(p, reader_options = list()) .count_delimited_rows(p, reader_options),
+      read_chunk = function(p, offset, n_max, header, col_classes = NULL, reader_options = list())
+        .read_delimited_chunk(p, offset, n_max, header, col_classes, reader_options),
       chunkable = TRUE)
   }
   #### Haven family: column types and labels are declared in the header, so ####
@@ -2596,7 +2769,10 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
                               col_classes = col_classes)
       if (!is.data.frame(df_chunk)) stop(sprintf("Reader '%s' read_chunk() did not return a data frame.", reader))
       data.table::setDT(df_chunk)
-      df_chunk <- normalize_character_encoding(df_chunk, reader_options$Encoding %||% NULL)
+      #### Built-in delimited callbacks already return strict UTF-8. This   ####
+      #### second pass enforces that reader contract without reinterpreting ####
+      #### the normalized values as their original source encoding.         ####
+      df_chunk <- normalize_character_encoding(df_chunk, "UTF-8")
       if (!is.null(year_val) && "YEAR" %in% partition_keys) df_chunk <- add_year_if_missing(df_chunk, year_val)
       if (!is.null(all_cols)) df_chunk <- align_columns(df_chunk, all_cols, col_classes,
                                                         max_coerce_na_pct = max_coerce_na_pct)
@@ -2684,9 +2860,7 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
 #' @export
 safe_read_csv <- function(path) {
   tryCatch({
-    df <- data.table::fread(file = path, na.strings = c("NA", "NULL"), encoding = "UTF-8")
-    df <- normalize_character_encoding(df)
-    canonicalize_dataframe_names(df)
+    read_delimited_full(path, reader_options = list(Encoding = "auto"))
   }, error = function(e) data.frame())
 }
 
@@ -4089,6 +4263,9 @@ read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL,
     return(data.frame())
   }
   rd <- get_file_reader(reader)
+  if (tolower(reader) %in% c("csv", "tsv", "txt", "gz")) {
+    reader_options <- .resolve_delimited_reader_options(full_path, reader_options)
+  }
   #### Formats without a chunked implementation are a single full read.     ####
   if (!isTRUE(rd$chunkable)) {
     df <- tryCatch(call_reader(rd, "read_full", full_path, reader_options = reader_options,
@@ -5533,7 +5710,7 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
 #### User-guided schema discovery workflow ####################################
 ################################################################################
 
-.schema_observation_issue_row <- function(row_meta, full_path, message) {
+.schema_observation_issue_row <- function(row_meta, full_path, message, encoding_info = NULL) {
   pspec <- tryCatch(partition_spec_for_row(row_meta), error = function(e) list(keys = NA_character_, values = NA_character_))
   data.table::data.table(
     Database = as.character(row_meta$Database[1]),
@@ -5553,7 +5730,13 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
     InferenceConfidence = "unavailable", ReaderWarning = NA_character_,
     SurveyStatus = "error", SurveyMessage = as.character(message),
     SourceSize = suppressWarnings(as.numeric(file.info(full_path)$size[1])),
-    SourceModifiedUTC = NA_character_, SourceFingerprint = NA_character_
+    SourceModifiedUTC = NA_character_, SourceFingerprint = NA_character_,
+    DeclaredEncoding = encoding_info$DeclaredEncoding %||% NA_character_,
+    DetectedEncoding = encoding_info$DetectedEncoding %||% NA_character_,
+    EncodingConfidence = encoding_info$EncodingConfidence %||% NA_real_,
+    EncodingUsed = encoding_info$EncodingUsed %||% NA_character_,
+    EncodingDetectionMethod = encoding_info$DetectionMethod %||% NA_character_,
+    EncodingValidationStatus = "error"
   )
 }
 
@@ -5611,6 +5794,7 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
 
 .survey_schema_source <- function(row_meta, MasterDBPath, SourceFingerprintMode = "metadata") {
   full_path <- source_path_for_row(row_meta, MasterDBPath)
+  encoding_info <- NULL
   warnings_seen <- character(0)
   capture_warnings <- function(expr) {
     withCallingHandlers(expr, warning = function(w) {
@@ -5622,10 +5806,18 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
     reader_type <- tolower(as.character(row_meta$FileType[1]))
     rd <- get_file_reader(reader_type)
     options <- reader_options_for_row(row_meta)
+    if (reader_type %in% c("csv", "tsv", "txt", "gz")) {
+      options <- .resolve_delimited_reader_options(full_path, options)
+      encoding_info <- options$.EncodingInfo
+    }
     original_header <- capture_warnings(call_reader(rd, "read_header", full_path,
                                                      reader_options = options))
+    header_encoding_info <- attr(original_header, "repoquet_encoding_info")
+    if (!is.null(header_encoding_info)) encoding_info <- header_encoding_info
     sample <- capture_warnings(call_reader(rd, "read_sample", full_path,
                                            reader_options = options))
+    sample_encoding_info <- attr(sample, "repoquet_encoding_info")
+    if (!is.null(sample_encoding_info)) encoding_info <- sample_encoding_info
     sample <- strip_haven(sample)
     data.table::setDT(sample)
     pspec <- partition_spec_for_row(row_meta)
@@ -5645,7 +5837,13 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
       PartitionValue = paste(pspec$values, collapse = ";"),
       SourceSize = fingerprint$size,
       SourceModifiedUTC = fingerprint$mtime_utc,
-      SourceFingerprint = fingerprint$fingerprint
+      SourceFingerprint = fingerprint$fingerprint,
+      DeclaredEncoding = encoding_info$DeclaredEncoding %||% NA_character_,
+      DetectedEncoding = encoding_info$DetectedEncoding %||% NA_character_,
+      EncodingConfidence = encoding_info$EncodingConfidence %||% NA_real_,
+      EncodingUsed = encoding_info$EncodingUsed %||% NA_character_,
+      EncodingDetectionMethod = encoding_info$DetectionMethod %||% NA_character_,
+      EncodingValidationStatus = if (is.null(encoding_info)) NA_character_ else "sample_valid_utf8"
     )
     rows <- lapply(names(sample), function(column) {
       stats <- .schema_observation_stats(sample[[column]])
@@ -5681,7 +5879,7 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
          error = NA_character_)
   }, error = function(e) {
     list(ok = FALSE, path = full_path,
-         data = .schema_observation_issue_row(row_meta, full_path, conditionMessage(e)),
+         data = .schema_observation_issue_row(row_meta, full_path, conditionMessage(e), encoding_info),
          error = conditionMessage(e))
   })
 }
@@ -5837,10 +6035,19 @@ RecommendRepositorySchema <- function(survey = NULL, ObservationPath = NULL) {
     GetSchemaObservations(ObservationPath)
   }
   observations <- data.table::as.data.table(observations)
+  encoding_defaults <- list(DeclaredEncoding = NA_character_, DetectedEncoding = NA_character_,
+                            EncodingConfidence = NA_real_, EncodingUsed = NA_character_,
+                            EncodingDetectionMethod = NA_character_,
+                            EncodingValidationStatus = NA_character_)
+  for (field in names(encoding_defaults)) {
+    if (!field %in% names(observations)) observations[, (field) := encoding_defaults[[field]]]
+  }
   source_issues <- unique(observations[
     SurveyStatus != "ok" | (!is.na(ReaderWarning) & nzchar(ReaderWarning)),
     .(Database, TableName, SourcePath, FileType, PartitionKey, PartitionValue,
-      SurveyStatus, ReaderWarning, SurveyMessage)
+      SurveyStatus, ReaderWarning, SurveyMessage, DeclaredEncoding,
+      DetectedEncoding, EncodingConfidence, EncodingUsed,
+      EncodingDetectionMethod, EncodingValidationStatus)
   ])
   usable <- observations[SurveyStatus == "ok" &
     (ObservationKind == "hive_partition" | !IsPartitionColumn)]

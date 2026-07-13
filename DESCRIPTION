@@ -29,7 +29,8 @@ Imports:
     glue,
     haven,
     jsonlite,
-    openxlsx
+    openxlsx,
+    stringi
 Suggests:
     circlize,
     ComplexHeatmap,
