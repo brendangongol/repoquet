@@ -9,7 +9,7 @@ library(ComplexHeatmap); library(RColorBrewer); library(circlize)
 ################################################################################
 #### Configuration #############################################################
 ################################################################################
-DBSourceFilePath <- "C:/Users/e282219/Downloads/github/CECORC/R/DBFunctions_PackageDevelopmentV18.R"
+DBSourceFilePath <- "C:/Users/e282219/Downloads/github/repoquet/R/repoquet.R"
 source(DBSourceFilePath)
 MasterDBPath <- "X:/National Databases"
 FormattedDBPath <- "X:/Brendan/NationalDatabases/formattedDatabases"
@@ -83,7 +83,7 @@ if (!isTRUE(getOption("CECORC.cleanup_installed"))) {
 #### [WARN] and manifest Status="partial_accepted" instead of failing and    ####
 #### re-reading the whole file on every run. Verified-empty files (declared  ####
 #### and confirmed 0 rows) checkpoint automatically with Status="empty".     ####
-MDT <- openxlsx::read.xlsx("C:/Users/e282219/Downloads/github/CECORC/inst/Misc/DBSetupV2.xlsx", sheet = "Sheet1")
+MDT <- openxlsx::read.xlsx("C:/Users/e282219/Downloads/github/repoquet/inst/extdata/DBSetupV2.xlsx", sheet = "Sheet1")
 
 #### ONE-TIME MIGRATION (2026-07-11): the case-collision preflight found     ####
 #### three tables whose workbook spellings differed only by case, and the    ####
@@ -142,6 +142,10 @@ repository_catalog <- BuildRepositoryCatalog(MDT = MDT,
                                              TableSchemaPath = TableSchemaPath,
                                              StrictSchemaValidation = TRUE,
                                              LogPath = LogPath, RunId = RunId)
+
+Error in build_comprehensive(files = full_paths, base_path = "", suffixes = rep(tbl,  : 
+  Schema header inference failed for 1 readable-path source file(s); first: X:/National Databases/NISBishoy/NIS_2020_2023DX.csv
+[2026-07-13 07:35:07] [LOCK] Released repository lock: X:/Brendan/NationalDatabases/formattedDatabases/.repository.lock
 
 ##############################################################################################
 #### Convert Datasets to parquet files and store in a formal database directory structure ####
