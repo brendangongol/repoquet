@@ -28,7 +28,11 @@ utils::globalVariables(c(
   "PartitionsOnDisk", "Path", "PctOutOfDomain", "PhysicalTable",
   "PhysicalTableName", "Profile", "Raw", "RegistryOverride", "RegistryPattern",
   "RepositoryKey", "Role", "RoleNormalized", "Role_Left", "Role_Right", "Rule",
-  "Severity", "Source", "SourcePath", "Status", "TableName", "ToClass",
+  "Severity", "Source", "SourcePath", "Status", "SurveyStatus", "SurveyMessage",
+  "ReaderWarning", "ObservationKind", "IsPartitionColumn", "ObservedType",
+  "InferenceConfidence", "PartitionKey", "PartitionValue", "ApprovedType",
+  "RecommendedType", "ObservedTypes", "MergeGroup", "RequiresReview", "Decision",
+  "SourceFingerprint", "TableName", "ToClass",
   "TypeSet", "code", "column_name", "database_table", "diagnosis_column",
   "n_keysets", "n_raw", "n_rows", "n_typesets", "pct_of_table"
 ))
@@ -1646,7 +1650,8 @@ parse_reader_options_json <- function(x) {
 reader_options_for_row <- function(row_meta) {
   out <- if ("ReaderOptions" %in% names(row_meta)) parse_reader_options_json(row_meta$ReaderOptions[1]) else list()
   fields <- c("Encoding", "Delimiter", "Quote", "NAStrings", "DecimalMark",
-              "DateFormat", "DateTimeFormat", "Timezone", "ReadMode")
+              "DateFormat", "DateTimeFormat", "Timezone", "ReadMode",
+              "KeepLeadingZeros")
   for (field in fields) {
     if (!field %in% names(row_meta)) next
     value <- row_meta[[field]][1]
@@ -1696,9 +1701,14 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
   }
   sep <- reader_options$Delimiter %||% NULL
   if (identical(sep, "\\t")) sep <- "\t"
+  keep_leading_zeros <- reader_options$KeepLeadingZeros %||% TRUE
+  if (is.character(keep_leading_zeros)) {
+    keep_leading_zeros <- tolower(trimws(keep_leading_zeros[1])) %in% c("true", "t", "yes", "y", "1")
+  }
   args <- list(na.strings = reader_options$NAStrings %||% c("NA", "NULL"),
                encoding = fread_encoding,
-               colClasses = fread_col_classes(col_classes, header))
+               colClasses = fread_col_classes(col_classes, header),
+               keepLeadingZeros = isTRUE(keep_leading_zeros))
   if (!is.null(sep) && nzchar(sep)) args$sep <- sep
   if (!is.null(reader_options$Quote)) args$quote <- as.character(reader_options$Quote)
   if (!is.null(reader_options$DecimalMark)) args$dec <- as.character(reader_options$DecimalMark)
@@ -1916,7 +1926,7 @@ align_columns <- function(df, all_cols, comprehensive_sample = NULL, max_coerce_
 # Run independent metadata scans in parallel, then retry only worker failures
 # in the main R process. This protects mapped/network drives that are visible
 # to the interactive session but not inherited by multisession workers.
-parallel_scan_with_serial_retry <- function(items, scan_one, n_workers = 1,
+.parallel_scan_with_serial_retry <- function(items, scan_one, n_workers = 1,
                                             future_packages = character(),
                                             is_failure = is.null,
                                             context = "source metadata scan") {
@@ -1989,7 +1999,7 @@ build_col_classes <- function(files, base_path, n_workers = 1, reader = "sav",
       list(ok = TRUE, path = p, classes = cls, error = NA_character_)
     }, error = function(e) list(ok = FALSE, path = p, classes = character(0), error = conditionMessage(e)))
   }
-  all_samples <- parallel_scan_with_serial_retry(
+  all_samples <- .parallel_scan_with_serial_retry(
     seq_along(all_paths), scan_one, n_workers = n_workers,
     future_packages = c("data.table", "haven"),
     is_failure = function(x) !is.list(x) || !isTRUE(x$ok),
@@ -2751,7 +2761,7 @@ build_comprehensive <- function(files, base_path, suffixes, uni_suffixes, reader
     list(ok = FALSE, path = all_paths[i], header = character(0),
          error = conditionMessage(e))
   })
-  header_results <- parallel_scan_with_serial_retry(
+  header_results <- .parallel_scan_with_serial_retry(
     seq_along(all_paths), scan_one, n_workers = n_workers,
     future_packages = c("haven", "data.table"),
     is_failure = function(x) !is.list(x) || !isTRUE(x$ok),
@@ -5247,6 +5257,8 @@ RepositoryInitialize <- function(FormattedDBPath, ParquetBasePath = file.path(Fo
                                  LogPath = file.path(FormattedDBPath, "Logs", "load_log.txt"),
                                  SchemaRegistryPath = file.path(FormattedDBPath, "Schema", "SchemaRegistry.xlsx"),
                                  TableSchemaPath = file.path(FormattedDBPath, "Schema", "TableSchemas.xlsx"),
+                                 SchemaObservationPath = file.path(FormattedDBPath, "Schema", "SchemaObservations.parquet"),
+                                 SchemaReviewPath = file.path(FormattedDBPath, "Schema", "SchemaReview.xlsx"),
                                  ManifestPath = NULL,
                                  DataContractPath = file.path(FormattedDBPath, "Schema", "DataContracts.xlsx"),
                                  create = TRUE, profile = c("hcup", "generic")) {
@@ -5264,6 +5276,8 @@ RepositoryInitialize <- function(FormattedDBPath, ParquetBasePath = file.path(Fo
     SchemaDir = dirname(SchemaRegistryPath),
     SchemaRegistryPath = SchemaRegistryPath,
     TableSchemaPath = TableSchemaPath,
+    SchemaObservationPath = SchemaObservationPath,
+    SchemaReviewPath = SchemaReviewPath,
     DataContractPath = DataContractPath,
     ManifestDir = dirname(ManifestPath),
     ManifestPath = ManifestPath,
@@ -5513,6 +5527,544 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
   }
   if (isTRUE(strict) && any(issues$Severity == "error")) stop("MDT preflight validation failed. Review logged [PREFLIGHT ERROR] messages.")
   invisible(issues)
+}
+
+################################################################################
+#### User-guided schema discovery workflow ####################################
+################################################################################
+
+.schema_observation_issue_row <- function(row_meta, full_path, message) {
+  pspec <- tryCatch(partition_spec_for_row(row_meta), error = function(e) list(keys = NA_character_, values = NA_character_))
+  data.table::data.table(
+    Database = as.character(row_meta$Database[1]),
+    TableName = as.character(row_meta$TableName[1]),
+    DuckDBTable = repository_table_name_for_row(row_meta),
+    SourcePath = normalizePath(full_path, winslash = "/", mustWork = FALSE),
+    FileType = tolower(as.character(row_meta$FileType[1])),
+    PartitionKey = paste(pspec$keys, collapse = ";"),
+    PartitionValue = paste(pspec$values, collapse = ";"),
+    ObservationKind = "source_error",
+    Column = NA_character_, OriginalColumn = NA_character_,
+    ObservedType = NA_character_, IsPartitionColumn = FALSE,
+    RowsSampled = NA_real_, NonMissingCount = NA_real_, MissingPercent = NA_real_,
+    IntegerLike = NA, FractionalCount = NA_real_, LeadingZeroCount = NA_real_,
+    NumericParseFailureCount = NA_real_, Minimum = NA_character_, Maximum = NA_character_,
+    MaximumTextLength = NA_real_, PrecisionRisk = NA,
+    InferenceConfidence = "unavailable", ReaderWarning = NA_character_,
+    SurveyStatus = "error", SurveyMessage = as.character(message),
+    SourceSize = suppressWarnings(as.numeric(file.info(full_path)$size[1])),
+    SourceModifiedUTC = NA_character_, SourceFingerprint = NA_character_
+  )
+}
+
+.schema_observation_stats <- function(x) {
+  type <- if (inherits(x, "integer64")) "int64" else normalize_type_name(class(x)[1])
+  present <- !is.na(x)
+  n_present <- sum(present)
+  n_total <- length(x)
+  fractional <- NA_real_
+  integer_like <- NA
+  precision_risk <- FALSE
+  minimum <- maximum <- NA_character_
+  leading_zero <- numeric_parse_failures <- 0
+  max_text <- NA_real_
+
+  if (n_present > 0L && type %in% c("logical", "integer", "int64", "numeric")) {
+    values <- suppressWarnings(as.numeric(x[present]))
+    finite <- values[is.finite(values)]
+    if (length(finite) > 0L) {
+      fractional <- if (type == "numeric") sum(abs(finite - round(finite)) > 1e-9) else 0
+      integer_like <- isTRUE(fractional == 0)
+      precision_risk <- any(abs(finite) > 2^53)
+      minimum <- format(min(finite), scientific = FALSE, trim = TRUE, digits = 22)
+      maximum <- format(max(finite), scientific = FALSE, trim = TRUE, digits = 22)
+    }
+  } else if (n_present > 0L && type %in% c("Date", "POSIXct", "time", "duration")) {
+    minimum <- as.character(min(x[present], na.rm = TRUE))[1]
+    maximum <- as.character(max(x[present], na.rm = TRUE))[1]
+  } else if (n_present > 0L && type == "character") {
+    values <- trimws(as.character(x[present]))
+    values <- values[nzchar(values)]
+    if (length(values) > 0L) {
+      leading_zero <- sum(grepl("^[+-]?0[0-9]+$", values))
+      parsed <- suppressWarnings(as.numeric(values))
+      numeric_parse_failures <- sum(is.na(parsed))
+      max_text <- max(nchar(values, type = "chars"))
+    }
+  }
+
+  list(
+    ObservedType = type,
+    RowsSampled = as.numeric(n_total),
+    NonMissingCount = as.numeric(n_present),
+    MissingPercent = if (n_total == 0L) NA_real_ else 100 * (n_total - n_present) / n_total,
+    IntegerLike = integer_like,
+    FractionalCount = fractional,
+    LeadingZeroCount = as.numeric(leading_zero),
+    NumericParseFailureCount = as.numeric(numeric_parse_failures),
+    Minimum = minimum,
+    Maximum = maximum,
+    MaximumTextLength = max_text,
+    PrecisionRisk = precision_risk
+  )
+}
+
+.survey_schema_source <- function(row_meta, MasterDBPath, SourceFingerprintMode = "metadata") {
+  full_path <- source_path_for_row(row_meta, MasterDBPath)
+  warnings_seen <- character(0)
+  capture_warnings <- function(expr) {
+    withCallingHandlers(expr, warning = function(w) {
+      warnings_seen <<- unique(c(warnings_seen, conditionMessage(w)))
+      invokeRestart("muffleWarning")
+    })
+  }
+  tryCatch({
+    reader_type <- tolower(as.character(row_meta$FileType[1]))
+    rd <- get_file_reader(reader_type)
+    options <- reader_options_for_row(row_meta)
+    original_header <- capture_warnings(call_reader(rd, "read_header", full_path,
+                                                     reader_options = options))
+    sample <- capture_warnings(call_reader(rd, "read_sample", full_path,
+                                           reader_options = options))
+    sample <- strip_haven(sample)
+    data.table::setDT(sample)
+    pspec <- partition_spec_for_row(row_meta)
+    ptypes <- partition_types_for_row(row_meta)
+    fingerprint <- source_fingerprint(full_path, mode = SourceFingerprintMode)
+    original_header <- as.character(original_header)
+    header_map <- split(original_header, canonical_colnames(original_header))
+    confidence <- if (reader_type %in% c("csv", "tsv", "txt", "gz")) "sampled" else "declared_or_stored"
+    warning_text <- if (length(warnings_seen) == 0L) NA_character_ else paste(warnings_seen, collapse = " | ")
+    base <- list(
+      Database = as.character(row_meta$Database[1]),
+      TableName = as.character(row_meta$TableName[1]),
+      DuckDBTable = repository_table_name_for_row(row_meta),
+      SourcePath = normalizePath(full_path, winslash = "/", mustWork = FALSE),
+      FileType = reader_type,
+      PartitionKey = paste(pspec$keys, collapse = ";"),
+      PartitionValue = paste(pspec$values, collapse = ";"),
+      SourceSize = fingerprint$size,
+      SourceModifiedUTC = fingerprint$mtime_utc,
+      SourceFingerprint = fingerprint$fingerprint
+    )
+    rows <- lapply(names(sample), function(column) {
+      stats <- .schema_observation_stats(sample[[column]])
+      original <- header_map[[column]]
+      data.table::as.data.table(c(base, list(
+        ObservationKind = "source_column",
+        Column = column,
+        OriginalColumn = if (is.null(original)) column else paste(unique(original), collapse = " | "),
+        IsPartitionColumn = column %in% canonical_colnames(pspec$keys),
+        InferenceConfidence = confidence,
+        ReaderWarning = warning_text,
+        SurveyStatus = "ok",
+        SurveyMessage = NA_character_
+      ), stats))
+    })
+    #### Hive partition columns are virtual schema members even when the     ####
+    #### physical source column is absent or intentionally removed.          ####
+    for (j in seq_along(pspec$keys)) {
+      rows[[length(rows) + 1L]] <- data.table::as.data.table(c(base, list(
+        ObservationKind = "hive_partition",
+        Column = canonical_colnames(pspec$keys[j]), OriginalColumn = NA_character_,
+        ObservedType = normalize_type_name(ptypes[j]), IsPartitionColumn = TRUE,
+        RowsSampled = as.numeric(nrow(sample)), NonMissingCount = as.numeric(nrow(sample)),
+        MissingPercent = 0, IntegerLike = normalize_type_name(ptypes[j]) %in% c("integer", "int64"),
+        FractionalCount = 0, LeadingZeroCount = 0, NumericParseFailureCount = 0,
+        Minimum = NA_character_, Maximum = NA_character_, MaximumTextLength = NA_real_,
+        PrecisionRisk = FALSE, InferenceConfidence = "configured_partition",
+        ReaderWarning = warning_text, SurveyStatus = "ok", SurveyMessage = NA_character_
+      )))
+    }
+    list(ok = TRUE, path = full_path,
+         data = data.table::rbindlist(rows, fill = TRUE),
+         error = NA_character_)
+  }, error = function(e) {
+    list(ok = FALSE, path = full_path,
+         data = .schema_observation_issue_row(row_meta, full_path, conditionMessage(e)),
+         error = conditionMessage(e))
+  })
+}
+
+#' Survey source schemas without applying domain policies
+#'
+#' Reads every selected source through its registered reader, records one
+#' metadata row per source column and virtual partition column, and stores the
+#' detailed evidence as Parquet. No registry override or cross-table name rule
+#' is applied at this stage.
+#' @export
+SurveyRepositorySchema <- function(MDT, MasterDBPath, ObservationPath,
+                                   DBLoad = NULL, n_workers = 1,
+                                   SourceFingerprintMode = c("metadata", "sha256", "none"),
+                                   StrictReaders = FALSE, LogPath = NULL, RunId = NULL) {
+  SourceFingerprintMode <- match.arg(SourceFingerprintMode)
+  if (length(ObservationPath) != 1L || is.na(ObservationPath) || !nzchar(trimws(ObservationPath))) {
+    stop("ObservationPath must be one non-empty Parquet file path.")
+  }
+  if (tolower(tools::file_ext(ObservationPath)) != "parquet") {
+    stop("ObservationPath must end in .parquet.")
+  }
+  previous_run <- if (!is.null(LogPath) || !is.null(RunId)) begin_repository_run(LogPath, RunId) else NULL
+  if (!is.null(previous_run)) on.exit(restore_repository_run(previous_run), add = TRUE)
+  required <- c("Database", "MDBDir", "Path", "TableName", "FileType")
+  missing <- setdiff(required, names(MDT))
+  if (length(missing) > 0L) stop("Schema survey requires MDT columns: ", paste(missing, collapse = ", "))
+  MDTdt <- data.table::as.data.table(MDT)
+  if (!is.null(DBLoad)) MDTdt <- MDTdt[as.character(Database) %in% as.character(DBLoad)]
+  if (nrow(MDTdt) == 0L) stop("Schema survey has no MDT rows to inspect.")
+  scan_one <- function(i) .survey_schema_source(MDTdt[i, ], MasterDBPath, SourceFingerprintMode)
+  results <- .parallel_scan_with_serial_retry(
+    seq_len(nrow(MDTdt)), scan_one, n_workers = n_workers,
+    future_packages = c("data.table", "haven", "arrow", "bit64", "openxlsx"),
+    is_failure = function(x) !is.list(x) || !isTRUE(x$ok),
+    context = "repository schema survey"
+  )
+  observations <- data.table::rbindlist(lapply(results, `[[`, "data"), fill = TRUE)
+  dir.create(dirname(ObservationPath), recursive = TRUE, showWarnings = FALSE)
+  write_arrow_table_safely(arrow::as_arrow_table(observations), ObservationPath)
+  failed <- vapply(results, function(x) !isTRUE(x$ok), logical(1))
+  n_warnings <- sum(!is.na(observations$ReaderWarning) & nzchar(observations$ReaderWarning))
+  summary <- data.table::data.table(
+    Sources = nrow(MDTdt), ObservationRows = nrow(observations),
+    Columns = data.table::uniqueN(observations[SurveyStatus == "ok"]$Column, na.rm = TRUE),
+    FailedSources = sum(failed), WarningRows = n_warnings,
+    ObservationPath = normalizePath(ObservationPath, winslash = "/", mustWork = FALSE)
+  )
+  log_msg(sprintf("[SCHEMA SURVEY] %d source(s), %d observation row(s), %d failed source(s); wrote %s",
+                  summary$Sources, summary$ObservationRows, summary$FailedSources, ObservationPath))
+  out <- structure(list(observations = observations, summary = summary,
+                        ObservationPath = ObservationPath), class = "RepositorySchemaSurvey")
+  if (isTRUE(StrictReaders) && any(failed)) {
+    stop(sprintf("Schema survey failed for %d source file(s). Detailed error rows were written to %s.",
+                 sum(failed), ObservationPath))
+  }
+  out
+}
+
+#' Retrieve detailed schema observations from the internal Parquet store
+#' @export
+GetSchemaObservations <- function(ObservationPath, Database = NULL, TableName = NULL,
+                                  Column = NULL, IssuesOnly = FALSE, Limit = NULL) {
+  if (!file.exists(ObservationPath)) stop("Schema observation Parquet file not found: ", ObservationPath)
+  con <- DBI::dbConnect(duckdb::duckdb())
+  on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
+  sql <- sprintf("SELECT * FROM read_parquet(%s)",
+                 quote_duckdb_string(normalizePath(ObservationPath, winslash = "/", mustWork = TRUE)))
+  where <- character(0)
+  if (!is.null(Database)) where <- c(where, sprintf("%s = %s", quote_duckdb_ident("Database"), quote_duckdb_string(Database[1])))
+  if (!is.null(TableName)) where <- c(where, sprintf("%s = %s", quote_duckdb_ident("TableName"), quote_duckdb_string(TableName[1])))
+  if (!is.null(Column)) where <- c(where, sprintf("%s = %s", quote_duckdb_ident("Column"), quote_duckdb_string(canonical_colnames(Column[1]))))
+  if (isTRUE(IssuesOnly)) {
+    where <- c(where, sprintf("(%s <> 'ok' OR COALESCE(%s, '') <> '')",
+                              quote_duckdb_ident("SurveyStatus"), quote_duckdb_ident("ReaderWarning")))
+  }
+  if (length(where) > 0L) sql <- paste(sql, "WHERE", paste(where, collapse = " AND "))
+  order_columns <- vapply(c("Database", "TableName", "Column", "PartitionValue", "SourcePath"),
+                          quote_duckdb_ident, character(1))
+  sql <- paste(sql, "ORDER BY", paste(order_columns, collapse = ", "))
+  if (!is.null(Limit)) {
+    limit <- suppressWarnings(as.integer(Limit[1]))
+    if (is.na(limit) || limit < 1L) stop("Limit must be a positive integer.")
+    sql <- paste(sql, "LIMIT", limit)
+  }
+  data.table::as.data.table(DBI::dbGetQuery(con, sql))
+}
+
+.schema_type_history <- function(rows) {
+  h <- unique(rows[, .(PartitionKey, PartitionValue, ObservedType, InferenceConfidence)])
+  numeric_partition <- suppressWarnings(as.numeric(h$PartitionValue))
+  if (all(!is.na(numeric_partition))) h <- h[order(numeric_partition, ObservedType)] else h <- h[order(PartitionValue, ObservedType)]
+  paste(sprintf("%s=%s: %s", h$PartitionKey, h$PartitionValue, h$ObservedType), collapse = "; ")
+}
+
+.schema_recommendation_for_group <- function(rows) {
+  types <- sort(unique(rows$ObservedType[!is.na(rows$ObservedType) & rows$ObservedType != "unknown"]))
+  has_warning <- any(!is.na(rows$ReaderWarning) & nzchar(rows$ReaderWarning))
+  risk <- "Lossless"
+  if (length(types) == 0L) {
+    recommended <- "character"; risk <- "Review"
+    reason <- "No non-missing type evidence was available."
+  } else if (length(types) == 1L) {
+    recommended <- types[1]
+    reason <- sprintf("Observed consistently as %s.", recommended)
+  } else if (all(types %in% c("integer", "int64"))) {
+    recommended <- "int64"
+    reason <- "Integer widths differ; int64 preserves every observed integer."
+  } else if (all(types %in% c("logical", "integer"))) {
+    recommended <- "integer"
+    reason <- "Logical and integer values can be represented without value loss as integer."
+  } else if (all(types %in% c("logical", "integer", "int64", "numeric"))) {
+    precision_risk <- any(rows$PrecisionRisk %in% TRUE, na.rm = TRUE)
+    fractional <- sum(rows$FractionalCount, na.rm = TRUE)
+    if (fractional == 0 && "int64" %in% types && !precision_risk) {
+      recommended <- "int64"
+      reason <- "All sampled numeric values are integral; int64 avoids floating-point identifiers."
+      risk <- "Review"
+    } else if (!precision_risk) {
+      recommended <- "numeric"
+      reason <- "Numeric storage safely accommodates the observed integer and fractional values."
+    } else {
+      recommended <- "character"
+      reason <- "Observed magnitudes can exceed exact floating-point integer precision."
+      risk <- "Review"
+    }
+  } else if ("character" %in% types) {
+    recommended <- "character"
+    reason <- "Character storage preserves mixed textual and numeric representations."
+    risk <- "Review"
+  } else if (all(types %in% c("Date", "POSIXct"))) {
+    recommended <- "POSIXct"
+    reason <- "Datetime storage preserves both dates and timestamps."
+    risk <- "Review"
+  } else {
+    recommended <- "character"
+    reason <- sprintf("No automatic lossless promotion exists for: %s.", paste(types, collapse = ", "))
+    risk <- "Potential loss"
+  }
+  if (has_warning && risk == "Lossless") risk <- "Review"
+  if (has_warning) reason <- paste(reason, "Reader warnings require confirmation.")
+  list(RecommendedType = normalize_type_name(recommended), Risk = risk,
+       Reason = reason, RequiresReview = risk != "Lossless")
+}
+
+#' Recommend canonical table schemas from observed evidence
+#' @export
+RecommendRepositorySchema <- function(survey = NULL, ObservationPath = NULL) {
+  observations <- if (inherits(survey, "RepositorySchemaSurvey")) {
+    data.table::copy(survey$observations)
+  } else {
+    if (is.null(ObservationPath)) stop("Provide survey or ObservationPath.")
+    GetSchemaObservations(ObservationPath)
+  }
+  observations <- data.table::as.data.table(observations)
+  source_issues <- unique(observations[
+    SurveyStatus != "ok" | (!is.na(ReaderWarning) & nzchar(ReaderWarning)),
+    .(Database, TableName, SourcePath, FileType, PartitionKey, PartitionValue,
+      SurveyStatus, ReaderWarning, SurveyMessage)
+  ])
+  usable <- observations[SurveyStatus == "ok" &
+    (ObservationKind == "hive_partition" | !IsPartitionColumn)]
+  if (nrow(usable) == 0L) stop("Schema survey contains no usable column observations.")
+  split_key <- paste(usable$Database, usable$TableName, usable$DuckDBTable,
+                     usable$Column, sep = "\r")
+  groups <- split(usable, split_key)
+  registry <- data.table::rbindlist(lapply(groups, function(rows) {
+    recommendation <- .schema_recommendation_for_group(rows)
+    observed_types <- paste(sort(unique(rows$ObservedType)), collapse = ",")
+    role <- if (all(rows$ObservationKind == "hive_partition")) "partition" else "data"
+    signature_text <- paste(sort(unique(paste(rows$SourceFingerprint, rows$PartitionValue,
+                                               rows$ObservedType, sep = "|"))), collapse = "||")
+    data.table::data.table(
+      Database = rows$Database[1], TableName = rows$TableName[1],
+      DuckDBTable = rows$DuckDBTable[1], Column = rows$Column[1],
+      ObservedTypes = observed_types, TypeHistory = .schema_type_history(rows),
+      RecommendedType = recommendation$RecommendedType,
+      ApprovedType = recommendation$RecommendedType,
+      Risk = recommendation$Risk, RecommendationReason = recommendation$Reason,
+      Confidence = paste(sort(unique(rows$InferenceConfidence)), collapse = ","),
+      Role = role, MergeGroup = "", RequiresReview = recommendation$RequiresReview,
+      Decision = if (recommendation$RequiresReview) "" else "Auto-approved",
+      UserNotes = "", ObservationSignature = digest::digest(signature_text, algo = "sha256", serialize = FALSE)
+    )
+  }), fill = TRUE)
+  data.table::setorder(registry, Database, TableName, Column)
+  history <- unique(usable[, .(Database, TableName, DuckDBTable, Column,
+                               PartitionKey, PartitionValue, ObservedType,
+                               InferenceConfidence, ReaderWarning)])
+  type_counts <- history[, .(NTypes = data.table::uniqueN(ObservedType)),
+                         by = .(Database, TableName, Column)]
+  history <- merge(history, type_counts, by = c("Database", "TableName", "Column"), all.x = TRUE)
+  history <- history[NTypes > 1L | (!is.na(ReaderWarning) & nzchar(ReaderWarning))]
+  summary <- data.table::data.table(
+    Columns = nrow(registry), AutoApproved = sum(!registry$RequiresReview),
+    NeedsReview = sum(registry$RequiresReview), SourceIssues = nrow(source_issues)
+  )
+  structure(list(registry = registry, history = history, source_issues = source_issues,
+                 summary = summary,
+                 ObservationPath = ObservationPath %||% survey$ObservationPath),
+            class = "RepositorySchemaProposal")
+}
+
+.preserve_schema_review_decisions <- function(registry, SchemaReviewPath) {
+  if (!file.exists(SchemaReviewPath) || !is_excel_workbook_path(SchemaReviewPath)) return(registry)
+  sheets <- tryCatch(openxlsx::getSheetNames(SchemaReviewPath), error = function(e) character(0))
+  old_parts <- lapply(intersect(c("Review", "Registry"), sheets), function(sheet) {
+    tryCatch(data.table::as.data.table(openxlsx::read.xlsx(SchemaReviewPath, sheet = sheet)), error = function(e) NULL)
+  })
+  old <- data.table::rbindlist(Filter(Negate(is.null), old_parts), fill = TRUE)
+  if (nrow(old) == 0L || !all(c("Database", "TableName", "Column", "ObservationSignature") %in% names(old))) return(registry)
+  old <- old[!duplicated(paste(Database, TableName, Column, sep = "\r"))]
+  current_key <- paste(registry$Database, registry$TableName, registry$Column, sep = "\r")
+  old_key <- paste(old$Database, old$TableName, old$Column, sep = "\r")
+  idx <- match(current_key, old_key)
+  same <- !is.na(idx) & registry$ObservationSignature == old$ObservationSignature[idx]
+  fields <- intersect(c("ApprovedType", "Decision", "Role", "MergeGroup", "UserNotes"), names(old))
+  for (field in fields) registry[same, (field) := old[[field]][idx[same]]]
+  registry
+}
+
+#' Write a compact, user-reviewable schema proposal workbook
+#' @export
+WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = TRUE) {
+  if (!inherits(proposal, "RepositorySchemaProposal")) stop("proposal must come from RecommendRepositorySchema().")
+  registry <- data.table::copy(proposal$registry)
+  if (isTRUE(PreserveDecisions)) registry <- .preserve_schema_review_decisions(registry, SchemaReviewPath)
+  review <- registry[RequiresReview == TRUE]
+  settings <- data.table::data.table(
+    Setting = c("ObservationPath", "Columns", "AutoApproved", "NeedsReview", "SourceIssues", "GeneratedUTC"),
+    Value = c(proposal$ObservationPath %||% "", proposal$summary$Columns,
+              proposal$summary$AutoApproved, proposal$summary$NeedsReview,
+              proposal$summary$SourceIssues,
+              format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"))
+  )
+  dir.create(dirname(SchemaReviewPath), recursive = TRUE, showWarnings = FALSE)
+  tmp <- tempfile(pattern = paste0(basename(SchemaReviewPath), ".tmp_"),
+                  tmpdir = dirname(SchemaReviewPath), fileext = ".xlsx")
+  wb <- openxlsx::createWorkbook()
+  sheets <- list(Review = review, Registry = registry, History = proposal$history,
+                 Settings = settings)
+  if (nrow(proposal$source_issues) > 0L) sheets$SourceIssues <- proposal$source_issues
+  header_style <- openxlsx::createStyle(fgFill = "#1F4E78", fontColour = "#FFFFFF",
+                                        textDecoration = "bold", border = "bottom")
+  for (sheet in names(sheets)) {
+    openxlsx::addWorksheet(wb, sheet)
+    value <- data.table::as.data.table(sheets[[sheet]])
+    if (nrow(value) > 0L) {
+      openxlsx::writeDataTable(wb, sheet, value, tableStyle = "TableStyleMedium2")
+    } else if (ncol(value) > 0L) {
+      #### openxlsx cannot create an Excel table with zero data rows. Keep ####
+      #### the sheet useful by writing its headers as ordinary cells.      ####
+      openxlsx::writeData(wb, sheet, value, colNames = TRUE)
+    }
+    openxlsx::freezePane(wb, sheet, firstRow = TRUE)
+    if (ncol(value) > 0L) openxlsx::addStyle(wb, sheet, header_style, rows = 1, cols = seq_len(ncol(value)), gridExpand = TRUE)
+    widths <- pmin(45, pmax(12, nchar(names(value)) + 2))
+    if (ncol(value) > 0L) openxlsx::setColWidths(wb, sheet, cols = seq_len(ncol(value)), widths = widths)
+  }
+  if (nrow(review) > 0L) {
+    type_col <- match("ApprovedType", names(review))
+    decision_col <- match("Decision", names(review))
+    openxlsx::dataValidation(wb, "Review", cols = type_col, rows = 2:(nrow(review) + 1L),
+                             type = "list", value = paste0('"', paste(setdiff(allowed_canonical_types(), "decimal(p,s)"), collapse = ","), '"'))
+    openxlsx::dataValidation(wb, "Review", cols = decision_col, rows = 2:(nrow(review) + 1L),
+                             type = "list", value = '"Accept,Override"')
+    risk_col <- match("Risk", names(review))
+    openxlsx::conditionalFormatting(wb, "Review", cols = risk_col, rows = 2:(nrow(review) + 1L),
+                                    rule = '=="Potential loss"', style = openxlsx::createStyle(fgFill = "#F4CCCC"))
+    openxlsx::conditionalFormatting(wb, "Review", cols = risk_col, rows = 2:(nrow(review) + 1L),
+                                    rule = '=="Review"', style = openxlsx::createStyle(fgFill = "#FFF2CC"))
+  }
+  openxlsx::saveWorkbook(wb, tmp, overwrite = TRUE)
+  replace_file_safely(tmp, SchemaReviewPath)
+  log_msg(sprintf("[SCHEMA PROPOSAL] Wrote %s (%d columns; %d require review).",
+                  SchemaReviewPath, nrow(registry), nrow(review)))
+  invisible(SchemaReviewPath)
+}
+
+.overlay_schema_review <- function(registry, review) {
+  if (is.null(review) || nrow(review) == 0L) return(registry)
+  key <- function(x) paste(x$Database, x$TableName, x$Column, sep = "\r")
+  idx <- match(key(registry), key(review))
+  hit <- which(!is.na(idx))
+  for (field in intersect(c("ApprovedType", "Decision", "Role", "MergeGroup", "UserNotes"), names(review))) {
+    registry[hit, (field) := review[[field]][idx[hit]]]
+  }
+  registry
+}
+
+#' Finalize a reviewed schema proposal into the writer catalog
+#' @export
+FinalizeRepositorySchema <- function(SchemaReviewPath, TableSchemaPath, strict = TRUE) {
+  if (!file.exists(SchemaReviewPath)) stop("Schema review workbook not found: ", SchemaReviewPath)
+  sheets <- openxlsx::getSheetNames(SchemaReviewPath)
+  if (!"Registry" %in% sheets) stop("Schema review workbook is missing the Registry sheet.")
+  registry <- data.table::as.data.table(openxlsx::read.xlsx(SchemaReviewPath, sheet = "Registry"))
+  review <- if ("Review" %in% sheets) data.table::as.data.table(openxlsx::read.xlsx(SchemaReviewPath, sheet = "Review")) else NULL
+  required <- c("Database", "TableName", "DuckDBTable", "Column", "ObservedTypes",
+                "RecommendedType", "ApprovedType", "RequiresReview", "Decision", "Role", "MergeGroup")
+  missing <- setdiff(required, names(registry))
+  if (length(missing) > 0L) {
+    stop("Schema review Registry sheet is missing required columns: ", paste(missing, collapse = ", "))
+  }
+  registry <- .overlay_schema_review(registry, review)
+  parse_review_flag <- function(x) {
+    text <- tolower(trimws(as.character(x)))
+    out <- rep(NA, length(text))
+    out[text %in% c("true", "t", "yes", "y", "1")] <- TRUE
+    out[text %in% c("false", "f", "no", "n", "0")] <- FALSE
+    out
+  }
+  needs_review <- parse_review_flag(registry$RequiresReview)
+  if (anyNA(needs_review)) stop("RequiresReview contains blank or invalid logical values.")
+  decision <- tolower(trimws(as.character(registry$Decision)))
+  unresolved <- needs_review & !decision %in% c("accept", "override")
+  if (any(unresolved)) {
+    message <- sprintf("%d schema decision(s) remain unresolved in the Review sheet.", sum(unresolved))
+    if (isTRUE(strict)) stop(message) else log_msg(paste("[SCHEMA REVIEW WARNING]", message))
+  }
+  raw_approved <- trimws(as.character(registry$ApprovedType))
+  if (any(is.na(raw_approved) | !nzchar(raw_approved))) {
+    stop("ApprovedType contains blank values; choose a canonical type before finalizing.")
+  }
+  approved <- vapply(raw_approved, normalize_type_name, character(1))
+  invalid <- !is_allowed_canonical_type(approved)
+  if (any(invalid)) stop("Invalid ApprovedType value(s): ", paste(unique(registry$ApprovedType[invalid]), collapse = ", "))
+  recommended <- vapply(registry$RecommendedType, normalize_type_name, character(1))
+  changed_without_override <- approved != recommended & decision != "override"
+  if (any(changed_without_override)) stop("Rows whose ApprovedType differs from RecommendedType must use Decision='Override'.")
+  if ("SourceIssues" %in% sheets) {
+    source_issues <- data.table::as.data.table(openxlsx::read.xlsx(SchemaReviewPath, sheet = "SourceIssues"))
+    source_errors <- tolower(as.character(source_issues$SurveyStatus)) == "error"
+    if (any(source_errors) && isTRUE(strict)) stop(sprintf("Schema survey contains %d unresolved source error(s); repair and resurvey before finalizing.", sum(source_errors)))
+  }
+  registry[, ApprovedType := approved]
+  merge_group <- toupper(trimws(as.character(registry$MergeGroup)))
+  registry[, MergeGroup := merge_group]
+  declared <- registry[!is.na(MergeGroup) & nzchar(MergeGroup)]
+  if (nrow(declared) > 0L) {
+    conflicts <- declared[, .(NTypes = data.table::uniqueN(ApprovedType),
+                              Types = paste(sort(unique(ApprovedType)), collapse = ",")), by = MergeGroup][NTypes > 1L]
+    if (nrow(conflicts) > 0L) stop("Approved merge groups contain incompatible types: ",
+                                    paste(sprintf("%s (%s)", conflicts$MergeGroup, conflicts$Types), collapse = "; "))
+  }
+  table_schema <- registry[, .(
+    Database, TableName, DuckDBTable, Column,
+    CanonicalType = ApprovedType,
+    InferredType = ObservedTypes,
+    RegistryOverride = ApprovedType != RecommendedType,
+    Role = ifelse(is.na(Role) | !nzchar(Role), "data", Role),
+    RegistryPattern = NA_character_,
+    Source = ifelse(tolower(Decision) == "auto-approved", "auto_approved", "user_approved")
+  )]
+  write_table_schema_catalog(table_schema, TableSchemaPath)
+  log_msg(sprintf("[SCHEMA FINALIZED] Wrote %d approved column definitions to %s.",
+                  nrow(table_schema), TableSchemaPath))
+  invisible(load_table_schema_catalog(TableSchemaPath, strict = TRUE))
+}
+
+#' Prepare the Parquet observations and compact review workbook
+#' @export
+PrepareSchemaRegistry <- function(MDT, MasterDBPath, ObservationPath, SchemaReviewPath,
+                                  DBLoad = NULL, n_workers = 1,
+                                  SourceFingerprintMode = c("metadata", "sha256", "none"),
+                                  StrictReaders = FALSE, LogPath = NULL, RunId = NULL) {
+  survey <- SurveyRepositorySchema(MDT = MDT, MasterDBPath = MasterDBPath,
+                                   ObservationPath = ObservationPath, DBLoad = DBLoad,
+                                   n_workers = n_workers,
+                                   SourceFingerprintMode = match.arg(SourceFingerprintMode),
+                                   StrictReaders = StrictReaders, LogPath = LogPath, RunId = RunId)
+  proposal <- RecommendRepositorySchema(survey = survey)
+  WriteSchemaProposal(proposal, SchemaReviewPath)
+  log_msg(sprintf("[SCHEMA READY] %d column(s) resolved automatically; %d require review in %s.",
+                  proposal$summary$AutoApproved, proposal$summary$NeedsReview, SchemaReviewPath))
+  invisible(list(survey = survey, proposal = proposal,
+                 ObservationPath = ObservationPath, SchemaReviewPath = SchemaReviewPath))
+}
+
+#' Finalize the reviewed registry using the existing table-catalog contract
+#' @export
+FinalizeSchemaRegistry <- function(SchemaReviewPath, TableSchemaPath, strict = TRUE) {
+  FinalizeRepositorySchema(SchemaReviewPath, TableSchemaPath, strict = strict)
 }
 
 #' Convert a named class map to a long schema table
@@ -5805,7 +6357,7 @@ harvest_source_labels <- function(files, reader, n_workers = 1) {
       list(ok = FALSE, path = p, data = NULL, error = conditionMessage(e))
     })
   }
-  label_results <- parallel_scan_with_serial_retry(
+  label_results <- .parallel_scan_with_serial_retry(
     files, scan_one, n_workers = n_workers,
     future_packages = c("haven", "data.table"),
     is_failure = function(x) !is.list(x) || !isTRUE(x$ok),
@@ -5924,9 +6476,10 @@ load_table_schema_catalog <- function(TableSchemaPath, strict = FALSE) {
 #' Merge a freshly inferred schema catalog with an existing one
 #'
 #' Preserves human curation across preflight runs: existing rows whose
-#' \code{Source} is \code{"manual"} keep their \code{CanonicalType} (manual
-#' outranks both inference and the registry), and rows for tables or databases
-#' the fresh pass did not cover are carried forward unchanged.
+#' \code{Source} is \code{"manual"} or \code{"user_approved"} keep their
+#' reviewed fields (human decisions outrank both inference and the registry),
+#' and rows for tables or databases the fresh pass did not cover are carried
+#' forward unchanged.
 #' @param new_schema data.table of freshly inferred/resolved catalog rows.
 #' @param existing_schema data.table of the catalog currently on disk (or NULL).
 #' @return data.table combining both per the precedence rules above.
@@ -5940,15 +6493,14 @@ merge_table_schema_catalog <- function(new_schema, existing_schema = NULL) {
   for (nm in setdiff(names(existing), names(new_schema))) new_schema[, (nm) := NA]
   if (!"Source" %in% names(existing)) existing[, Source := NA_character_]
   key_of <- function(x) paste(x$Database, x$TableName, x$Column, sep = "||")
-  manual <- existing[tolower(as.character(Source)) == "manual"]
-  if (nrow(manual) > 0L && nrow(new_schema) > 0L) {
-    idx <- match(key_of(new_schema), key_of(manual))
+  curated <- existing[tolower(as.character(Source)) %in% c("manual", "user_approved")]
+  if (nrow(curated) > 0L && nrow(new_schema) > 0L) {
+    idx <- match(key_of(new_schema), key_of(curated))
     hit <- which(!is.na(idx))
     if (length(hit) > 0L) {
-      preserve <- setdiff(intersect(names(new_schema), names(manual)),
+      preserve <- setdiff(intersect(names(new_schema), names(curated)),
                           c("Database", "TableName", "DuckDBTable", "Column", "InferredType"))
-      for (nm in preserve) data.table::set(new_schema, i = hit, j = nm, value = manual[[nm]][idx[hit]])
-      new_schema[hit, Source := "manual"]
+      for (nm in preserve) data.table::set(new_schema, i = hit, j = nm, value = curated[[nm]][idx[hit]])
     }
   }
   #### Rows absent from a freshly scanned table are stale columns and must ####

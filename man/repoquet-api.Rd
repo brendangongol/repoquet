@@ -18,6 +18,13 @@
 \alias{build_default_schema_registry}
 \alias{BuildRepositoryCatalog}
 \alias{BuildRepositorySchema}
+\alias{SurveyRepositorySchema}
+\alias{RecommendRepositorySchema}
+\alias{WriteSchemaProposal}
+\alias{FinalizeRepositorySchema}
+\alias{PrepareSchemaRegistry}
+\alias{FinalizeSchemaRegistry}
+\alias{GetSchemaObservations}
 \alias{call_reader}
 \alias{canonical_colnames}
 \alias{canonical_type_to_arrow}
@@ -172,8 +179,12 @@ compatibility with the original script-based workflow.
 Start with \code{create_repository_project()} for a scaffolded project,
 \code{RepositoryInitialize()} for an existing project, and
 \code{ValidateMDTPreflight()} before calling
-\code{ParquetBackEndCreate()}. Use \code{BuildRepositoryCatalog()},
-\code{audit_repository()}, and \code{validate_data_contracts()} to inspect
+\code{ParquetBackEndCreate()}. Use \code{PrepareSchemaRegistry()} to write a
+Parquet-backed observation survey and compact review workbook, then
+\code{FinalizeSchemaRegistry()} to produce the approved table catalog. Use
+\code{GetSchemaObservations()} for focused access to detailed evidence.
+The legacy \code{BuildRepositoryCatalog()} remains available. Use
+\code{audit_repository()} and \code{validate_data_contracts()} to inspect
 and validate the resulting repository. See the package README for complete
 workflow examples and configuration fields.
 }

@@ -65,6 +65,11 @@ test_that("refreshing a table prunes columns removed from its sources", {
   expect_identical(merged$Column, "A")
   expect_identical(merged$CanonicalType, "character")
   expect_identical(merged$Source, "manual")
+
+  old$Source[old$Column == "A"] <- "user_approved"
+  approved <- merge_table_schema_catalog(fresh, old)
+  expect_identical(approved$CanonicalType, "character")
+  expect_identical(approved$Source, "user_approved")
 })
 
 test_that("mixed source formats can populate one logical table", {
@@ -153,7 +158,7 @@ test_that("strict file failure is surfaced after run bookkeeping", {
 })
 
 test_that("parallel metadata scans retry worker-only failures serially", {
-  runner <- get("parallel_scan_with_serial_retry",
+  runner <- get(".parallel_scan_with_serial_retry",
                 envir = environment(build_col_classes))
   main_pid <- Sys.getpid()
   scan_one <- function(i) {

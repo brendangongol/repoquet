@@ -99,10 +99,18 @@ ValidateMDTPreflight(
   ParquetBasePath = paths$ParquetBasePath
 )
 
-BuildRepositoryCatalog(
+prepared <- PrepareSchemaRegistry(
   MDT, MasterDBPath = cfg$MasterDBPath,
-  SchemaRegistryPath = paths$SchemaRegistryPath,
-  TableSchemaPath = paths$TableSchemaPath
+  ObservationPath = paths$SchemaObservationPath,
+  SchemaReviewPath = paths$SchemaReviewPath,
+  n_workers = cfg$n_workers
+)
+
+# Review the compact Review sheet in paths$SchemaReviewPath, then finalize it.
+FinalizeSchemaRegistry(
+  SchemaReviewPath = paths$SchemaReviewPath,
+  TableSchemaPath = paths$TableSchemaPath,
+  strict = TRUE
 )
 
 result <- ParquetBackEndCreate(
@@ -125,6 +133,21 @@ result <- ParquetBackEndCreate(
 )
 print(result)
 ```
+
+The detailed per-file and per-column evidence remains in Parquet so the Excel
+workbook stays navigable. Retrieve only the slice needed for troubleshooting:
+
+```r
+GetSchemaObservations(
+  paths$SchemaObservationPath,
+  Database = "SALES", TableName = "Orders", Column = "ORDER_ID"
+)
+```
+
+`SchemaRegistryPath` remains the optional reusable policy-pattern file in this
+first release of the review workflow. `SchemaReviewPath` is the user-facing
+proposal; finalization writes the concrete approved schema to `TableSchemaPath`,
+which is the catalog consumed by the Parquet writer.
 
 Register and validate DuckDB views with the catalog's partition types:
 

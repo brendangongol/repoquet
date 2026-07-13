@@ -24,6 +24,8 @@ RepositoryPaths <- RepositoryInitialize(FormattedDBPath = FormattedDBPath,
                                         profile = "hcup")
 SchemaRegistryPath <- RepositoryPaths$SchemaRegistryPath
 TableSchemaPath <- RepositoryPaths$TableSchemaPath
+SchemaObservationPath <- RepositoryPaths$SchemaObservationPath
+SchemaReviewPath <- RepositoryPaths$SchemaReviewPath
 ManifestPath <- RepositoryPaths$ManifestPath
 DataContractPath <- RepositoryPaths$DataContractPath
 RunId <- new_repository_run_id()
@@ -118,361 +120,56 @@ ValidateMDTPreflight(MDT = MDT, strict = TRUE, logStatus = TRUE,
 MDTCompleteStatus(MDT = MDT, CheckpointPath = CheckpointPath, verbose = TRUE, logStatus = TRUE)
 
 ###############################################################################
-#### Preflight: catalogue all table schemas across all databases #############
+#### Schema discovery: survey, review, and finalize ###########################
 ###############################################################################
-#### Establishes every column's type up front (inference + schema registry)  ####
-#### and writes the full cross-database catalogue to TableSchemas.xlsx,      ####
-#### where it can be reviewed and curated. To pin a column type manually:    ####
-#### edit its CanonicalType in the TableSchemas sheet, set that row's Source ####
-#### to "manual", and save -- manual rows survive re-runs of this preflight  ####
-#### and outrank both inference and the registry. ParquetBackEndCreate below ####
-#### reads this catalogue instead of re-inferring types, so resumed runs     ####
-#### also skip the expensive per-file sampling pass. Note a manual edit only ####
-#### affects future writes: to apply it to a table already on disk, use the  ####
-#### reset_table_for_reload() step after ParquetBackEndCreate.               ####
-#### DBLoad derives from the workbook so a database added to DBSetupV2.xlsx  ####
-#### is catalogued and loaded automatically. To stage a partial load,        ####
-#### override with an explicit subset, e.g. DBLoad <- c("NIS", "NRD").       ####
+#### The survey reads every source through its configured reader and stores  ####
+#### detailed per-file/per-column evidence in SchemaObservations.parquet.    ####
+#### Recommendations are derived from those observations rather than HCUP    ####
+#### naming rules. SchemaReview.xlsx stays compact: Review contains only     ####
+#### decisions needing attention; Registry contains every proposed column;   ####
+#### History shows type drift; SourceIssues shows reader errors/warnings.     ####
+#### DBLoad derives from DBSetupV2.xlsx. Override it only for a staged load.  ####
 DBLoad <- sort(unique(MDT$Database))
-repository_catalog <- BuildRepositoryCatalog(MDT = MDT,
-                                             DBLoad = DBLoad,
-                                             MasterDBPath = MasterDBPath,
-                                             n_workers = n_workers,
-                                             SchemaRegistryPath = SchemaRegistryPath,
-                                             TableSchemaPath = TableSchemaPath,
-                                             StrictSchemaValidation = TRUE,
-                                             LogPath = LogPath, RunId = RunId)
+PrepareSchemaRegistry(
+  MDT = MDT,
+  DBLoad = DBLoad,
+  MasterDBPath = MasterDBPath,
+  ObservationPath = SchemaObservationPath,
+  SchemaReviewPath = SchemaReviewPath,
+  n_workers = n_workers,
+  SourceFingerprintMode = "metadata",
+  StrictReaders = FALSE,
+  LogPath = LogPath,
+  RunId = RunId
+)
 
-> repository_catalog <- BuildRepositoryCatalog(MDT = MDT,
-+                                              DBLoad = DBLoad,
-+                                              MasterDBPath = MasterDBPath,
-+                                              n_workers = n_workers,
-+                                              SchemaRegistryPath = SchemaRegistryPath,
-+                                              TableSchemaPath = TableSchemaPath,
-+                                              StrictSchemaValidation = TRUE,
-+                                              LogPath = LogPath, RunId = RunId)
-[2026-07-13 08:14:24] [run_id=20260713T081409_7188_126460] [LOCK] Acquired repository lock: X:/Brendan/NationalDatabases/formattedDatabases/.repository.lock (PCMC400005437 | 7188 | 2026-07-13 08:14:24 | BuildRepositoryCatalog)
-[2026-07-13 08:14:25] [run_id=20260713T081409_7188_126460] [CATALOG] Building schema for NEDS (42 files)
-[2026-07-13 08:16:08] [run_id=20260713T081409_7188_126460] [CATALOG] Building schema for NIS (52 files)
-[2026-07-13 08:17:54] [run_id=20260713T081409_7188_126460] [CATALOG] Building schema for NISBishoy (2 files)
-[2026-07-13 08:17:56] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 1 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:17:57] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 1 of 1 failed item(s) serially.
-[2026-07-13 08:18:00] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 1 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:18:00] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 1 of 1 failed item(s) serially.
-[2026-07-13 08:18:04] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 1 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:18:05] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 1 of 1 failed item(s) serially.
-[2026-07-13 08:18:09] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 1 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:18:11] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 1 of 1 failed item(s) serially.
-[2026-07-13 08:18:14] [run_id=20260713T081409_7188_126460] [CATALOG] Building schema for NRD (54 files)
-[2026-07-13 08:20:46] [run_id=20260713T081409_7188_126460] [CATALOG] Building schema for NSQIP (14 files)
-[2026-07-13 08:20:52] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 14 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:21:14] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 14 of 14 failed item(s) serially.
-[2026-07-13 08:21:19] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 14 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:22:59] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 14 of 14 failed item(s) serially.
-[2026-07-13 08:23:05] [run_id=20260713T081409_7188_126460] [CATALOG] Building schema for NTDB (154 files)
-[2026-07-13 08:23:08] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 6 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:23:10] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 6 of 6 failed item(s) serially.
-[2026-07-13 08:23:14] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 6 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:23:14] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 6 of 6 failed item(s) serially.
-[2026-07-13 08:23:17] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 6 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:23:19] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 6 of 6 failed item(s) serially.
-[2026-07-13 08:23:23] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 6 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:23:23] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 6 of 6 failed item(s) serially.
-[2026-07-13 08:23:26] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 3 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:23:26] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 3 of 3 failed item(s) serially.
-[2026-07-13 08:23:30] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 3 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:23:30] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 3 of 3 failed item(s) serially.
-[2026-07-13 08:23:34] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 4 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:23:35] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 4 of 4 failed item(s) serially.
-[2026-07-13 08:23:38] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 4 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:23:39] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 4 of 4 failed item(s) serially.
-[2026-07-13 08:23:42] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 7 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:23:44] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 7 of 7 failed item(s) serially.
-[2026-07-13 08:23:48] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 7 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:23:48] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 7 of 7 failed item(s) serially.
-[2026-07-13 08:23:52] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 1 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:23:52] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 1 of 1 failed item(s) serially.
-[2026-07-13 08:23:55] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 1 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:23:55] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 1 of 1 failed item(s) serially.
-[2026-07-13 08:23:59] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 3 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:24:00] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 3 of 3 failed item(s) serially.
-[2026-07-13 08:24:03] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 3 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:24:03] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 3 of 3 failed item(s) serially.
-[2026-07-13 08:24:08] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 7 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:24:09] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 7 of 7 failed item(s) serially.
-[2026-07-13 08:24:14] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 7 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:24:15] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 7 of 7 failed item(s) serially.
-[2026-07-13 08:24:19] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 7 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:24:21] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 7 of 7 failed item(s) serially.
-[2026-07-13 08:24:25] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 7 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:24:26] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 7 of 7 failed item(s) serially.
-[2026-07-13 08:24:30] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 7 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:24:33] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 7 of 7 failed item(s) serially.
-[2026-07-13 08:24:36] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 7 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:24:37] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 7 of 7 failed item(s) serially.
-[2026-07-13 08:24:41] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 7 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:24:41] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 7 of 7 failed item(s) serially.
-[2026-07-13 08:24:45] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 7 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:24:46] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 7 of 7 failed item(s) serially.
-[2026-07-13 08:24:49] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 7 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:24:51] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 7 of 7 failed item(s) serially.
-[2026-07-13 08:24:55] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 7 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:25:01] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 7 of 7 failed item(s) serially.
-[2026-07-13 08:25:05] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 7 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:25:07] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 7 of 7 failed item(s) serially.
-[2026-07-13 08:25:11] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 7 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:25:13] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 7 of 7 failed item(s) serially.
-[2026-07-13 08:25:19] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 7 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:25:20] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 7 of 7 failed item(s) serially.
-[2026-07-13 08:25:24] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 7 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:25:25] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 7 of 7 failed item(s) serially.
-[2026-07-13 08:25:29] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 7 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:25:29] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 7 of 7 failed item(s) serially.
-[2026-07-13 08:25:34] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 7 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:25:34] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 7 of 7 failed item(s) serially.
-[2026-07-13 08:25:39] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 7 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:25:42] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 7 of 7 failed item(s) serially.
-[2026-07-13 08:25:45] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 7 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:25:50] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 7 of 7 failed item(s) serially.
-[2026-07-13 08:25:54] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 4 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:25:55] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 4 of 4 failed item(s) serially.
-[2026-07-13 08:25:59] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 4 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:25:59] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 4 of 4 failed item(s) serially.
-[2026-07-13 08:26:02] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 4 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:26:03] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 4 of 4 failed item(s) serially.
-[2026-07-13 08:26:08] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 4 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:26:08] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 4 of 4 failed item(s) serially.
-[2026-07-13 08:26:11] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:26:12] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:26:15] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:26:15] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:26:18] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:26:18] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:26:21] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:26:22] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:26:26] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:26:26] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:26:29] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:26:30] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:26:32] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:26:32] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:26:35] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:26:35] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:26:38] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:26:39] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:26:42] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:26:43] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:26:45] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:26:45] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:26:48] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:26:49] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:26:52] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:26:52] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:26:55] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:26:55] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:26:59] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 7 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:27:02] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 7 of 7 failed item(s) serially.
-[2026-07-13 08:27:06] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 7 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:27:06] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 7 of 7 failed item(s) serially.
-[2026-07-13 08:27:11] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 7 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:27:11] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 7 of 7 failed item(s) serially.
-[2026-07-13 08:27:15] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 7 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:27:16] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 7 of 7 failed item(s) serially.
-[2026-07-13 08:27:19] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 4 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:27:20] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 4 of 4 failed item(s) serially.
-[2026-07-13 08:27:25] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 4 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:27:27] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 4 of 4 failed item(s) serially.
-[2026-07-13 08:27:31] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 7 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:27:34] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 7 of 7 failed item(s) serially.
-[2026-07-13 08:27:37] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 7 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:27:38] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 7 of 7 failed item(s) serially.
-[2026-07-13 08:27:41] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 7 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:27:43] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 7 of 7 failed item(s) serially.
-[2026-07-13 08:27:47] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 7 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:27:48] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 7 of 7 failed item(s) serially.
-[2026-07-13 08:27:52] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 7 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:27:55] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 7 of 7 failed item(s) serially.
-[2026-07-13 08:27:58] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 7 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:28:01] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 7 of 7 failed item(s) serially.
-[2026-07-13 08:28:01] [run_id=20260713T081409_7188_126460] [CATALOG] Building schema for TQP (167 files)
-[2026-07-13 08:28:04] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 4 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:28:05] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 4 of 4 failed item(s) serially.
-[2026-07-13 08:28:08] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 4 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:28:08] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 4 of 4 failed item(s) serially.
-[2026-07-13 08:28:12] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 5 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:28:12] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 5 of 5 failed item(s) serially.
-[2026-07-13 08:28:16] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 5 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:28:17] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 5 of 5 failed item(s) serially.
-[2026-07-13 08:28:19] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 1 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:28:19] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 1 of 1 failed item(s) serially.
-[2026-07-13 08:28:23] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 1 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:28:23] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 1 of 1 failed item(s) serially.
-[2026-07-13 08:28:25] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 1 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:28:25] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 1 of 1 failed item(s) serially.
-[2026-07-13 08:28:29] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 1 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:28:29] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 1 of 1 failed item(s) serially.
-[2026-07-13 08:28:31] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:28:31] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:28:35] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:28:35] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:28:40] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 8 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:28:42] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 8 of 8 failed item(s) serially.
-[2026-07-13 08:28:47] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 8 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:28:47] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 8 of 8 failed item(s) serially.
-[2026-07-13 08:28:53] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 8 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:28:53] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 8 of 8 failed item(s) serially.
-[2026-07-13 08:28:58] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 8 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:28:58] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 8 of 8 failed item(s) serially.
-[2026-07-13 08:29:01] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 1 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:29:01] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 1 of 1 failed item(s) serially.
-[2026-07-13 08:29:05] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 1 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:29:05] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 1 of 1 failed item(s) serially.
-[2026-07-13 08:29:08] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:29:09] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:29:12] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:29:12] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:29:15] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:29:16] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:29:19] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:29:19] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:29:22] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:29:22] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:29:26] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:29:26] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:29:29] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:29:29] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:29:32] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:29:32] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:29:35] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:29:35] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:29:38] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:29:38] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:29:41] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:29:42] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:29:45] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:29:46] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:29:49] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:29:50] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:29:53] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:29:53] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:29:56] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:29:57] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:30:00] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:30:00] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:30:04] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 8 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:30:05] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 8 of 8 failed item(s) serially.
-[2026-07-13 08:30:09] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 8 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:30:09] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 8 of 8 failed item(s) serially.
-[2026-07-13 08:30:12] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:30:12] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:30:15] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:30:15] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:30:20] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:30:20] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:30:24] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:30:25] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:30:30] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 8 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:30:30] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 8 of 8 failed item(s) serially.
-[2026-07-13 08:30:35] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 8 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:30:35] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 8 of 8 failed item(s) serially.
-[2026-07-13 08:30:39] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 6 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:30:41] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 6 of 6 failed item(s) serially.
-[2026-07-13 08:30:45] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 6 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:30:45] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 6 of 6 failed item(s) serially.
-[2026-07-13 08:30:47] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:30:48] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:30:51] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:30:51] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:30:54] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:30:54] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:30:57] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:30:57] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:31:00] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:31:00] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:31:04] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:31:04] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:31:07] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:31:07] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:31:10] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:31:10] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:31:13] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:31:14] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:31:17] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:31:17] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:31:20] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:31:20] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:31:23] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:31:23] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:31:26] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:31:26] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:31:30] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:31:30] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:31:37] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 8 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:31:39] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 8 of 8 failed item(s) serially.
-[2026-07-13 08:31:43] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 8 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:31:43] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 8 of 8 failed item(s) serially.
-[2026-07-13 08:31:47] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 8 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:31:50] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 8 of 8 failed item(s) serially.
-[2026-07-13 08:31:54] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 8 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:31:55] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 8 of 8 failed item(s) serially.
-[2026-07-13 08:32:00] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 8 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:32:02] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 8 of 8 failed item(s) serially.
-[2026-07-13 08:32:06] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 8 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:32:07] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 8 of 8 failed item(s) serially.
-[2026-07-13 08:32:11] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 8 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:32:13] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 8 of 8 failed item(s) serially.
-[2026-07-13 08:32:18] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 8 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:32:19] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 8 of 8 failed item(s) serially.
-[2026-07-13 08:32:23] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 10 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:32:26] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 10 of 10 failed item(s) serially.
-[2026-07-13 08:32:30] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 10 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:32:31] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 10 of 10 failed item(s) serially.
-[2026-07-13 08:32:34] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:32:35] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:32:38] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:32:38] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:32:41] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:32:42] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:32:44] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:32:45] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:32:47] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 1 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:32:48] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 1 of 1 failed item(s) serially.
-[2026-07-13 08:32:51] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 1 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:32:51] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 1 of 1 failed item(s) serially.
-[2026-07-13 08:32:55] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 1 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:32:55] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 1 of 1 failed item(s) serially.
-[2026-07-13 08:32:59] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 1 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:33:00] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 1 of 1 failed item(s) serially.
-[2026-07-13 08:33:04] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:33:04] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:33:07] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:33:08] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:33:11] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:33:11] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:33:14] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:33:14] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:33:17] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:33:18] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:33:21] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:33:21] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:33:25] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 6 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:33:27] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 6 of 6 failed item(s) serially.
-[2026-07-13 08:33:31] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 6 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:33:31] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 6 of 6 failed item(s) serially.
-[2026-07-13 08:33:34] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:33:35] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:33:38] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 2 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:33:38] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 2 of 2 failed item(s) serially.
-[2026-07-13 08:33:41] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference failed for 1 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:33:41] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] schema header inference recovered 1 of 1 failed item(s) serially.
-[2026-07-13 08:33:44] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference failed for 1 item(s); retrying those item(s) serially in the main R process.
-[2026-07-13 08:33:44] [run_id=20260713T081409_7188_126460] [PARALLEL FALLBACK] column-class inference recovered 1 of 1 failed item(s) serially.
-Warning messages:
-1: In (function (input = "", file = NULL, text = NULL, cmd = NULL,  :
-  Stopped early on line 177. Expected 4 fields but found 1. Consider fill=TRUE. First discarded non-empty line: <<<=age 10; 0.6-1cm thick>>
-2: In (function (input = "", file = NULL, text = NULL, cmd = NULL,  :
-  Stopped early on line 184. Expected 4 fields but found 1. Consider fill=TRUE. First discarded non-empty line: <<<=age 10; 0.6-1cm thick>>
-[2026-07-13 08:33:46] [LOCK] Released repository lock: X:/Brendan/NationalDatabases/formattedDatabases/.repository.lock
+#### Optional console preview. The helper queries Parquet with DuckDB, so    ####
+#### it does not pull the full observation store into R.                     ####
+schema_issues <- GetSchemaObservations(
+  ObservationPath = SchemaObservationPath,
+  IssuesOnly = TRUE,
+  Limit = 100L
+)
+if (nrow(schema_issues) > 0L) print(schema_issues)
+
+###############################################################################
+#### Schema review gate #######################################################
+###############################################################################
+#### On the first run, open SchemaReviewPath and complete every Review row:  ####
+####   Decision = "Accept" keeps RecommendedType.                            ####
+####   Decision = "Override" requires the desired ApprovedType.              ####
+#### MergeGroup may identify columns that must share one type across tables. ####
+#### After review, run FinalizeSchemaRegistry below; a second survey is not  ####
+#### needed. Rerun the survey after fixing SourceIssues or changing sources. ####
+#### Existing decisions survive only while their observation signature is   ####
+#### unchanged, so changed evidence always returns to the Review sheet.      ####
+#### Finalization stops here until all required decisions are complete, then ####
+#### writes TableSchemas.xlsx in the exact format ParquetBackEndCreate uses. ####
+repository_catalog <- FinalizeSchemaRegistry(
+  SchemaReviewPath = SchemaReviewPath,
+  TableSchemaPath = TableSchemaPath,
+  strict = TRUE
+)
 
 ##############################################################################################
 #### Convert Datasets to parquet files and store in a formal database directory structure ####
@@ -518,9 +215,9 @@ log_msg(sprintf("Checkpoint after load: %d files recorded", length(completed_che
 #### Optional: force one table to rebuild under the current schema ###########
 ###############################################################################
 #### Parquet already on disk keeps the column types it was written with;     ####
-#### changes to the schema registry or manual TableSchemas.xlsx edits only   ####
-#### affect future writes. To apply them to an existing table, clear that    ####
-#### table and reload it. DryRun = TRUE (the default) deletes nothing and    ####
+#### changes approved in SchemaReview.xlsx and finalized to                  ####
+#### TableSchemas.xlsx affect only future writes. To apply them to an        ####
+#### existing table, clear and reload it. DryRun = TRUE (the default)        ####
 #### only reports what would be removed; once it looks right, set            ####
 #### DryRun = FALSE and then re-run the ParquetBackEndCreate step above to   ####
 #### rebuild the table from source.                                          ####
@@ -588,9 +285,9 @@ repo_audit$issues
 ###############################################################################
 #### Data dictionary: find variables and validate content against it #########
 ###############################################################################
-#### search_labels() queries the Labels sheet BuildRepositoryCatalog         ####
-#### harvested from the SPSS headers: find variables across all tables by    ####
-#### label text, column name, or value-label text.                           ####
+#### Finalization preserves an existing Labels sheet in TableSchemas.xlsx.  ####
+#### This first survey redesign does not harvest new variable/value labels,  ####
+#### so these helpers require a dictionary retained from an earlier catalog. ####
 # search_labels("payer", TableSchemaPath = TableSchemaPath, ParquetBasePath = ParquetBasePath)
 # search_labels("^DIED$", TableSchemaPath = TableSchemaPath, search_in = "column")
 #### validate_against_dictionary() checks stored values against each         ####
