@@ -1,0 +1,41 @@
+Package: repoquet
+Type: Package
+Title: Build Self-Auditing Parquet Data Repositories
+Version: 0.1.0
+Authors@R: person("Brendan", "Gongol",
+    email = "b.gongol@ruhealth.org", role = c("aut", "cre"))
+Description: A schema-aware, self-auditing engine that transforms heterogeneous
+    source files into refreshable, query-ready Parquet repositories for
+    larger-than-memory analytics. A metadata-driven workflow combines
+    table-specific type normalization, Hive partitioning, source
+    fingerprinting, transactional manifests, resumable checkpoints, schema and
+    data contracts, catalog generation, reconciliation, custom file readers,
+    and validated DuckDB views.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Depends: R (>= 4.2.0)
+URL: https://github.com/brendangongol/repoquet
+BugReports: https://github.com/brendangongol/repoquet/issues
+Imports:
+    arrow,
+    bit64,
+    data.table,
+    DBI,
+    digest,
+    duckdb,
+    foreign,
+    future,
+    future.apply,
+    glue,
+    haven,
+    jsonlite,
+    openxlsx
+Suggests:
+    circlize,
+    ComplexHeatmap,
+    RColorBrewer,
+    R.utils,
+    renv,
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3
+RoxygenNote: 7.3.2

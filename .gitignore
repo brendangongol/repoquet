@@ -1,0 +1,17 @@
+.Rhistory
+.RData
+.Ruserdata
+.Rproj.user/
+.codex_work/
+*.Rcheck/
+*.pending
+*.previous
+.repository.lock*
+renv/library/
+renv/staging/
+.renv-cache/
+.renv-root/
+.r-lib/
+.package-build/
+repoquet_*.tar.gz
+inst/Misc/DBSetupV2_broken_backup_*.xlsx

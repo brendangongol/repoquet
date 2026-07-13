@@ -1,0 +1,16 @@
+^renv$
+^\.git($|/)
+^\.gitattributes$
+^\.github($|/)
+^\.Rprofile$
+^\.Rproj\.user$
+^.*\.Rproj$
+^renv($|/)
+^renv\.lock$
+^tools($|/)
+^.*\.Rcheck($|/)
+^\.renv-cache($|/)
+^\.renv-root($|/)
+^\.r-lib($|/)
+^\.package-build($|/)
+^repoquet_.*\.tar\.gz$
