@@ -119,6 +119,7 @@ test_that("clean healthcare schema workflow remains executable", {
                     "schema_workflow_test.R")
   expect_silent(parse(path))
   text <- paste(readLines(path, warn = FALSE), collapse = "\n")
-  expect_match(text, "library(repoquet)", fixed = TRUE)
+  expect_match(text, "source(RepoquetSourcePath", fixed = TRUE)
+  expect_false(grepl("library\\(repoquet\\)", text))
   expect_false(grepl("^>", text))
 })

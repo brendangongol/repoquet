@@ -5,7 +5,18 @@
 library(data.table); library(openxlsx); library(DBI); library(duckdb);
 library(haven); library(arrow); library(glue); library(future); library(future.apply)
 library(ComplexHeatmap); library(RColorBrewer); library(circlize)
-library(repoquet)
+
+#### Development mode: always execute the current source-tree functions.   ####
+#### Set REPOQUET_SOURCE on another machine instead of editing package code. ####
+RepoquetSourcePath <- Sys.getenv(
+  "REPOQUET_SOURCE",
+  unset = "C:/Users/breng/Dropbox/github/repoquet/R/repoquet.R"
+)
+if (!file.exists(RepoquetSourcePath)) {
+  stop("repoquet development source not found: ", RepoquetSourcePath,
+       ". Set REPOQUET_SOURCE to the cloned repository's R/repoquet.R file.")
+}
+source(RepoquetSourcePath, local = .GlobalEnv)
 
 ################################################################################
 #### Configuration #############################################################

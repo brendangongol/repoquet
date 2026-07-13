@@ -2,7 +2,15 @@
 #### Clean schema-workflow test helpers ########################################
 ################################################################################
 
-library(repoquet)
+RepoquetSourcePath <- Sys.getenv(
+  "REPOQUET_SOURCE",
+  unset = "C:/Users/breng/Dropbox/github/repoquet/R/repoquet.R"
+)
+if (!file.exists(RepoquetSourcePath)) {
+  stop("repoquet development source not found: ", RepoquetSourcePath,
+       ". Set REPOQUET_SOURCE to the cloned repository's R/repoquet.R file.")
+}
+source(RepoquetSourcePath, local = .GlobalEnv)
 
 run_schema_workflow_test <- function(MDT, MasterDBPath, ObservationPath,
                                      SchemaReviewPath, SchemaRegistryPath = NULL,
@@ -32,4 +40,3 @@ finalize_schema_workflow_test <- function(SchemaReviewPath, TableSchemaPath) {
     strict = TRUE
   )
 }
-

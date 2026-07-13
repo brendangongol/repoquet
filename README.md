@@ -29,10 +29,16 @@ During active development, the complete implementation lives in
 
 ## Create A Project
 
+While the package is under active development, source the current implementation
+from the cloned repository so every workflow run uses the latest functions:
+
 ```r
-library(repoquet)
+source("R/repoquet.R")
 paths <- create_repository_project("~/my_repository", profile = "generic")
 ```
+
+The deployment workflow will switch this line to `library(repoquet)` after the
+package is ready to install and version as a release.
 
 The scaffold creates:
 
