@@ -143,35 +143,6 @@ repository_catalog <- BuildRepositoryCatalog(MDT = MDT,
                                              StrictSchemaValidation = TRUE,
                                              LogPath = LogPath, RunId = RunId)
 
-> repository_catalog <- BuildRepositoryCatalog(MDT = MDT,
-+                                              DBLoad = DBLoad,
-+                                              MasterDBPath = MasterDBPath,
-+                                              n_workers = n_workers,
-+                                              SchemaRegistryPath = SchemaRegistryPath,
-+                                              TableSchemaPath = TableSchemaPath,
-+                                              StrictSchemaValidation = TRUE,
-+                                              LogPath = LogPath, RunId = RunId)
-[2026-07-13 07:50:39] [run_id=20260713T072910_24232_345136] [LOCK] Acquired repository lock: X:/Brendan/NationalDatabases/formattedDatabases/.repository.lock (PCMC400005437 | 24232 | 2026-07-13 07:50:39 | BuildRepositoryCatalog)
-[2026-07-13 07:50:39] [run_id=20260713T072910_24232_345136] [CATALOG] Building schema for NEDS (42 files)
-[2026-07-13 07:50:57] [run_id=20260713T072910_24232_345136] [CATALOG] Building schema for NIS (52 files)
-[2026-07-13 07:51:45] [run_id=20260713T072910_24232_345136] [CATALOG] Building schema for NISBishoy (2 files)
-[2026-07-13 07:51:53] [run_id=20260713T072910_24232_345136] [CATALOG] Building schema for NRD (54 files)
-[2026-07-13 07:52:39] [run_id=20260713T072910_24232_345136] [CATALOG] Building schema for NSQIP (14 files)
-[2026-07-13 07:54:49] [run_id=20260713T072910_24232_345136] [CATALOG] Building schema for NTDB (154 files)
-[2026-07-13 07:56:08] [run_id=20260713T072910_24232_345136] [CATALOG] Building schema for TQP (167 files)
-[2026-07-13 07:57:48] [run_id=20260713T072910_24232_345136] [SCHEMA WARNING] Merge key TQP/INC_KEY (within_database; detected by name_candidate) has incompatible resolved types: int64,integer across TQP_AIS98PCODE; TQP_AISCCODE; TQP_AISDIAGNOSIS; TQP_AISP05CODE; TQP_AISPCODE; TQP_COMORBID; TQP_COMPLIC; TQP_DCODE; TQP_DEMO; TQP_DISCHARGE; TQP_ECODE; TQP_ED; TQP_HOSPITALEVENTS; TQP_ICD10_DCODE; TQP_ICD10_ECODE; TQP_ICD10_LOC; TQP_ICDDIAGNOSIS; TQP_ICDPROCEDURE; TQP_INCLUSION; TQP_PCODE; TQP_PM_2015; TQP_PM_2016; TQP_PM_EMBOLIZE_SITE; TQP_PM_TBI_CM; TQP_PM_TBI_GCS_Q; TQP_PREEXISTINGCONDITIONS; TQP_PROTDEV; TQP_PUF_PTFAC_INDEX; TQP_TRANSPORT; TQP_TRAUMA; TQP_VITALS
-[2026-07-13 07:57:48] [run_id=20260713T072910_24232_345136] [SCHEMA WARNING] Merge key ALL/KEY_NIS_ALT (cross_database; detected by name_candidate) has incompatible resolved types: int64,numeric across NIS_Misc; NISBishoy_FULLDhillon_EGS
-[2026-07-13 07:57:48] [run_id=20260713T072910_24232_345136] [SCHEMA WARNING] Merge key ALL/INC_KEY (cross_database; detected by name_candidate) has incompatible resolved types: character,int64,integer across NTDB_AIS98PCODE; NTDB_AISCCODE; NTDB_AISP05CODE; NTDB_AISPCODE; NTDB_CM_TYPE; NTDB_COMORBID; NTDB_COMPLIC; NTDB_DCODE; NTDB_DEMO; NTDB_DISCHARGE; NTDB_ECODE; NTDB_ED; NTDB_EMBOLIZATION_SITE; NTDB_GCS_QUAL; NTDB_ICD10_DCODE; NTDB_ICD10_ECODE; NTDB_ICD10_LOC; NTDB_PCODE; NTDB_PM; NTDB_PROTDEV; NTDB_TRANSPORT; NTDB_VITALS; TQP_AIS98PCODE; TQP_AISCCODE; TQP_AISDIAGNOSIS; TQP_AISP05CODE; TQP_AISPCODE; TQP_COMORBID; TQP_COMPLIC; TQP_DCODE; TQP_DEMO; TQP_DISCHARGE; TQP_ECODE; TQP_ED; TQP_HOSPITALEVENTS; TQP_ICD10_DCODE; TQP_ICD10_ECODE; TQP_ICD10_LOC; TQP_ICDDIAGNOSIS; TQP_ICDPROCEDURE; TQP_INCLUSION; TQP_PCODE; TQP_PM_2015; TQP_PM_2016; TQP_PM_EMBOLIZE_SITE; TQP_PM_TBI_CM; TQP_PM_TBI_GCS_Q; TQP_PREEXISTINGCONDITIONS; TQP_PROTDEV; TQP_PUF_PTFAC_INDEX; TQP_TRANSPORT; TQP_TRAUMA; TQP_VITALS
-Error in ValidateSchemaMergeKeys(combined, strict = StrictSchemaValidation) : 
-  Schema merge-key validation failed.
-In addition: 
-Warning messages:
-1: In (function (input = "", file = NULL, text = NULL, cmd = NULL,  :
-  Stopped early on line 177. Expected 4 fields but found 1. Consider fill=TRUE. First discarded non-empty line: <<<=age 10; 0.6-1cm thick>>
-2: In (function (input = "", file = NULL, text = NULL, cmd = NULL,  :
-  Stopped early on line 184. Expected 4 fields but found 1. Consider fill=TRUE. First discarded non-empty line: <<<=age 10; 0.6-1cm thick>>
-[2026-07-13 07:57:48] [LOCK] Released repository lock: X:/Brendan/NationalDatabases/formattedDatabases/.repository.lock
-
 ##############################################################################################
 #### Convert Datasets to parquet files and store in a formal database directory structure ####
 ##############################################################################################

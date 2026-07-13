@@ -151,3 +151,25 @@ test_that("strict file failure is surfaced after run bookkeeping", {
     LockRepository = FALSE, SnapshotState = FALSE), "failed for 1 source file")
   expect_true(dir.exists(file.path(dirname(fx$mf), "RunSummaries")))
 })
+
+test_that("parallel metadata scans retry worker-only failures serially", {
+  runner <- get("parallel_scan_with_serial_retry",
+                envir = environment(build_col_classes))
+  main_pid <- Sys.getpid()
+  scan_one <- function(i) {
+    if (Sys.getpid() != main_pid) {
+      return(list(ok = FALSE, value = NULL, error = "worker cannot access source"))
+    }
+    list(ok = TRUE, value = i, error = NA_character_)
+  }
+
+  results <- runner(
+    as.list(1:2), scan_one, n_workers = 2,
+    future_packages = character(),
+    is_failure = function(x) !isTRUE(x$ok),
+    context = "test metadata scan"
+  )
+
+  expect_true(all(vapply(results, function(x) isTRUE(x$ok), logical(1))))
+  expect_equal(vapply(results, `[[`, integer(1), "value"), 1:2)
+})

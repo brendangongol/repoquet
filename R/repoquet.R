@@ -1913,6 +1913,52 @@ align_columns <- function(df, all_cols, comprehensive_sample = NULL, max_coerce_
 #' str(col_classes)
 #' unlink(tmp_dir, recursive = TRUE)
 #' }
+# Run independent metadata scans in parallel, then retry only worker failures
+# in the main R process. This protects mapped/network drives that are visible
+# to the interactive session but not inherited by multisession workers.
+parallel_scan_with_serial_retry <- function(items, scan_one, n_workers = 1,
+                                            future_packages = character(),
+                                            is_failure = is.null,
+                                            context = "source metadata scan") {
+  if (length(items) == 0L) return(list())
+  if (as.integer(n_workers) <= 1L) return(lapply(items, scan_one))
+
+  old_plan <- future::plan()
+  on.exit(future::plan(old_plan), add = TRUE)
+  future::plan(future::multisession, workers = as.integer(n_workers))
+  parallel_error <- NULL
+  results <- tryCatch(
+    future.apply::future_lapply(items, scan_one, future.seed = NULL,
+                                future.packages = future_packages),
+    error = function(e) {
+      parallel_error <<- conditionMessage(e)
+      NULL
+    }
+  )
+  future::plan(old_plan)
+
+  if (is.null(results)) {
+    log_msg(sprintf("[PARALLEL FALLBACK] %s failed before producing results (%s); retrying all %d item(s) serially.",
+                    context, parallel_error, length(items)))
+    return(lapply(items, scan_one))
+  }
+
+  failed <- vapply(results, is_failure, logical(1))
+  if (!any(failed)) return(results)
+
+  retry_indices <- which(failed)
+  log_msg(sprintf("[PARALLEL FALLBACK] %s failed for %d item(s); retrying those item(s) serially in the main R process.",
+                  context, length(retry_indices)))
+  retried <- lapply(items[retry_indices], scan_one)
+  results[retry_indices] <- retried
+  recovered <- !vapply(retried, is_failure, logical(1))
+  if (any(recovered)) {
+    log_msg(sprintf("[PARALLEL FALLBACK] %s recovered %d of %d failed item(s) serially.",
+                    context, sum(recovered), length(retry_indices)))
+  }
+  results
+}
+
 #' @export
 build_col_classes <- function(files, base_path, n_workers = 1, reader = "sav",
                               reader_options = NULL){
@@ -1943,16 +1989,12 @@ build_col_classes <- function(files, base_path, n_workers = 1, reader = "sav",
       list(ok = TRUE, path = p, classes = cls, error = NA_character_)
     }, error = function(e) list(ok = FALSE, path = p, classes = character(0), error = conditionMessage(e)))
   }
-  if (as.integer(n_workers) > 1L) {
-    old_plan  <- future::plan()
-    on.exit(future::plan(old_plan), add = TRUE)
-    future::plan(future::multisession, workers = n_workers)
-    all_samples <- future.apply::future_lapply(seq_along(all_paths), scan_one, future.seed = NULL,
-                                 future.packages = c("data.table", "haven"))
-    future::plan(old_plan)
-  } else {
-    all_samples <- lapply(seq_along(all_paths), scan_one)
-  }
+  all_samples <- parallel_scan_with_serial_retry(
+    seq_along(all_paths), scan_one, n_workers = n_workers,
+    future_packages = c("data.table", "haven"),
+    is_failure = function(x) !is.list(x) || !isTRUE(x$ok),
+    context = "column-class inference"
+  )
   failed <- vapply(all_samples, function(x) !isTRUE(x$ok), logical(1))
   if (any(failed)) {
     failed_msg <- vapply(all_samples[failed], function(x) sprintf("%s (%s)", x$path, x$error), character(1))
@@ -2702,28 +2744,32 @@ build_comprehensive <- function(files, base_path, suffixes, uni_suffixes, reader
   #### file fails individually at load time instead.                        ####
   scan_one <- function(i) tryCatch({
     rd <- get_file_reader(readers[i])
-    canonical_colnames(call_reader(rd, "read_header", all_paths[i],
-                                   reader_options = reader_options[[i]]))
-  }, error = function(e) NULL)
-  if (as.integer(n_workers) > 1L) {
-    old_plan  <- future::plan()
-    on.exit(future::plan(old_plan), add = TRUE)
-    future::plan(future::multisession, workers = n_workers)
-    all_headers <- future.apply::future_lapply(seq_along(all_paths), scan_one, future.seed = NULL,
-                                 future.packages = c("haven", "data.table"))
-    future::plan(old_plan)
-  } else {
-    all_headers <- lapply(seq_along(all_paths), scan_one)
-  }
-  failed <- vapply(all_headers, is.null, logical(1))
+    header <- canonical_colnames(call_reader(rd, "read_header", all_paths[i],
+                                             reader_options = reader_options[[i]]))
+    list(ok = TRUE, path = all_paths[i], header = header, error = NA_character_)
+  }, error = function(e) {
+    list(ok = FALSE, path = all_paths[i], header = character(0),
+         error = conditionMessage(e))
+  })
+  header_results <- parallel_scan_with_serial_retry(
+    seq_along(all_paths), scan_one, n_workers = n_workers,
+    future_packages = c("haven", "data.table"),
+    is_failure = function(x) !is.list(x) || !isTRUE(x$ok),
+    context = "schema header inference"
+  )
+  failed <- vapply(header_results, function(x) !isTRUE(x$ok), logical(1))
   if (any(failed)) {
-    log_msg(sprintf("[SCHEMA ERROR] build_comprehensive: %d file(s) unreadable during header scan (first: %s) -- their columns cannot be resolved safely.",
-                    sum(failed), basename(all_paths[which(failed)[1]])))
+    first_failure <- header_results[[which(failed)[1]]]
+    log_msg(sprintf("[SCHEMA ERROR] build_comprehensive: %d file(s) unreadable during header scan (first: %s; reader: %s; cause: %s) -- their columns cannot be resolved safely.",
+                    sum(failed), basename(first_failure$path), readers[which(failed)[1]],
+                    first_failure$error))
     if (isTRUE(strict_read)) {
-      stop(sprintf("Schema header inference failed for %d readable-path source file(s); first: %s",
-                   sum(failed), all_paths[which(failed)[1]]))
+      stop(sprintf("Schema header inference failed for %d readable-path source file(s); first: %s; reader: %s; cause: %s",
+                   sum(failed), first_failure$path, readers[which(failed)[1]],
+                   first_failure$error))
     }
   }
+  all_headers <- lapply(header_results, function(x) if (isTRUE(x$ok)) x$header else NULL)
   stats::setNames(lapply(uni_suffixes, function(s) {
     unique(unlist(all_headers[suffixes == s]))
   }), uni_suffixes)
@@ -5737,10 +5783,7 @@ harvest_source_labels <- function(files, reader, n_workers = 1) {
   rd <- get_file_reader(reader)
   if (!isTRUE(rd$has_labels) || is.null(rd$read_labels_header)) return(empty)
   read_labels_header <- rd$read_labels_header
-  old_plan  <- future::plan()
-  on.exit(future::plan(old_plan), add = TRUE)
-  future::plan(future::multisession, workers = n_workers)
-  per_file <- future.apply::future_lapply(files, function(p) {
+  scan_one <- function(p) {
     tryCatch({
       hdr <- read_labels_header(p)
       cols <- names(hdr)
@@ -5755,11 +5798,27 @@ harvest_source_labels <- function(files, reader, n_workers = 1) {
         if (nchar(out) > 5000L) out <- paste0(substr(out, 1L, 5000L), " ...")
         out
       }, character(1))
-      data.table::data.table(Column = cols, VariableLabel = var_lab,
-                             ValueLabels = val_lab, SourceFile = basename(p))
-    }, error = function(e) NULL)
-  }, future.seed = NULL, future.packages = c("haven", "data.table"))
-  per_file <- Filter(Negate(is.null), per_file)
+      data <- data.table::data.table(Column = cols, VariableLabel = var_lab,
+                                    ValueLabels = val_lab, SourceFile = basename(p))
+      list(ok = TRUE, path = p, data = data, error = NA_character_)
+    }, error = function(e) {
+      list(ok = FALSE, path = p, data = NULL, error = conditionMessage(e))
+    })
+  }
+  label_results <- parallel_scan_with_serial_retry(
+    files, scan_one, n_workers = n_workers,
+    future_packages = c("haven", "data.table"),
+    is_failure = function(x) !is.list(x) || !isTRUE(x$ok),
+    context = sprintf("%s label harvesting", reader)
+  )
+  failed <- vapply(label_results, function(x) !isTRUE(x$ok), logical(1))
+  if (any(failed)) {
+    for (result in label_results[failed]) {
+      log_msg(sprintf("[LABEL WARNING] Could not harvest labels from %s: %s",
+                      result$path, result$error))
+    }
+  }
+  per_file <- lapply(label_results[!failed], `[[`, "data")
   if (length(per_file) == 0L) return(empty)
   all_lab <- data.table::rbindlist(per_file, fill = TRUE)
   all_lab[, Column := canonical_colnames(Column)]
