@@ -228,6 +228,8 @@ run_result <- ParquetBackEndCreate(MDT = MDT,
                                               StopOnFileError = TRUE,
                                               ReturnRunResult = TRUE,
                                               RunId = RunId,
+                                              AutoCleanup = TRUE, 
+                                              CleanupAfterPhase = "database",
                                               MaxCoerceNAPct = 25) # fail a file when type coercion destroys >25% of a column's present values;
                                                                    # per-column damage totals land in CoercionReport.csv next to the manifest
 #### Note: the loader snapshots the four state files (checkpoint, manifest,  ####
