@@ -98,12 +98,6 @@ The same memory-bounded logical-record reader is then used for schema discovery
 and repository loading. Corrected records flow directly to schema inference or
 Parquet chunks; repoquet does not create a cleaned CSV or overwrite the source.
 
-The installed package includes the real-world workbook used while developing
-the multi-table healthcare workflow:
-
-```r
-system.file("extdata", "DBSetupV2.xlsx", package = "repoquet")
-```
 
 It is an example inventory rather than a required package configuration.
 
