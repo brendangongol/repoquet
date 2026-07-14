@@ -32,14 +32,7 @@ RepositoryPaths <- RepositoryInitialize(FormattedDBPath = FormattedDBPath,
                                         CheckpointPath = CheckpointPath,
                                         LogPath = LogPath,
                                         profile = "hcup")
-SchemaRegistryPath <- RepositoryPaths$SchemaRegistryPath
-TableSchemaPath <- RepositoryPaths$TableSchemaPath
-SchemaObservationPath <- RepositoryPaths$SchemaObservationPath
-SchemaReviewPath <- RepositoryPaths$SchemaReviewPath
-ManifestPath <- RepositoryPaths$ManifestPath
-DataContractPath <- RepositoryPaths$DataContractPath
 RunId <- new_repository_run_id()
-SAV_CHUNK_SIZE <- 4000000L
 n_workers <- min(15L, max(1L, parallel::detectCores() - 1L))
 dir.create(ParquetBasePath, recursive = TRUE, showWarnings = FALSE)
 
@@ -153,15 +146,15 @@ PrepareSchemaRegistry(
   MDT = MDT,
   DBLoad = DBLoad,
   MasterDBPath = MasterDBPath,
-  ObservationPath = SchemaObservationPath,
-  SchemaReviewPath = SchemaReviewPath,
+  ObservationPath = RepositoryPaths$SchemaObservationPath,
+  SchemaReviewPath = RepositoryPaths$SchemaReviewPath,
   n_workers = n_workers,
   SourceFingerprintMode = "metadata",
   StrictReaders = FALSE,
   #### This policy workbook is optional and visible. The survey remains     ####
   #### data-derived; matched HCUP policies and conflicts appear explicitly  ####
   #### in SchemaReview.xlsx instead of being applied invisibly.             ####
-  SchemaRegistryPath = SchemaRegistryPath,
+  SchemaRegistryPath = RepositoryPaths$SchemaRegistryPath,
   SchemaProfile = "hcup",
   LogPath = LogPath,
   RunId = RunId
@@ -170,7 +163,7 @@ PrepareSchemaRegistry(
 #### Optional console preview. The helper queries Parquet with DuckDB, so    ####
 #### it does not pull the full observation store into R.                     ####
 schema_issues <- GetSchemaObservations(
-  ObservationPath = SchemaObservationPath,
+  ObservationPath = RepositoryPaths$SchemaObservationPath,
   IssuesOnly = TRUE,
   Limit = 100L
 )
@@ -199,8 +192,8 @@ if (nrow(schema_issues) > 0L) print(schema_issues)
 #### Finalization stops here until all required decisions are complete, then ####
 #### writes TableSchemas.xlsx in the exact format ParquetBackEndCreate uses. ####
 repository_catalog <- FinalizeSchemaRegistry(
-  SchemaReviewPath = SchemaReviewPath,
-  TableSchemaPath = TableSchemaPath,
+  SchemaReviewPath = RepositoryPaths$SchemaReviewPath,
+  TableSchemaPath = RepositoryPaths$TableSchemaPath,
   strict = TRUE
 )
 
@@ -221,12 +214,12 @@ run_result <- ParquetBackEndCreate(MDT = MDT,
                                               TerminalHivePartition = FALSE,
                                               RAMThreshold = 30,
                                               SAV_ROW_THRESHOLD = 4000000L,
-                                              SAV_CHUNK_SIZE = SAV_CHUNK_SIZE,
+                                              SAV_CHUNK_SIZE = 4000000L,
                                               chunk_size_decrement = NULL,
                                               min_chunk_size = NULL,
-                                              SchemaRegistryPath = SchemaRegistryPath,
-                                              ManifestPath = ManifestPath,
-                                              TableSchemaPath = TableSchemaPath,
+                                              SchemaRegistryPath = RepositoryPaths$SchemaRegistryPath,
+                                              ManifestPath = RepositoryPaths$ManifestPath,
+                                              TableSchemaPath = RepositoryPaths$TableSchemaPath,
                                               UseSchemaCatalog = TRUE,
                                               StrictPreflight = TRUE,
                                               StrictSchemaValidation = TRUE,
@@ -258,7 +251,7 @@ log_msg(sprintf("Checkpoint after load: %d files recorded", length(completed_che
 # reset_table_for_reload(MDT = MDT, Database = "NIS", TableName = "Core",
 #                        ParquetBasePath = ParquetBasePath,
 #                        CheckpointPath = CheckpointPath,
-#                        ManifestPath = ManifestPath, DryRun = TRUE)
+#                        ManifestPath = RepositoryPaths$ManifestPath, DryRun = TRUE)
 
 ################################################################################
 #### Summary & Verification ####################################################
@@ -282,12 +275,12 @@ con <- open_duckdb(FormattedDBPath = FormattedDBPath,                 # To creat
 completed_checkpoint <- load_checkpoint(path = CheckpointPath)
 completed_mdt <- MDT[checkpoint_completed_mask(MDT, completed_checkpoint),]
 register_parquet_view_compile(con = con, ParquetBasePath = ParquetBasePath, verbose = TRUE, logStatus = FALSE,
-                               SchemaRegistryPath = SchemaRegistryPath,
-                               TableSchemaPath = TableSchemaPath,
+                               SchemaRegistryPath = RepositoryPaths$SchemaRegistryPath,
+                               TableSchemaPath = RepositoryPaths$TableSchemaPath,
                                validate = TRUE, strict_validation = TRUE,
                               tables_written = unique(repository_table_names(completed_mdt)),
                               LogPath = LogPath, RunId = RunId )
-contract_results <- validate_data_contracts(con, DataContractPath, strict = TRUE,
+contract_results <- validate_data_contracts(con, RepositoryPaths$DataContractPath, strict = TRUE,
                                             LogPath = LogPath, RunId = RunId)
 
 #####################################################################
@@ -311,7 +304,7 @@ con <- open_duckdb(FormattedDBPath = FormattedDBPath, DBName = "DuckDBRelational
 repo_audit <- audit_repository(MDT = MDT,
                                ParquetBasePath = ParquetBasePath,
                                CheckpointPath = CheckpointPath,
-                               ManifestPath = ManifestPath,
+                               ManifestPath = RepositoryPaths$ManifestPath,
                                con = con, verbose = TRUE,
                                LogPath = LogPath, RunId = RunId)
 repo_audit$issues
@@ -330,7 +323,7 @@ repo_audit$issues
 #### Caveat: continuous HCUP variables often label only special codes        ####
 #### (e.g. 999 = missing), so interpret high percentages with the            ####
 #### DomainSize column in view rather than as automatic errors.              ####
-# dict_check <- validate_against_dictionary(con, TableSchemaPath = TableSchemaPath,
+# dict_check <- validate_against_dictionary(con, TableSchemaPath = RepositoryPaths$TableSchemaPath,
 #                                           tables = c("NIS_Core"))
 # head(dict_check, 25)
 

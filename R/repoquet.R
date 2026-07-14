@@ -82,8 +82,7 @@ utils::globalVariables(c(
 .run_env$log_path <- NA_character_
 
 new_repository_run_id <- function() {
-  paste0(format(Sys.time(), "%Y%m%dT%H%M%S"), "_", Sys.getpid(), "_",
-         sprintf("%06d", sample.int(999999L, 1L)))
+  paste0(format(Sys.time(), "%Y%m%dT%H%M%S"), "_", Sys.getpid(), "_", sprintf("%06d", sample.int(999999L, 1L)))
 }
 
 #' Start a run-scoped logging context
@@ -173,7 +172,6 @@ log_msg <- function(msg, log_path = NULL, run_id = NULL) {
   run_tag <- if (is.na(run_id)) "" else sprintf(" [run_id=%s]", run_id)
   line <- sprintf("[%s]%s %s", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), run_tag, msg)
   cat(line, "\n", sep = "")
-
   write_err <- tryCatch({
     dir.create(dirname(log_path), recursive = TRUE, showWarnings = FALSE)
     fcon <- file(log_path, open = "at")
@@ -185,12 +183,10 @@ log_msg <- function(msg, log_path = NULL, run_id = NULL) {
       log_buffer_set(log_path, character(0))
       cat(sprintf("[log] %d buffered message(s) flushed to disk.\n", n_flushed))
     }
-
     writeLines(line, fcon)
     flush(fcon)
     NULL
   }, error = function(e) e)
-
   if (!is.null(write_err)) {
     buffered <- c(log_buffer_get(log_path), line)
     log_buffer_set(log_path, buffered)
@@ -198,8 +194,7 @@ log_msg <- function(msg, log_path = NULL, run_id = NULL) {
       cat(sprintf("[log] Write to '%s' failed (%s). Buffering messages until connectivity restored.\n",
                   log_path, write_err$message))
     } else {
-      cat(sprintf("[log] Still buffering -- %d message(s) pending.\n",
-                  length(buffered)))
+      cat(sprintf("[log] Still buffering -- %d message(s) pending.\n", length(buffered)))
     }
   }
   invisible(NULL)
@@ -208,7 +203,7 @@ log_msg <- function(msg, log_path = NULL, run_id = NULL) {
 flush_log_buffer <- function(log_path = NULL) {
   log_path <- resolve_log_path(log_path)
   buffered <- log_buffer_get(log_path)
-  if (length(buffered) == 0L) {
+  if (length(buffered) == 0L){
     cat("[log] No buffered messages to flush.\n")
     return(invisible(TRUE))
   }
@@ -286,9 +281,6 @@ repository_checkpoint_key <- function(MDT, MasterDBPath = NULL,
     stop(sprintf("Cannot build repository checkpoint key; missing columns: %s",
                  paste(missing_required, collapse = ", ")))
   }
-  #### Keep classic YEAR keys bit-identical to the historical format. For   ####
-  #### generalized partitions, include each key name as well as its value so ####
-  #### changing SITE=MGH to FACILITY=MGH cannot falsely reuse a checkpoint. ####
   partition_identity <- vapply(seq_len(nrow(MDT)), function(i) {
     spec <- partition_spec_for_row(MDT[i, , drop = FALSE])
     if (identical(spec$keys, "YEAR")) {
@@ -329,10 +321,6 @@ checkpoint_completed_mask <- function(MDT, completed_checkpoint, accept_legacy =
   keys <- repository_checkpoint_key(MDT, MasterDBPath = MasterDBPath,
                                     SourceFingerprintMode = SourceFingerprintMode)
   hit <- keys %in% checkpoint_compare
-  #### Legacy acceptance (value-only keys, bare paths) exists for migration ####
-  #### only: value-only keys cannot distinguish SITE=MGH from FACILITY=MGH. ####
-  #### Run migrate_checkpoint_keys() once, then legacy entries disappear    ####
-  #### and this branch stops matching anything.                             ####
   if (isTRUE(accept_legacy)) {
     legacy_keys <- repository_checkpoint_legacy_key(MDT)
     path_counts <- table(MDT$Path)
@@ -796,7 +784,7 @@ scan_for_new_source_files <- function(MasterDBPath, MDT, extensions = supported_
     db_guess <- names(db_tab)[1]
     known_tables <- unique(as.character(MDTdt[MDTdt$Database == db_guess, ]$TableName))
     known_norm <- norm_token(known_tables)
-    ord <- order(nchar(known_norm), decreasing = TRUE)   # longest name wins
+    ord <- order(nchar(known_norm), decreasing = TRUE)
     known_tables <- known_tables[ord]; known_norm <- known_norm[ord]
     for (rel in sort(new_rel)) {
       stem_norm <- norm_token(tools::file_path_sans_ext(basename(rel)))
@@ -919,9 +907,6 @@ write_year_parquet <- function(df, ParquetBasePath, table_name, year_val, source
   if (!data.table::is.data.table(df)) df <- strip_haven(df)
   data.table::setDT(df)
   df <- canonicalize_dataframe_names(df)
-  #### Partition columns live in the directory names; hive injects them at ####
-  #### read time, so they must not also be written into the file. Their    ####
-  #### contents must agree with the workbook value before they are dropped. ####
   validate_partition_column_values(df, partition_keys, partition_values,
                                    source_label = basename(source_path))
   for (pk in intersect(canonical_colnames(partition_keys), names(df))) df[, (pk) := NULL]
@@ -1008,10 +993,6 @@ write_year_parquet <- function(df, ParquetBasePath, table_name, year_val, source
 register_parquet_view <- function(con, ParquetBasePath, table_name, schema_registry = NULL, validate = TRUE,
                                   strict_validation = TRUE, table_schema = NULL) {
   parquet_dir <- gsub("\\\\", "/", file.path(ParquetBasePath, table_name))
-  #### A table whose source files were all verified empty completes and     ####
-  #### checkpoints without writing any Parquet. read_parquet() errors on a  ####
-  #### fileless glob, so skip the view (loudly) instead of failing the      ####
-  #### whole registration pass.                                             ####
   n_parquet <- length(list.files(parquet_dir, pattern = "\\.parquet$", recursive = TRUE, ignore.case = TRUE))
   if (n_parquet == 0L) {
     log_msg(sprintf("[VIEW SKIPPED] %s: no parquet files under %s (all source files may be verified-empty). No view created.",
@@ -1028,8 +1009,6 @@ register_parquet_view <- function(con, ParquetBasePath, table_name, schema_regis
   } else {
     ""
   }
-  #### DuckDB otherwise guesses DATE/BIGINT from directory text. Explicit ####
-  #### hive_types keeps partition columns aligned with the schema catalog. ####
   try(DBI::dbExecute(con, "SET hive_types_autocast = false"), silent = TRUE)
   projection <- if (length(partition_types) > 0L) {
     source_names <- names(partition_types)
@@ -1122,7 +1101,6 @@ SummaryVerification <- function(MDT, CheckpointPath, LogPath, logStatus = TRUE,
     MDT, completed_checkpoint, accept_legacy = SourceFingerprintMode == "none",
     MasterDBPath = MasterDBPath, SourceFingerprintMode = SourceFingerprintMode),]$Path
   msg(sprintf("Files completed : %d", length(completed_files_complete)))
-  #### Load failures and errors ####
   Log <- if (file.exists(LogPath)) readLines(LogPath) else character(0)
   if (!is.null(RunId) && length(RunId) > 0L && !is.na(RunId[1]) && nzchar(RunId[1])) {
     Log <- Log[grepl(sprintf("[run_id=%s]", RunId[1]), Log, fixed = TRUE)]
@@ -1217,8 +1195,6 @@ DBDimPerTable <- function(con, verbose = TRUE, logStatus = TRUE, orderByMemBurde
 ################################################################################
 #### Schema normalization helpers ##############################################
 ################################################################################
-# Canonicalize names once, early, and everywhere. HCUP/SPSS source files are
-# conventionally upper-case, so upper-case is used as the single warehouse schema.
 canonical_colnames <- function(x) {
   x <- trimws(as.character(x))
   x <- toupper(x)
@@ -1455,8 +1431,6 @@ normalize_character_encoding <- function(df, source_encoding = NULL) {
   enc <- .canonical_encoding_name(source_encoding)
   if (enc == "auto") enc <- "UTF-8"
   char_cols <- names(df)[vapply(df, is.character, logical(1))]
-  #### Convert everything first, then mutate the table. A failed conversion ####
-  #### therefore leaves the original bytes intact for an automatic retry.  ####
   new_names <- .normalize_utf8_vector(names(df), enc, "column names")
   converted <- lapply(char_cols, function(col) {
     .normalize_utf8_vector(df[[col]], enc, sprintf("column %s", col))
@@ -1545,8 +1519,6 @@ canonicalize_dataframe_names <- function(df) {
         if (any(miss)) lhs[miss] <- rhs[miss]
         data.table::set(df, j = keep, value = lhs)
       }
-      #### Delete by position, highest first. Deleting by duplicated name can ####
-      #### remove the retained canonical column or assign to it twice.        ####
       for (j in rev(drop)) data.table::set(df, j = j, value = NULL)
     }
   }
@@ -1665,46 +1637,7 @@ add_year_if_missing <- function(df, year_value) {
   }
   return(df)
 }
-################################################################################
-#### Data cleaning helpers #####################################################
-################################################################################
-#' Strip all \pkg{haven} S3 attributes from a data frame
-#'
-#' \code{haven::read_sav()} returns a tibble whose columns carry the
-#' \code{haven_labelled} S3 class.  Operations such as \code{setDT()},
-#' \code{data.table::set()}, and Arrow's \code{Table$create()} dispatch on
-#' that class and can trigger \emph{"recursive indexing failed at level 2"}.
-#'
-#' This function converts the data frame to a \code{data.table} in-place
-#' (zero-copy via \code{setDT()}), then replaces each \code{haven_labelled}
-#' column with its declared base type (\code{double}, \code{integer}, or
-#' \code{character}) using \code{data.table::set()}.  Peak additional RAM is
-#' one column at a time.
-#' @param df A data frame, tibble, or data.table returned by
-#'   \code{haven::read_sav()}.
-#' @return The same object (a \code{data.table}) with all \code{haven_labelled}
-#'   classes removed and columns coerced to their declared base types.
-#' @details
-#' \code{type.convert()} is deliberately \emph{not} used here because i
-#' re-infers types from values, making the result chunk-dependent.  For example
-#' a procedure-code column containing only digits in one chunk would be inferred
-#' as \code{integer}, but a chunk containing alphanumeric ICD-10 codes would be
-#' inferred as \code{character}, causing Arrow schema conflicts across chunks.
-#' Using the declared base type from the \code{haven_labelled} class vector is
-#' deterministic across all chunks of the same file.
-#' @seealso \code{\link{align_columns}}, \code{\link{safe_read_sav}}
-#' @examples
-#' \dontrun{
-#' set.seed(1)
-#' df <- data.frame(sex = haven::labelled(sample(1:2, 10, replace = TRUE),
-#'                                        labels = c(Male = 1, Female = 2)),
-#'                  age = haven::labelled(sample(18:90, 10, replace = TRUE),
-#'                                        label = "Age in years") )
-#' sapply(df, function(x) class(x)[1]) # "haven_labelled"
-#' df <- strip_haven(df)
-#' sapply(df, function(x) class(x)[1]) # "integer"/"numeric"
-#' }
-#' @export
+
 ################################################################################
 #### Pluggable file readers ####################################################
 ################################################################################
@@ -1788,8 +1721,6 @@ call_reader <- function(reader, method, path, reader_options = list(), ...) {
   for (nm in intersect(names(aliases), names(reader_options))) {
     aliased_options[[aliases[[nm]]]] <- reader_options[[nm]]
   }
-  #### Explicit loader arguments are appended last and win over workbook  ####
-  #### options, so ReaderOptions cannot replace path/offset/schema controls. ####
   extras <- c(aliased_options, list(reader_options = reader_options), list(...))
   extras <- extras[!duplicated(names(extras), fromLast = TRUE)]
   formal_names <- names(formals(fun))
@@ -1859,9 +1790,6 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
     keep_leading_zeros <- tolower(trimws(keep_leading_zeros[1])) %in% c("true", "t", "yes", "y", "1")
   }
   args <- list(na.strings = reader_options$NAStrings %||% c("NA", "NULL"),
-               #### fread parses ASCII delimiters from the original bytes. ####
-               #### Character values are decoded strictly and normalized   ####
-               #### to UTF-8 immediately after parsing.                    ####
                encoding = "unknown",
                colClasses = fread_col_classes(col_classes, header),
                keepLeadingZeros = isTRUE(keep_leading_zeros))
@@ -2273,9 +2201,6 @@ read_delimited_full <- function(path, col_classes = NULL, reader_options = list(
 }
 
 register_builtin_file_readers <- function() {
-  #### Delimited family: fread auto-detects separators and reads .gz/.bz2   ####
-  #### natively, so csv/tsv/txt/gz share one implementation. Declared-type  ####
-  #### information does not exist, so type inference samples deep.          ####
   for (tp in c("csv", "tsv", "txt", "gz")) {
     register_file_reader(tp,
       read_full   = function(p, col_classes = NULL, reader_options = list()) read_delimited_full(p, col_classes, reader_options),
@@ -2286,8 +2211,6 @@ register_builtin_file_readers <- function() {
         .read_delimited_chunk(p, offset, n_max, header, col_classes, reader_options),
       chunkable = TRUE)
   }
-  #### Haven family: column types and labels are declared in the header, so ####
-  #### small samples are authoritative and label harvesting is supported.   ####
   register_file_reader("sav",
     read_full   = function(p, reader_options = list()) read_haven_full(
       p, function(path) call_reader(list(type = "sav_inner", read = haven::read_sav), "read", path,
@@ -2356,6 +2279,7 @@ strip_haven <- function(df) {
   }
   canonicalize_dataframe_names(df)
 }
+
 #########################################
 #### align all columns across tables ####
 #########################################
@@ -2410,6 +2334,7 @@ align_columns <- function(df, all_cols, comprehensive_sample = NULL, max_coerce_
   data.table::setcolorder(df, ordered_cols)
   return(df)
 }
+
 ################################################################################
 #### Column-class inference ####################################################
 ################################################################################
@@ -2510,8 +2435,6 @@ align_columns <- function(df, all_cols, comprehensive_sample = NULL, max_coerce_
 #' @export
 build_col_classes <- function(files, base_path, n_workers = 1, reader = "sav",
                               reader_options = NULL){
-  #### The registry encodes the right sample depth per format: declared-    ####
-  #### type files (haven family) sample shallow, delimited files deep.      ####
   all_paths <- if (nchar(base_path) == 0) files else file.path(base_path, files)
   readers <- if (length(reader) == 1L) rep(reader, length(all_paths)) else reader
   if (length(readers) != length(all_paths)) stop("reader must have length 1 or match files.")
@@ -2524,14 +2447,8 @@ build_col_classes <- function(files, base_path, n_workers = 1, reader = "sav",
     tryCatch({
       rd <- get_file_reader(readers[i])
       df <- call_reader(rd, "read_sample", p, reader_options = reader_options[[i]])
-      #### strip_haven is a no-op on frames without labelled columns and    ####
-      #### canonicalizes names either way.                                  ####
       df <- strip_haven(df)
       cls <- sapply(df, function(col) {
-        #### fread represents an all-missing sample as logical even when   ####
-        #### the real source type is unknown. Do not let that sentinel     ####
-        #### override an observed type from another file. A logical column ####
-        #### with at least one TRUE/FALSE value remains genuinely logical. ####
         if (is.logical(col) && !any(!is.na(col))) "unknown" else normalize_type_name(class(col)[1])
       })
       list(ok = TRUE, path = p, classes = cls, error = NA_character_)
@@ -2560,6 +2477,7 @@ build_col_classes <- function(files, base_path, n_workers = 1, reader = "sav",
   names(col_class_map) <- names(col_types_seen)
   col_class_map
 }
+
 ################################################################################
 #### File readers ##############################################################
 ################################################################################
@@ -2815,8 +2733,6 @@ safe_read_sav_chunked <- function(path, chunk_size = 1000000L, TerminalHiveParti
                       new_fields <- ref_schema$fields
                       new_fields[[fi + 1L]] <- arrow::field(conflict_field, arrow::utf8())
                       ref_schema <<- arrow::schema(new_fields)
-                      #### Chunks already on disk carry the old type; re-cast them ####
-                      #### so every file in this year directory agrees.            ####
                       for (prev_file in written_chunk_files) {
                         recast_err <- tryCatch({
                           prev_tbl <- arrow::read_parquet(prev_file, as_data_frame = FALSE)
@@ -2848,8 +2764,6 @@ safe_read_sav_chunked <- function(path, chunk_size = 1000000L, TerminalHiveParti
                   Sys.sleep(chunk_wait_s[cattempt])
                 }
                 write_arrow_table_safely(arrow_tbl, chunk_file)
-                #### Track the file before manifest update. If the manifest ####
-                #### write fails, outer cleanup must still remove this chunk. ####
                 written_chunk_files <- unique(c(written_chunk_files, chunk_file))
                 NULL
               }, error = function(e) e)
@@ -2870,10 +2784,6 @@ safe_read_sav_chunked <- function(path, chunk_size = 1000000L, TerminalHiveParti
         }, error = function(e) list(status = "error", message = e$message))
 
         if(chunk_attempt$status != "error"){ break }
-        #### A partition-value disagreement or coercion-threshold breach is a ####
-        #### data/workbook problem, not a transient read failure -- shrinking ####
-        #### the chunk cannot fix it, so fail the file immediately instead of ####
-        #### entering the retry loop.                                         ####
         if (grepl("disagree with the workbook partition value|exceeds the coercion NA threshold",
                   chunk_attempt$message)) {
           stop(chunk_attempt$message)
@@ -2923,7 +2833,6 @@ safe_read_sav_chunked <- function(path, chunk_size = 1000000L, TerminalHiveParti
               tail_df <- canonicalize_dataframe_names(tail_df)
               tail_df <- enforce_col_classes(tail_df, col_classes, max_coerce_na_pct = max_coerce_na_pct)
             }
-            #### Inf/NaN in numeric cols -- Arrow cannot serialise these ####
             num_cols_tail <- names(tail_df)[sapply(tail_df, is.numeric)]
             for(col in num_cols_tail){
               bad <- which(!is.finite(tail_df[[col]]) & !is.na(tail_df[[col]]))
@@ -2984,11 +2893,6 @@ safe_read_sav_chunked <- function(path, chunk_size = 1000000L, TerminalHiveParti
       touch_repository_lock(RepositoryLock)
     }
     if(total_written == 0L){
-      #### Verified empty vs failed read: a successfully determined row     ####
-      #### count of exactly 0 is a true fact about the source file, not a   ####
-      #### failure -- record it and checkpoint so the file is not retried   ####
-      #### on every run. An unknown row count with 0 rows written stays a   ####
-      #### hard failure.                                                    ####
       if (!is.na(total_rows) && total_rows == 0L) {
         log_msg(sprintf("[WARN] file=%s | issue=verified_empty_source | declared_rows=0 | Recording as complete with 0 rows.", basename(path)))
         update_parquet_manifest(ManifestPath = ManifestPath, Database = Database, TableName = TableName,
@@ -3013,10 +2917,6 @@ safe_read_sav_chunked <- function(path, chunk_size = 1000000L, TerminalHiveParti
       msg <- sprintf(
         "file=%s | issue=row_count_mismatch_possible_truncation | declared_ncases=%d | rows_written=%d | File appears truncated -- verify against HCUP documentation or re-download.",
         basename(path), total_rows, total_written)
-      #### AcceptPartial is the per-row, human-recorded acknowledgment in    ####
-      #### the MDT workbook that this file's truncation has been verified    ####
-      #### and accepted. Without it, truncation stays fatal so a partial     ####
-      #### load can never silently checkpoint.                               ####
       if (!isTRUE(accept_partial)) {
         log_msg(sprintf("[CHUNKED ERROR] %s", msg))
         stop(msg)
@@ -3080,14 +2980,6 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
                   if (logical_stream) "streaming repaired logical records" else
                     paste(formatC(total_rows, format = "d", big.mark = ","), "rows"),
                   as.integer(chunk_size)))
-  #### Pin fread's column types per chunk from the agreed classes. Without  ####
-  #### this fread re-infers per chunk, so e.g. a character column that is   ####
-  #### entirely empty within one chunk types as logical there (empty -> NA) ####
-  #### while mixed chunks yield "" -- values would depend on chunk          ####
-  #### composition.                                                         ####
-  #### Positional list(type = indices) form: with header = FALSE fread      ####
-  #### names columns V1..Vn before col.names applies, so NAMED colClasses   ####
-  #### would silently never match.                                          ####
   chunk_col_classes <- NULL
   if (!is.null(col_classes)) {
     canon_hdr <- canonical_colnames(header)
@@ -3100,8 +2992,6 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
   file_stem <- parquet_chunk_stem(path, partition_dir = year_dir,
                                   TerminalHivePartition = TerminalHivePartition,
                                   MaxFileStemTruncate = MaxFileStemTruncate)
-  #### Stale chunks from a previous partial run of this file must go before ####
-  #### rewriting, or leftover high-numbered chunks double-count rows.       ####
   if (!is.null(year_dir) && dir.exists(year_dir)) {
     stale <- if (TerminalHivePartition) {
       d <- list.dirs(year_dir, recursive = FALSE, full.names = TRUE)
@@ -3131,9 +3021,6 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
   process_chunk <- function(df_chunk) {
     if (!is.data.frame(df_chunk)) stop(sprintf("Reader '%s' did not return a data frame chunk.", reader))
     data.table::setDT(df_chunk)
-    #### Built-in delimited callbacks already return strict UTF-8. This   ####
-    #### second pass enforces that reader contract without reinterpreting ####
-    #### the normalized values as their original source encoding.         ####
     df_chunk <- normalize_character_encoding(df_chunk, "UTF-8")
     if (!is.null(year_val) && "YEAR" %in% partition_keys) df_chunk <- add_year_if_missing(df_chunk, year_val)
     if (!is.null(all_cols)) df_chunk <- align_columns(df_chunk, all_cols, col_classes,
@@ -3197,8 +3084,6 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
       while (offset < total_rows) {
         touch_repository_lock(RepositoryLock)
         n_this <- min(as.integer(chunk_size), total_rows - offset)
-        #### skip = offset + 1 skips the header line plus the rows already  ####
-        #### written; column names come from the header read above.         ####
         df_chunk <- call_reader(rd, "read_chunk", path, reader_options = reader_options,
                                 offset = offset, n_max = n_this, header = header,
                                 col_classes = col_classes)
@@ -3307,9 +3192,6 @@ build_comprehensive <- function(files, base_path, suffixes, uni_suffixes, reader
   if (!is.list(reader_options) || length(reader_options) != length(all_paths)) {
     stop("reader_options must be a list with one element per file.")
   }
-  #### Per-file tolerance: a missing/unreadable file must not abort the     ####
-  #### whole database's header scan -- its columns stay unknown and the     ####
-  #### file fails individually at load time instead.                        ####
   scan_one <- function(i) tryCatch({
     rd <- get_file_reader(readers[i])
     header <- canonical_colnames(call_reader(rd, "read_header", all_paths[i],
@@ -3342,6 +3224,7 @@ build_comprehensive <- function(files, base_path, suffixes, uni_suffixes, reader
     unique(unlist(all_headers[suffixes == s]))
   }), uni_suffixes)
 }
+
 ################################################################################
 #### Checkpoint system #########################################################
 ################################################################################
@@ -3382,7 +3265,6 @@ load_checkpoint <- function(path){
   character(0)
 }
 
-
 #' Atomically save the completed-file checkpoint
 #'
 #' Writes the checkpoint to a temporary file in the same directory and then
@@ -3414,13 +3296,6 @@ save_checkpoint <- function(checkpoint, path) {
 ################################################################################
 #### Single-writer repository lock #############################################
 ################################################################################
-#### The atomic-write helpers protect individual files, but nothing stops    ####
-#### two loader runs (e.g. two machines against the same network share)      ####
-#### from interleaving checkpoint saves. The lock is a directory (mkdir is   ####
-#### atomic on every platform and filesystem) containing an owner record;    ####
-#### the loader heartbeats it after each completed file so a crashed run's   ####
-#### lock goes stale and can be taken over.                                  ####
-
 repository_lock_path_default <- function(ParquetBasePath) {
   file.path(dirname(ParquetBasePath), ".repository.lock")
 }
@@ -3540,12 +3415,9 @@ snapshot_repository_state <- function(CheckpointPath = NULL, ManifestPath = NULL
   }
   stamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
   snap_dir <- file.path(BackupDir, stamp)
-  #### A second snapshot within the same second lands in the same folder --  ####
-  #### harmless, the copies are identical.                                   ####
   dir.create(snap_dir, recursive = TRUE, showWarnings = FALSE)
   ok <- file.copy(candidates, snap_dir, overwrite = TRUE, copy.date = TRUE)
   log_msg(sprintf("[SNAPSHOT] Saved %d/%d state file(s) to %s", sum(ok), length(candidates), snap_dir))
-  #### Retention: newest keep_last snapshot folders survive.                 ####
   snaps <- list.dirs(BackupDir, recursive = FALSE, full.names = TRUE)
   snaps <- snaps[grepl("^[0-9]{8}_[0-9]{6}$", basename(snaps))]
   if (length(snaps) > keep_last) {
@@ -3694,8 +3566,6 @@ reset_table_for_reload <- function(MDT, Database, TableName, ParquetBasePath,
                   if (DryRun) "would remove" else "removing",
                   parquet_dir, sum(stale), sum(stale_manifest)))
   if (!DryRun) {
-    #### Destructive path: take the single-writer lock so a reset cannot    ####
-    #### race a loader run on another machine.                              ####
     reset_lock <- acquire_repository_lock(repository_lock_path_default(ParquetBasePath),
                                           owner_note = sprintf("reset_table_for_reload %s", table_name))
     on.exit(release_repository_lock(reset_lock), add = TRUE)
@@ -3716,8 +3586,6 @@ reset_table_for_reload <- function(MDT, Database, TableName, ParquetBasePath,
 #### Repository reconciliation (fsck) ##########################################
 ################################################################################
 
-#### Normalize paths for cross-source comparison (manifest rows may mix      ####
-#### separators; Windows filesystems are case-insensitive).                  ####
 normalize_repo_path <- function(x) {
   out <- gsub("\\\\", "/", as.character(x))
   if (.Platform$OS.type == "windows") tolower(out) else out
@@ -3822,10 +3690,6 @@ audit_repository <- function(MDT, ParquetBasePath, CheckpointPath, ManifestPath 
         add_issue("manifest_missing_file", "error", sum(gone))
       }
     }
-    #### Every real output file gets its own file-level "written" manifest   ####
-    #### row (single-file and per-chunk alike). Dir-level rows (completed/   ####
-    #### empty/partial_accepted) must NOT blanket-claim their directory --   ####
-    #### that would hide genuine orphans sitting inside partition dirs.      ####
     claimed_files <- normalize_repo_path(manifest$ParquetPath[grepl("\\.parquet$", manifest$ParquetPath, ignore.case = TRUE)])
     disk_norm <- normalize_repo_path(disk_files)
     orphan_mask <- !(disk_norm %in% claimed_files)
@@ -3892,10 +3756,6 @@ audit_repository <- function(MDT, ParquetBasePath, CheckpointPath, ManifestPath 
 #' @export
 build_default_schema_registry <- function(profile = c("generic", "hcup")) {
   profile <- match.arg(profile)
-  #### Generic repositories must not inherit naming assumptions: ID, KEY,  ####
-  #### CODE, and WEIGHT can legitimately mean different things by domain.  ####
-  #### The empty template remains user-extensible; HCUP conventions are an ####
-  #### explicit opt-in profile.                                             ####
   if (profile == "generic") {
     return(data.table::data.table(
       Profile = character(), ColumnPattern = character(),
@@ -4236,9 +4096,6 @@ update_parquet_manifest <- function(ManifestPath, Database, TableName, DuckDBTab
   dir.create(dirname(ManifestPath), recursive = TRUE, showWarnings = FALSE)
   manifest_year <- suppressWarnings(as.integer(Year[1]))
   if (length(manifest_year) == 0L || is.na(manifest_year)) manifest_year <- NA_integer_
-  #### General partition provenance: ";"-joined key names and (sanitized)   ####
-  #### values, so site and nested partitions are first-class rather than    ####
-  #### parsed back out of ParquetPath. Year stays as a derived convenience. ####
   pk_chr <- if (is.null(PartitionKey) || all(is.na(PartitionKey))) NA_character_ else paste(as.character(PartitionKey), collapse = ";")
   pv_chr <- if (is.null(PartitionValue) || all(is.na(PartitionValue))) NA_character_ else paste(as.character(PartitionValue), collapse = ";")
   row <- data.table::data.table(
@@ -4291,9 +4148,6 @@ update_parquet_manifest <- function(ManifestPath, Database, TableName, DuckDBTab
   }
   old <- if (file.exists(ManifestPath)) read_parquet_manifest(ManifestPath) else data.table::data.table()
   if (nrow(old) > 0L) {
-    #### Dedupe slot: PartitionValue when recorded, falling back to Year so ####
-    #### rows written by older manifests (no PartitionValue column) still   ####
-    #### dedupe correctly.                                                  ####
     slot_of <- function(dt) {
       pv <- if ("PartitionValue" %in% names(dt)) as.character(dt$PartitionValue) else rep(NA_character_, nrow(dt))
       ifelse(!is.na(pv) & nzchar(pv), pv, as.character(dt$Year))
@@ -4623,9 +4477,6 @@ read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL,
                     DuckDBTable = NULL, SourcePath = NULL, SchemaHash = NA_character_,
                     MaxFileStemTruncate = FALSE, accept_partial = FALSE,
                     RepositoryLock = NULL) {
-  #### An unrecognized strategy string would otherwise silently behave as   ####
-  #### "always direct read" -- an OOM crash hours into a run instead of an  ####
-  #### immediate error here.                                                ####
   PartitionBy <- match.arg(PartitionBy, c("NRows", "RAMEstimate", "FAIL"))
   file_mdbdir <- MDTSelect[MDTSelect$Path == path, ]$MDBDir[1]
   row_options <- MDTSelect[MDTSelect$Path == path, , drop = FALSE]
@@ -4692,8 +4543,6 @@ read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL,
   if(PartitionBy == "FAIL"){
     if(PrintStatus){ print("Performing test read") }
     DFTemp <- tryCatch({
-      #### read_full strips label classes and sanitizes encodings, and      ####
-      #### errors on failure -- the error is the chunk-dispatch signal.     ####
       df <- call_reader(rd, "read_full", full_path, reader_options = reader_options,
                         col_classes = col_classes)
       if ("YEAR" %in% canonical_colnames(partition_keys)) df <- add_year_if_missing(df, year_val)
@@ -4813,7 +4662,7 @@ open_duckdb <- function(FormattedDBPath, DBName = "DuckDBRelationalDatabase.duck
 #' HCUP discharge records are a sample: national estimates require the survey
 #' weight (\code{DISCWT} for NIS, \code{TRENDWT} for trend files, etc.). These
 #' helpers compute weighted point estimates with the weight handling that is
-#' easy to get subtly wrong by hand -- rows with a missing weight are excluded
+#' easy to get subtly wrong by hand. Rows with a missing weight are excluded
 #' from weighted figures (and counted separately), and for means the weight
 #' sum is restricted to rows where the value is non-missing so the denominator
 #' matches the numerator.
@@ -4906,8 +4755,6 @@ weighted_summary <- function(con, table, value_col = NULL, weight_col,
       FROM {qtbl} {where_clause} {grp}")
   } else {
     x <- quote_duckdb_ident(resolve(value_col, "value_col"))
-    #### The weighted mean's denominator only counts weights of rows whose  ####
-    #### value is present, so numerator and denominator cover the same rows. ####
     q <- glue::glue("
       SELECT {sel_by}
              COUNT(*) AS n_unweighted,
@@ -5312,12 +5159,9 @@ ColumnAvailabilityCompile <- function(con, tables, ParquetBasePath, SupportingIn
       n_empty <- 0L
       n_inconsistent <- 0L
     } else {
-      #### Without na.rm, a column absent from any one partition yields NA   ####
-      #### here and is silently dropped from BOTH counters -- yet columns    ####
-      #### missing from some partitions are exactly the "inconsistent" ones. ####
       max_pct <- suppressWarnings(apply(avail[partition_cols], 1, max, na.rm = TRUE))
       min_pct <- suppressWarnings(apply(avail[partition_cols], 1, min, na.rm = TRUE))
-      max_pct[!is.finite(max_pct)] <- 0   # all-NA row: treat as empty everywhere
+      max_pct[!is.finite(max_pct)] <- 0
       min_pct[!is.finite(min_pct)] <- 0
       n_empty <- sum(max_pct <= 1, na.rm = TRUE)
       n_inconsistent <- sum(max_pct > 1 & min_pct <= 1, na.rm = TRUE)
@@ -5585,13 +5429,6 @@ discover_schema_relationships <- function(table_schema, include_candidates = TRU
                                          tolower(as.character(Role_Right)) == "join_key", "declared", "candidate")))])
 }
 
-#' Initialize a versioned repository directory layout
-#'
-#' Creates the first two priority infrastructure layers for the data warehouse:
-#' schema metadata, manifests, logs, and checkpoints.  The function returns a
-#' named list of paths that should be passed into the loader rather than relying
-#' on scattered path literals.
-#' @export
 ################################################################################
 #### Project scaffolding #######################################################
 ################################################################################
@@ -5670,7 +5507,7 @@ create_repository_project <- function(dir, MasterDBPath = file.path(dir, "source
     "  DBName            = \"Repository.duckdb\",",
     "  DuckDB_GB         = \"8GB\"        # DuckDB memory limit (~75% of available RAM)",
     ")"), paths$ConfigPath)
-  #### Empty MDT with the exact headers the preflight requires.             ####
+  #### Empty MDT with the exact headers the preflight requires. ####
   mdt_template <- data.frame(Database = character(), MDBDir = character(), Path = character(),
                              TableName = character(), FileType = character(),
                              PartitionKey = character(), PartitionValue = character(),
@@ -5764,7 +5601,7 @@ create_repository_project <- function(dir, MasterDBPath = file.path(dir, "source
 #' a year-partitioned SALES database (csv, three years, with an identifier,
 #' a code column, and a sampling weight), a site-partitioned SENSORS database
 #' (csv, two sites), and a labelled Stata file to exercise the data dictionary
-#' -- plus a filled-in DBSetup.xlsx. Everything the quickstart in the README
+#' plus a filled-in DBSetup.xlsx. Everything the quickstart in the README
 #' does runs against this.
 #' @param dir Project directory.
 #' @param seed RNG seed for reproducible fake data.
@@ -5877,9 +5714,6 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
                                  LogPath = NULL, RunId = NULL) {
   previous_run <- if (!is.null(LogPath) || !is.null(RunId)) begin_repository_run(LogPath, RunId) else NULL
   if (!is.null(previous_run)) on.exit(restore_repository_run(previous_run), add = TRUE)
-  #### Year is no longer required: identity and partitioning derive from   ####
-  #### the partition spec (PartitionKey/PartitionValue, with Year as the   ####
-  #### legacy fallback for blank YEAR-keyed rows).                         ####
   required <- c("Database", "MDBDir", "Path", "TableName", "FileType")
   missing_required <- setdiff(required, names(MDT))
   issues <- data.table::data.table(Check = character(), Severity = character(), Message = character(), N = integer())
@@ -5890,9 +5724,6 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
     add_issue("required_columns", "error", sprintf("MDT is missing required columns: %s", paste(missing_required, collapse = ", ")), length(missing_required))
   } else {
     MDTdt <- data.table::as.data.table(MDT)
-    #### Required columns must also be non-blank per row: a blank Path or   ####
-    #### MDBDir builds a garbage file path that fails much later and less   ####
-    #### legibly than an error here.                                        ####
     for (rc in required) {
       vals <- MDTdt[[rc]]
       blank <- is.na(vals) | !nzchar(trimws(as.character(vals)))
@@ -5939,9 +5770,6 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
     if (any(bad_filetype)) add_issue("bad_filetype", "error",
                                      sprintf("One or more MDT FileType values have no registered reader. Supported: %s.",
                                              paste(supported_file_types(), collapse = ", ")), sum(bad_filetype))
-    #### AcceptPartial (optional): per-row acknowledgment that a file's     ####
-    #### verified truncation is accepted; such rows checkpoint with a       ####
-    #### warning instead of failing on row-count mismatch.                  ####
     if ("AcceptPartial" %in% names(MDTdt)) {
       ap_raw <- MDTdt$AcceptPartial
       ap_set <- !is.na(ap_raw) & nzchar(trimws(as.character(ap_raw)))
@@ -5953,9 +5781,6 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
       if (n_ap > 0L) add_issue("accept_partial_rows", "warning",
                                sprintf("%d row(s) set AcceptPartial=TRUE; truncated loads for these files checkpoint with a [WARN] instead of failing.", n_ap), n_ap)
     }
-    #### Hive partition spec checks. Every row must resolve to a valid      ####
-    #### spec; blank PartitionKey/PartitionValue fall back to YEAR + the    ####
-    #### legacy Year column when present.                                   ####
     specs <- vector("list", nrow(MDTdt))
     partition_types <- vector("list", nrow(MDTdt))
     for (i in seq_len(nrow(MDTdt))) {
@@ -5972,14 +5797,10 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
     ok <- !vapply(specs, inherits, logical(1), what = "error") &
       !vapply(partition_types, inherits, logical(1), what = "error")
     if (all(ok)) {
-      #### Identity check uses the same key the checkpoint uses.            ####
       rk <- repository_checkpoint_key(MDTdt)
       dup_key <- sum(duplicated(rk) | duplicated(rk, fromLast = TRUE))
       if (dup_key > 0L) add_issue("duplicate_repository_key", "error", "Duplicate repository checkpoint identities found.", dup_key)
     }
-    #### YEAR-keyed partition values must be whole years, or hive dirs and  ####
-    #### YEAR-typed queries break. Note as.integer("2019.5") silently       ####
-    #### truncates, so require an all-digits string, not mere coercibility. ####
     bad_year <- sum(vapply(specs[ok], function(s) {
       "YEAR" %in% s$keys && !grepl("^[0-9]+$", s$values[match("YEAR", s$keys)])
     }, logical(1)))
@@ -6054,8 +5875,6 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
                                                                      chunk_collisions$Dirs[i], chunk_collisions$N[i],
                                                                      chunk_collisions$ChunkStem[i], chunk_collisions$Paths[i]))
       }
-      #### Distinct raw PartitionValues that sanitize to the same directory ####
-      #### would silently merge partitions.                                 ####
       raw_vals <- if ("PartitionValue" %in% names(MDTdt)) as.character(MDTdt$PartitionValue)[ok] else rep(NA_character_, sum(ok))
       collide <- data.table::data.table(Database = spec_dt$Database, TableName = spec_dt$TableName,
                                         Dir = spec_dt$Dir, DirKey = spec_dt$DirKey,
@@ -6077,7 +5896,7 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
 }
 
 ################################################################################
-#### User-guided schema discovery workflow ####################################
+#### User-guided schema discovery workflow #####################################
 ################################################################################
 
 .classify_schema_reader_warnings <- function(warnings, rows_sampled = NA_integer_) {
@@ -6266,8 +6085,6 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
         SurveyMessage = NA_character_
       ), stats))
     })
-    #### Hive partition columns are virtual schema members even when the     ####
-    #### physical source column is absent or intentionally removed.          ####
     for (j in seq_along(pspec$keys)) {
       rows[[length(rows) + 1L]] <- data.table::as.data.table(c(base, list(
         ObservationKind = "hive_partition",
@@ -6320,10 +6137,6 @@ SurveyRepositorySchema <- function(MDT, MasterDBPath, ObservationPath,
   if (!is.null(DBLoad)) MDTdt <- MDTdt[as.character(Database) %in% as.character(DBLoad)]
   if (nrow(MDTdt) == 0L) stop("Schema survey has no MDT rows to inspect.")
   scan_one <- function(i) {
-    #### Multisession workers do not inherit callbacks stored inside the    ####
-    #### main process's reader-registry environment when repoquet.R was     ####
-    #### sourced directly. Re-registering is cheap and makes both installed ####
-    #### package and development/source execution deterministic.            ####
     register_builtin_file_readers()
     .survey_schema_source(MDTdt[i, ], MasterDBPath, SourceFingerprintMode)
   }
@@ -6653,9 +6466,6 @@ RecommendRepositorySchema <- function(survey = NULL, ObservationPath = NULL,
   })
   old <- data.table::rbindlist(Filter(Negate(is.null), old_parts), fill = TRUE)
   if (nrow(old) == 0L || !all(c("Database", "TableName", "Column", "ObservationSignature") %in% names(old))) return(registry)
-  #### Preserve only deliberate user decisions. Blank rows from an older, ####
-  #### more conservative proposal must not replace a newly auto-approved   ####
-  #### decision when recommendation rules improve.                          ####
   if (!"Decision" %in% names(old)) return(registry)
   old_decision <- tolower(trimws(as.character(old$Decision)))
   old <- old[old_decision %in% c("accept", "override")]
@@ -6705,9 +6515,6 @@ RecommendRepositorySchema <- function(survey = NULL, ObservationPath = NULL,
   target <- data.table::as.data.table(target)
   if (length(target_rows) == 0L || length(fields) == 0L) return(target)
   for (field in fields) {
-    #### Blank Excel columns are often read as numeric or logical. Review ####
-    #### fields are textual contracts, so normalize both sides before a  ####
-    #### data.table assignment can coerce valid decisions to NA.          ####
     if (!field %in% names(target)) {
       target[, (field) := NA_character_]
     } else {
@@ -6738,9 +6545,6 @@ WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = 
     compatibility <- .preserve_compatibility_decisions(compatibility, SchemaReviewPath)
   }
   if (ncol(compatibility) == 0L) {
-    #### Keep the hidden registry structurally valid even when no groups  ####
-    #### exist. Header-only sheets read cleanly and do not masquerade as  ####
-    #### user decisions during finalization.                              ####
     compatibility <- data.table::data.table(
       Scope = character(), Database = character(), Column = character(),
       MergeGroup = character(), CurrentTypes = character(), Tables = character(),
@@ -7012,8 +6816,6 @@ WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = 
     if (nrow(value) > 0L) {
       openxlsx::writeDataTable(wb, sheet, value, tableStyle = "TableStyleMedium2")
     } else if (ncol(value) > 0L) {
-      #### openxlsx cannot create an Excel table with zero data rows. Keep ####
-      #### the sheet useful by writing its headers as ordinary cells.      ####
       openxlsx::writeData(wb, sheet, value, colNames = TRUE)
     }
     openxlsx::freezePane(wb, sheet, firstRow = TRUE)
@@ -7172,9 +6974,6 @@ WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = 
   }
   assigned <- data.table::rbindlist(assignments, fill = TRUE)
   if (nrow(assigned) > 0L) {
-    #### A cross-database decision intentionally supersedes a narrower     ####
-    #### within-database decision for the same physical column. Detect     ####
-    #### only disagreements among rules at the highest applicable scope.  ####
     highest <- assigned[, .(Priority = max(Priority)), by = Row]
     candidates <- assigned[highest, on = .(Row, Priority), nomatch = 0L]
     conflicts <- candidates[, .(
@@ -7214,9 +7013,6 @@ FinalizeRepositorySchema <- function(SchemaReviewPath, TableSchemaPath, strict =
   if (length(missing) > 0L) {
     stop("Schema review Registry sheet is missing required columns: ", paste(missing, collapse = ", "))
   }
-  #### Source errors invalidate downstream decisions. Report these before  ####
-  #### asking for column review, because a corrected/resurveyed source can ####
-  #### change the proposal and its observation signatures.                  ####
   if ("SourceIssues" %in% sheets) {
     source_issues <- data.table::as.data.table(openxlsx::read.xlsx(SchemaReviewPath, sheet = "SourceIssues"))
     source_errors <- if ("SurveyStatus" %in% names(source_issues)) {
@@ -7365,10 +7161,6 @@ write_table_schema_catalog <- function(table_schema, TableSchemaPath, label_cata
   if (is.null(TableSchemaPath) || !nzchar(TableSchemaPath)) return(invisible(NULL))
   dir.create(dirname(TableSchemaPath), recursive = TRUE, showWarnings = FALSE)
   table_schema <- data.table::as.data.table(table_schema)
-  #### Preserve the data dictionary across writers that don't harvest       ####
-  #### labels themselves (e.g. ParquetBackEndCreate's end-of-run write):    ####
-  #### rewriting the workbook without re-reading the Labels sheet would     ####
-  #### silently destroy it.                                                 ####
   if (is.null(label_catalog)) label_catalog <- load_label_catalog(TableSchemaPath)
   if (is_excel_workbook_path(TableSchemaPath)) {
     sheets <- list(TableSchemas = table_schema)
@@ -7397,7 +7189,7 @@ write_table_schema_catalog <- function(table_schema, TableSchemaPath, label_cata
   invisible(TableSchemaPath)
 }
 
-#### Sibling file used for the data dictionary when the catalog is CSV.     ####
+#### Sibling file used for the data dictionary when the catalog is CSV. ####
 label_catalog_path <- function(TableSchemaPath) {
   paste0(tools::file_path_sans_ext(TableSchemaPath), "_Labels.csv")
 }
@@ -7420,9 +7212,6 @@ load_label_catalog <- function(TableSchemaPath) {
       data.table::fread(lp)
     }
   }, error = function(e) {
-    #### The dictionary is optional, so a read failure must not block the   ####
-    #### workflow -- but it must not be silent either, or the Labels sheet  ####
-    #### quietly vanishes on the next catalog rewrite.                      ####
     log_msg(sprintf("[LABELS WARNING] Could not read the Labels dictionary for %s: %s", TableSchemaPath, conditionMessage(e)))
     NULL
   })
@@ -7489,8 +7278,6 @@ parse_value_label_codes <- function(x) {
   if (is.na(x) || !nzchar(x)) return(character(0))
   if (endsWith(x, " ...")) return(NULL)
   pieces <- strsplit(x, "; ", fixed = TRUE)[[1]]
-  #### Pieces without " = " are continuations of a label that itself        ####
-  #### contained "; " -- they carry no code, so skip them.                   ####
   has_code <- grepl(" = ", pieces, fixed = TRUE)
   codes <- trimws(sub(" = .*$", "", pieces[has_code]))
   unique(codes[nzchar(codes)])
@@ -7661,7 +7448,6 @@ harvest_source_labels <- function(files, reader, n_workers = 1) {
   if (length(per_file) == 0L) return(empty)
   all_lab <- data.table::rbindlist(per_file, fill = TRUE)
   all_lab[, Column := canonical_colnames(Column)]
-  #### First non-empty label per column wins (files arrive newest-first).   ####
   has_any <- !(is.na(all_lab$VariableLabel) & is.na(all_lab$ValueLabels))
   all_lab <- all_lab[has_any]
   if (nrow(all_lab) == 0L) return(empty)
@@ -7746,10 +7532,6 @@ load_table_schema_catalog <- function(TableSchemaPath, strict = FALSE) {
     ts[bad, CanonicalType := "character"]
   }
   col_classes <- list()
-  #### Partition columns come from directory names, not file contents;     ####
-  #### only explicit catalog Role == "partition" rows are removed from     ####
-  #### writer class maps. A real source-file column named YEAR can survive ####
-  #### when a table is partitioned by something else.                      ####
   is_partition <- !is.na(ts$Role) & tolower(as.character(ts$Role)) == "partition"
   body_rows <- ts[!is_partition]
   for (db in unique(body_rows$Database)) {
@@ -7790,9 +7572,6 @@ merge_table_schema_catalog <- function(new_schema, existing_schema = NULL) {
       for (nm in preserve) data.table::set(new_schema, i = hit, j = nm, value = curated[[nm]][idx[hit]])
     }
   }
-  #### Rows absent from a freshly scanned table are stale columns and must ####
-  #### be pruned. Only tables that were not part of this refresh are carried ####
-  #### forward; manual metadata for columns still present was applied above. ####
   refreshed_tables <- unique(paste(new_schema$Database, new_schema$TableName, sep = "||"))
   existing_table <- paste(existing$Database, existing$TableName, sep = "||")
   carried <- existing[!existing_table %in% refreshed_tables]
@@ -7849,10 +7628,6 @@ BuildRepositorySchema <- function(MDTSelect, MasterDBPath, Database = NULL, n_wo
     reader_tbl <- as.character(rows_tbl$FileTypeLower)
     reader_opts <- lapply(seq_len(nrow(rows_tbl)), function(i) reader_options_for_row(rows_tbl[i, ]))
     full_paths <- file.path(MasterDBPath, rows_tbl$MDBDir, rows_tbl$Path)
-    #### Missing files are excluded from schema inference so one absent     ####
-    #### file cannot abort the whole database; each missing file still      ####
-    #### fails individually at load time. Present-but-unreadable files      ####
-    #### keep triggering the strict inference stop.                         ####
     missing_mask <- !file.exists(full_paths)
     if (any(missing_mask)) {
       log_msg(sprintf("[SCHEMA WARNING] %s/%s: %d source file(s) missing on disk (first: %s) -- excluded from schema inference; they will fail individually at load time.",
@@ -7861,18 +7636,12 @@ BuildRepositorySchema <- function(MDTSelect, MasterDBPath, Database = NULL, n_wo
       reader_tbl <- reader_tbl[!missing_mask]
       reader_opts <- reader_opts[!missing_mask]
     }
-    #### Partition keys live in the directory names, never in the files, so ####
-    #### they are excluded from the column union and the class maps. This   ####
-    #### also errors early if the table's rows disagree on PartitionKey.    ####
     part_keys <- table_partition_keys(rows_tbl)
     part_types <- table_partition_types(rows_tbl)
     comprehensive[[tbl]] <- setdiff(build_comprehensive(files = full_paths, base_path = "", suffixes = rep(tbl, length(full_paths)),
                                                         uni_suffixes = tbl, n_workers = n_workers, reader = reader_tbl,
                                                         reader_options = reader_opts)[[tbl]],
                                     part_keys)
-    #### Data dictionary: capture the SPSS variable/value labels that       ####
-    #### strip_haven() discards during loading. Newest file first so a      ####
-    #### label that evolved across years reflects the latest definition.    ####
     if (isTRUE(harvest_labels) && length(full_paths) > 0L) {
       rows_kept <- rows_tbl[!missing_mask]
       for (label_reader in unique(reader_tbl[vapply(reader_tbl, reader_supports_labels, logical(1))])) {
@@ -7895,10 +7664,6 @@ BuildRepositorySchema <- function(MDTSelect, MasterDBPath, Database = NULL, n_wo
     from_catalog <- is.list(known_col_classes) && !is.null(known_col_classes[[tbl]])
     new_cols <- character(0)
     if (from_catalog) {
-      #### Catalog mode: the curated catalog is the source of truth, so no   ####
-      #### sampling and no registry re-application (manual edits would be    ####
-      #### clobbered). Headers are still scanned above, and only columns the ####
-      #### catalog has never seen get a fresh inference pass.                ####
       class_map <- known_col_classes[[tbl]]
       names(class_map) <- canonical_colnames(names(class_map))
       class_map <- class_map[!names(class_map) %in% part_keys]
@@ -7934,9 +7699,6 @@ BuildRepositorySchema <- function(MDTSelect, MasterDBPath, Database = NULL, n_wo
     if (from_catalog && length(new_cols) > 0L && nrow(long) > 0L) {
       long[Column %in% new_cols, Source := "inferred_at_load"]
     }
-    #### One catalog row per hive partition key. YEAR stays integer; other  ####
-    #### keys are character, matching what DuckDB autocasts from the        ####
-    #### directory names.                                                   ####
     year_row <- data.table::data.table(Database = as.character(rows_tbl$Database[1]),
                                        TableName = as.character(tbl),
                                        DuckDBTable = physical_table,
@@ -8016,12 +7778,6 @@ ValidateSchemaMergeKeys <- function(table_schema, strict = FALSE) {
       Databases = paste(sort(unique(Database)), collapse = "; "),
       Detection = "approved_compatibility"),
     by = MergeGroup][NTypes > 1L]
-  #### Parentheses force data.table to read this as a logical filter on the ####
-  #### column rather than a variable lookup in calling scope.               ####
-  #### Once a candidate has been reviewed, only its approved MergeGroup is ####
-  #### authoritative. This permits a user to approve within-database groups ####
-  #### while explicitly keeping identically named cross-database fields     ####
-  #### separate.                                                             ####
   keys <- ts[(CandidateMergeKey) & !MergeReviewed & !ExplicitGroup]
   issues_within_db <- keys[, .(Scope = "within_database",
                                Types = paste(sort(unique(CanonicalType)), collapse = ","),
@@ -8085,9 +7841,6 @@ BuildRepositoryCatalog <- function(MDT, DBLoad = NULL, MasterDBPath, n_workers =
   if (!is.null(previous_run)) on.exit(restore_repository_run(previous_run), add = TRUE)
   MDTdt <- data.table::as.data.table(MDT)
   if (is.null(DBLoad)) DBLoad <- unique(as.character(MDTdt$Database))
-  #### The preflight writes the catalog and registry; take the same writer   ####
-  #### lock the loader uses so a catalog rewrite can never race a loader     ####
-  #### finishing on another machine.                                         ####
   if (isTRUE(LockRepository)) {
     if (is.null(LockPath)) {
       LockPath <- if (!is.null(TableSchemaPath) && nzchar(TableSchemaPath)) {
@@ -8124,8 +7877,6 @@ BuildRepositoryCatalog <- function(MDT, DBLoad = NULL, MasterDBPath, n_workers =
   fresh <- if (length(fresh_rows) > 0L) data.table::rbindlist(fresh_rows, fill = TRUE) else data.table::data.table()
   combined <- merge_table_schema_catalog(fresh, if (is.null(existing)) NULL else existing$table_schema)
   ValidateSchemaMergeKeys(combined, strict = StrictSchemaValidation)
-  #### Data dictionary: freshly harvested labels replace those databases'   ####
-  #### rows; databases not in DBLoad keep their existing dictionary rows.   ####
   label_combined <- NULL
   if (isTRUE(HarvestLabels)) {
     fresh_lab <- if (length(fresh_labels) > 0L) data.table::rbindlist(fresh_labels, fill = TRUE) else data.table::data.table()
@@ -8141,8 +7892,6 @@ BuildRepositoryCatalog <- function(MDT, DBLoad = NULL, MasterDBPath, n_workers =
   n_labels <- if (is.null(label_combined)) 0L else nrow(label_combined)
   log_msg(sprintf("[CATALOG] Wrote schema catalog: %s (%d tables, %d columns, %d manual override(s) preserved, %d dictionary label(s))",
                   TableSchemaPath, data.table::uniqueN(combined$DuckDBTable), nrow(combined), n_manual, n_labels))
-  #### Round-trip through the reader so the returned object matches exactly ####
-  #### what ParquetBackEndCreate will consume.                              ####
   invisible(load_table_schema_catalog(TableSchemaPath, strict = TRUE))
 }
 
@@ -8190,9 +7939,6 @@ generic_db_loader <- function(files, base_path, db_prefix, completed_checkpoint,
       suffix <- row_meta$TableName[1]
       all_cols_v <- unique(canonical_colnames(comprehensive[[suffix]]))
       pspec <- partition_spec_for_row(row_meta)
-      #### year_val is provenance for the manifest/logs and the value       ####
-      #### injected when YEAR is a partition key; NA for tables partitioned ####
-      #### by something else.                                               ####
       year_val <- if ("YEAR" %in% pspec$keys) {
         pspec$values[match("YEAR", pspec$keys)]
       } else if ("Year" %in% names(row_meta)) {
@@ -8201,9 +7947,6 @@ generic_db_loader <- function(files, base_path, db_prefix, completed_checkpoint,
       table_name <- repository_table_name_for_row(row_meta)
       reader_file <- tolower(row_meta$FileType[1])
       table_col_classes <- if (is.list(col_classes) && !is.null(col_classes[[suffix]])) col_classes[[suffix]] else col_classes
-      #### registry_resolved = TRUE means col_classes already carries the    ####
-      #### registry (and any manual catalog overrides, which must win) --    ####
-      #### re-applying the registry here would clobber manual curation.      ####
       if (!isTRUE(registry_resolved)) {
         if (is.null(schema_registry)) schema_registry <- load_schema_registry(SchemaRegistryPath, create_if_missing = FALSE)
         table_col_classes <- apply_schema_registry(table_col_classes, schema_registry, database = db_prefix, table_name = suffix)
@@ -8244,9 +7987,6 @@ generic_db_loader <- function(files, base_path, db_prefix, completed_checkpoint,
           pre_aligned <- FALSE
         }
         if (!is.data.frame(df) || nrow(df) == 0) {
-          #### Verified empty vs failed read: safe_read_sav/safe_read_csv    ####
-          #### return an empty frame on read ERRORS too, so re-verify        ####
-          #### directly against the source before declaring the file empty.  ####
           full_source_path <- file.path(base_path, row_meta$MDBDir[1], source_path)
           if (is.data.frame(df) && verify_source_empty(
               full_source_path, reader_file, reader_options_for_row(row_meta))) {
@@ -8284,9 +8024,6 @@ generic_db_loader <- function(files, base_path, db_prefix, completed_checkpoint,
       }
       Comp <- TRUE
     }, error = function(e) {
-      #### "__EMPTY_OK__" is the verified-empty escape: the source file      ####
-      #### provably contains 0 rows, so it completes (and checkpoints)       ####
-      #### without writing Parquet. "__SKIP__" stays a silent failure.       ####
       if (identical(conditionMessage(e), "__EMPTY_OK__")) {
         Comp <<- TRUE
         return(invisible(NULL))
@@ -8389,8 +8126,6 @@ ParquetBackEndCreate <- function(MDT, DBLoad, MasterDBPath, completed_checkpoint
   on.exit(restore_repository_run(previous_run), add = TRUE)
   RunId <- resolve_run_id()
   run_started_at <- format(Sys.time(), "%Y-%m-%dT%H:%M:%S%z")
-  #### Fresh coercion-damage accounting for this run; the aggregated report ####
-  #### is written next to the manifest at the end.                          ####
   coercion_report_reset()
   log_msg(sprintf("Parallel workers available: %d (scoped per scan)", n_workers), log_path = LogPath)
   if (is.null(ManifestPath)) ManifestPath <- manifest_path_default(ParquetBasePath)
@@ -8420,17 +8155,12 @@ ParquetBackEndCreate <- function(MDT, DBLoad, MasterDBPath, completed_checkpoint
       save_checkpoint(completed_checkpoint, CheckpointPath)
     }
   }
-  #### Snapshot the repository's bookkeeping (checkpoint, manifest, catalog, ####
-  #### registry) before this run can touch any of it, so divergence found by ####
-  #### audit_repository() is recoverable, not just detectable.               ####
   if (isTRUE(SnapshotState)) {
     if (is.null(StateBackupDir)) StateBackupDir <- file.path(dirname(ParquetBasePath), "StateBackups")
     snapshot_repository_state(CheckpointPath = CheckpointPath, ManifestPath = ManifestPath,
                               TableSchemaPath = TableSchemaPath, SchemaRegistryPath = SchemaRegistryPath,
                               BackupDir = StateBackupDir, keep_last = SnapshotKeep)
   }
-  #### RunPreflight = FALSE skips the loader's own structural MDT/output     ####
-  #### validation pass when the caller has already run it explicitly.        ####
   if (isTRUE(RunPreflight)) {
     ValidateMDTPreflight(MDT, strict = StrictPreflight, logStatus = TRUE,
                          ParquetBasePath = ParquetBasePath,
@@ -8458,10 +8188,6 @@ ParquetBackEndCreate <- function(MDT, DBLoad, MasterDBPath, completed_checkpoint
     log_msg(sprintf("[ERROR] %s failed during %s: %s", db, phase, conditionMessage(e)), log_path = LogPath)
     log_msg(sprintf("[ERROR] Call: %s", paste(deparse(conditionCall(e)), collapse = " ")), log_path = LogPath)
   }
-  #### Phase 1: build every database's schema BEFORE any Parquet is written, ####
-  #### so combined cross-database merge-key validation can stop the run      ####
-  #### while stopping is still free. (Previously the combined check only ran ####
-  #### after loading, when incompatible files were already on disk.)         ####
   schema_objs <- list()
   for (f in seq_along(DBLoad)) {
     db <- DBLoad[f]
@@ -8482,14 +8208,11 @@ ParquetBackEndCreate <- function(MDT, DBLoad, MasterDBPath, completed_checkpoint
       touch_repository_lock(repo_lock)
     }, error = function(e) record_failure(db, e, "schema inference"))
   }
-  #### Combined validation across every database in this run, plus the       ####
-  #### existing catalog's rows for databases not being reloaded.             ####
   if (length(all_schema_rows) > 0L) {
     combined_schema <- merge_table_schema_catalog(data.table::rbindlist(all_schema_rows, fill = TRUE),
                                                   if (!is.null(catalog)) catalog$table_schema else NULL)
     ValidateSchemaMergeKeys(combined_schema, strict = StrictSchemaValidation)
   }
-  #### Phase 2: load. ####
   for (db in names(schema_objs)) {
     log_msg(paste("=== Loading", db, "==="), log_path = LogPath)
     tryCatch({
@@ -8534,8 +8257,6 @@ ParquetBackEndCreate <- function(MDT, DBLoad, MasterDBPath, completed_checkpoint
     })
   }
   if (length(all_schema_rows) > 0L) {
-    #### Merge instead of overwrite: keep manual rows and databases that ####
-    #### were not part of this DBLoad.                                   ####
     final_schema <- merge_table_schema_catalog(data.table::rbindlist(all_schema_rows, fill = TRUE),
                                                if (!is.null(catalog)) catalog$table_schema else NULL)
     ValidateSchemaMergeKeys(final_schema, strict = StrictSchemaValidation)
