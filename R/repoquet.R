@@ -8598,7 +8598,7 @@ ParquetBackEndCreate <- function(MDT, DBLoad, MasterDBPath, completed_checkpoint
   coercion_written <- TRUE
   log_msg(paste("ParquetBackEndCreate function complete. Final checkpoint size:", length(completed_checkpoint)), log_path = LogPath)
    
-  # Phase 2: Auto-cleanup of temporary Parquet files
+  # Auto-cleanup of temporary Parquet files
   if (isTRUE(AutoCleanup) && CleanupAfterPhase %in% c("all", "database")) {
     log_msg("[CLEANUP PHASE] Starting cleanup of temporary Parquet files after write operations", log_path = LogPath)
     cleanup_result <- tryCatch({
