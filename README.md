@@ -192,3 +192,49 @@ Run `Rscript tools/bootstrap-renv.R` once to restore the project-specific
 Rscript tests/run_tests.R
 R CMD check .
 ```
+
+## Troubleshooting
+
+### Temporary Parquet Files Left in Database
+
+After running a workflow, you may notice `.tmp_*.parquet` files left in your
+database directories (e.g., `year=2023/NEDS_2013_Comorbidities.SAV.parquet.tmp_abc123.parquet`).
+These are atomic write safeguards that should be cleaned up after each write completes.
+
+**What they are:** During Parquet writes, repoquet creates a temporary file first,
+then atomically renames it to the final location. This prevents corruption if the
+write is interrupted. Normally these are cleaned up immediately.
+
+**Why they persist:** Temporary files may remain if:
+
+- The write operation is interrupted or crashes
+- The file is locked by antivirus scanning, system services, or another process
+- The operating system prevents the file from being deleted (Windows file locking)
+- High I/O contention prevents timely cleanup
+
+**Are they harmful?**
+No. The final `.parquet` files are complete and valid. Temporary files are never
+promoted to the active database. DuckDB reads only `*.parquet` files (not `.tmp_*`).
+However, they do consume disk space and make auditing unclear.
+
+**How to clean them up:**
+
+```r
+# Clean temp files > 24 hours old
+library(repoquet)
+cleanup_temp_files("/path/to/ParquetBasePath")
+
+# Dry run: see what would be removed without deleting
+cleanup_temp_files("/path/to/ParquetBasePath", dry_run = TRUE)
+
+# Clean files > 1 hour old (more aggressive)
+cleanup_temp_files("/path/to/ParquetBasePath", max_age_hours = 1L)
+```
+
+The function logs each cleanup operation. Review the log output to confirm it's
+removing only old temporary files, not active data.
+
+**Prevention:**
+repoquet now includes retry logic and enhanced error handling to minimize
+temporary file accumulation. Future runs should leave fewer temp files.
+

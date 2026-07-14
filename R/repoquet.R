@@ -507,8 +507,145 @@ replace_file_safely <- function(tmp, path) {
     }
     stop(e)
   }, finally = {
-    if (file.exists(tmp)) unlink(tmp)
+    if (file.exists(tmp)) {
+      unlink_result <- try(unlink(tmp), silent = TRUE)
+      if (!is.numeric(unlink_result) || unlink_result != 0L) {
+        log_msg(sprintf("[CLEANUP WARN] Failed to remove temp file during finalization: %s", tmp))
+      }
+    }
   })
+}
+
+#' Robustly remove a file with retry logic
+#'
+#' Attempts to remove a file with exponential backoff retry logic. Useful for
+#' removing files that may be locked by the OS or another process during I/O
+#' operations. Logs failures if requested.
+#'
+#' @param path Character. Path to the file to remove.
+#' @param max_attempts Integer. Maximum number of removal attempts (default 3).
+#' @param wait_sec Numeric vector. Wait times (in seconds) before retries
+#'   (default c(0, 1, 5)).
+#' @param log_failures Logical. If TRUE, log failed removal to the standard
+#'   repository log (default TRUE).
+#' @return Logical. TRUE if file was removed or did not exist; FALSE if removal
+#'   failed after all retries.
+#' @keywords internal
+safe_unlink <- function(path, max_attempts = 3L, wait_sec = c(0, 1, 5),
+                        log_failures = TRUE) {
+  if (!file.exists(path)) return(TRUE)
+  for (i in seq_len(max_attempts)) {
+    unlink_result <- try(unlink(path), silent = TRUE)
+    if (is.numeric(unlink_result) && unlink_result == 0L) return(TRUE)
+    if (i < max_attempts) Sys.sleep(wait_sec[i])
+  }
+  if (log_failures) {
+    log_msg(sprintf("[CLEANUP WARN] Failed to remove file after %d attempt(s): %s",
+                    max_attempts, path))
+  }
+  return(FALSE)
+}
+
+#' Clean up temporary Parquet write files
+#'
+#' Scans a directory for temporary files left behind by atomic write operations
+#' (files matching a pattern, typically `*.tmp_*.parquet`). Removes old temporary
+#' files while preserving recent ones that may still be in use.
+#'
+#' @param parent_dir Character. Root directory to scan for temporary files.
+#' @param pattern Character. Regular expression to match temporary files
+#'   (default matches `*.tmp_*.parquet`).
+#' @param max_age_hours Integer. Minimum age (in hours) before a temp file is
+#'   considered safe to remove. Default 24 hours (files < 24 hrs old are preserved).
+#' @param dry_run Logical. If TRUE, log what would be removed without actually
+#'   deleting files (default FALSE).
+#' @param verbose Logical. If TRUE, log cleanup operations (default TRUE).
+#'
+#' @return Invisibly returns a data.table with columns:
+#'   \describe{
+#'     \item{file}{Full path to the temporary file}
+#'     \item{size_bytes}{File size in bytes}
+#'     \item{age_hours}{Age of file in hours}
+#'     \item{mtime}{File modification time}
+#'   }
+#'
+#' @details
+#' This function is useful for cleaning up orphaned temporary files after
+#' crashed or interrupted write operations. It scans recursively into all
+#' subdirectories and removes only files older than \code{max_age_hours},
+#' to avoid interfering with active write operations.
+#'
+#' @examples
+#' \dontrun{
+#'   # Clean temp files > 24 hours old from a Parquet directory
+#'   cleanup_temp_files("/path/to/parquet/database")
+#'
+#'   # Dry run: see what would be removed
+#'   cleanup_temp_files("/path/to/parquet/database", dry_run = TRUE)
+#'
+#'   # Clean files > 1 hour old
+#'   cleanup_temp_files("/path/to/parquet/database", max_age_hours = 1L)
+#' }
+#' @keywords internal
+cleanup_temp_files <- function(parent_dir, pattern = "^.*\\.tmp_.*\\.parquet$",
+                              max_age_hours = 24L, dry_run = FALSE,
+                              verbose = TRUE) {
+  if (!dir.exists(parent_dir)) {
+    if (verbose) log_msg(sprintf("[CLEANUP INFO] Directory does not exist: %s", parent_dir))
+    return(invisible(data.table::data.table(
+      file = character(0), size_bytes = integer(0), age_hours = numeric(0),
+      cleaned = logical(0)
+    )))
+  }
+
+  temp_files <- list.files(parent_dir, pattern = pattern, full.names = TRUE,
+                           recursive = TRUE, include.dirs = FALSE)
+  if (length(temp_files) == 0L) {
+    if (verbose) log_msg(sprintf("[CLEANUP INFO] No temporary files found in %s", parent_dir))
+    return(invisible(data.table::data.table(
+      file = character(0), size_bytes = integer(0), age_hours = numeric(0),
+      cleaned = logical(0)
+    )))
+  }
+
+  now <- Sys.time()
+  file_info <- data.table::data.table(file = temp_files)
+  file_info[, c("size_bytes", "mtime") := {
+    info <- file.info(file)
+    list(info$size, info$mtime)
+  }]
+  file_info[, age_hours := as.numeric(difftime(now, mtime, units = "hours"))]
+  file_info[, should_clean := age_hours >= max_age_hours]
+
+  cleaned_files <- 0L
+  if (any(file_info$should_clean)) {
+    to_clean <- file_info[should_clean == TRUE, file]
+    for (f in to_clean) {
+      if (dry_run) {
+        if (verbose) {
+          log_msg(sprintf("[CLEANUP DRY-RUN] Would remove: %s (%.1f hours old, %d bytes)",
+                          f, file_info[file == f, age_hours], file_info[file == f, size_bytes]))
+        }
+      } else {
+        if (safe_unlink(f, log_failures = FALSE)) {
+          cleaned_files <- cleaned_files + 1L
+          if (verbose) {
+            log_msg(sprintf("[CLEANUP OK] Removed temp file: %s", basename(f)))
+          }
+        }
+      }
+    }
+  }
+
+  if (verbose) {
+    recent_count <- sum(!file_info$should_clean)
+    log_msg(sprintf("[CLEANUP SUMMARY] Directory: %s | Total temps: %d | Recent (<%d hrs): %d | Cleaned: %d",
+                    basename(parent_dir), nrow(file_info), max_age_hours, recent_count,
+                    if (dry_run) 0L else cleaned_files))
+  }
+
+  file_info[, should_clean := NULL]
+  invisible(file_info)
 }
 
 ################################################################################
@@ -946,7 +1083,12 @@ write_year_parquet <- function(df, ParquetBasePath, table_name, year_val, source
       NULL
     }, error = function(e) e)
     if (is.null(write_err)) break
-    if (!is.null(tmp_path) && file.exists(tmp_path)) unlink(tmp_path)
+    if (!is.null(tmp_path) && file.exists(tmp_path)) {
+      if (!safe_unlink(tmp_path, max_attempts = 3L, log_failures = TRUE)) {
+        log_msg(sprintf("[WRITE CLEANUP WARN] Could not remove temp file after write failure: %s",
+                        tmp_path))
+      }
+    }
     if (attempt == write_attempts)
       stop(write_err)
     log_msg(sprintf("[WRITE RETRY] Write attempt %d failed: %s", attempt, write_err$message))

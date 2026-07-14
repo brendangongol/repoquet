@@ -21,3 +21,9 @@
   template rather than a collection of domain assumptions.
 - CSV readers now preserve leading-zero fields by default, with a per-source
   `KeepLeadingZeros` reader option for explicit control.
+- Enhanced atomic Parquet write operations with robust temp file cleanup: added
+  `safe_unlink()` for retry-based file removal, `cleanup_temp_files()` for
+  directory-level orphaned temp file recovery, and improved error handling in
+  write retry logic to prevent temporary files from persisting after I/O failures
+  (addresses file-locking issues on Windows and high-I/O environments).
+
