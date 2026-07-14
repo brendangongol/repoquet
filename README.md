@@ -143,7 +143,10 @@ result <- ParquetBackEndCreate(
   ManifestPath = paths$ManifestPath,
   SourceFingerprintMode = cfg$SourceFingerprintMode,
   StopOnFileError = TRUE,
-  ReturnRunResult = TRUE
+  ReturnRunResult = TRUE,
+  AutoCleanup = TRUE,           # ✨ Automatic temp file cleanup (Phase 2)
+  CleanupAfterPhase = "all",    # Clean after all writes complete
+  MaxTempAgeHours = 1L          # Remove temp files > 1 hour old
 )
 print(result)
 ```
@@ -166,6 +169,32 @@ user-facing proposal, and finalization writes the concrete approved schema to
 writer. When both paths are passed to `ParquetBackEndCreate()`, reviewed columns
 come from `TableSchemaPath`; `SchemaRegistryPath` is retained only for policy
 metadata and for genuinely new columns absent from the finalized catalog.
+
+### Temporary File Cleanup (Phase 2)
+
+By default, `ParquetBackEndCreate()` automatically cleans up temporary `.tmp_*.parquet`
+files that may be left behind during write operations (due to file locking on Windows
+or other I/O delays). Control this with:
+
+- `AutoCleanup = TRUE` (default): Enable automatic cleanup
+- `CleanupAfterPhase = "all"` (default): Clean after all writes complete
+  - `"database"`: Clean after each database batch
+  - `"none"`: Disable auto-cleanup; call `cleanup_temp_files()` manually
+- `MaxTempAgeHours = 1L` (default): Only remove temp files older than this
+
+```r
+# Default: auto-cleanup after all writes
+ParquetBackEndCreate(MDT, DBLoad = databases, ...)
+
+# Aggressive: clean after each database
+ParquetBackEndCreate(MDT, DBLoad = databases, CleanupAfterPhase = "database", ...)
+
+# Manual: disable auto-cleanup, clean manually
+ParquetBackEndCreate(MDT, DBLoad = databases, AutoCleanup = FALSE, ...)
+cleanup_temp_files(paths$ParquetBasePath, max_age_hours = 1L)
+```
+
+All cleanup operations are logged with `[CLEANUP ...]` prefixes for visibility.
 
 Register and validate DuckDB views with the catalog's partition types:
 

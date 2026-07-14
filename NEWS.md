@@ -26,4 +26,9 @@
   directory-level orphaned temp file recovery, and improved error handling in
   write retry logic to prevent temporary files from persisting after I/O failures
   (addresses file-locking issues on Windows and high-I/O environments).
+- Phase 2: Integrated automatic temp file cleanup into `ParquetBackEndCreate()`
+  with `AutoCleanup` parameter (default TRUE) and `CleanupAfterPhase` options
+  ("all" after all writes, "database" after each batch, "none" to disable).
+  This prevents orphaned `.tmp_*.parquet` files from accumulating without
+  requiring manual cleanup calls.
 

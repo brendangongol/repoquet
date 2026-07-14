@@ -8247,6 +8247,21 @@ print.RepositoryRunResult <- function(x, ...) {
 }
 
 #' Orchestrate repository schema first, then write Parquet
+#'
+#' @param AutoCleanup Logical. If TRUE (default), temporary Parquet files are
+#'   cleaned up at the end of write operations. This prevents accumulation of
+#'   orphaned `.tmp_*.parquet` files that may be left behind due to I/O delays
+#'   or file locking.
+#' @param CleanupAfterPhase Character. Controls when cleanup occurs:
+#'   \describe{
+#'     \item{"all"}{(default) Clean only after all databases are written}
+#'     \item{"database"}{Clean after each database batch completes}
+#'     \item{"none"}{Disable auto-cleanup; user must call cleanup manually}
+#'   }
+#' @param MaxTempAgeHours Integer. Minimum age (in hours) before a temporary
+#'   file is considered safe to remove. Default 1 (files < 1 hour old are
+#'   preserved to avoid interfering with active writes).
+#'
 #' @export
 ParquetBackEndCreate <- function(MDT, DBLoad, MasterDBPath, completed_checkpoint, CheckpointPath, ParquetBasePath, SAV_ROW_THRESHOLD = 1000000L,
                                  PartitionBy, RAMThreshold, SAV_CHUNK_SIZE = 1000000L, LogPath, n_workers = 1, PrintStatus = FALSE,
@@ -8261,9 +8276,12 @@ ParquetBackEndCreate <- function(MDT, DBLoad, MasterDBPath, completed_checkpoint
                                  StopOnDatabaseError = TRUE, StopOnFileError = TRUE,
                                  MaxCoerceNAPct = NULL,
                                  SourceFingerprintMode = c("metadata", "sha256", "none"),
+                                 AutoCleanup = TRUE, CleanupAfterPhase = c("all", "database", "none"),
+                                 MaxTempAgeHours = 1L,
                                  ReturnRunResult = FALSE, RunId = NULL, RunSummaryPath = NULL) {
   PartitionBy <- match.arg(PartitionBy, c("NRows", "RAMEstimate", "FAIL"))
   SourceFingerprintMode <- match.arg(SourceFingerprintMode)
+  CleanupAfterPhase <- match.arg(CleanupAfterPhase, c("all", "database", "none"))
   previous_run <- begin_repository_run(LogPath = LogPath, RunId = RunId)
   on.exit(restore_repository_run(previous_run), add = TRUE)
   RunId <- resolve_run_id()
@@ -8428,6 +8446,29 @@ ParquetBackEndCreate <- function(MDT, DBLoad, MasterDBPath, completed_checkpoint
   coercion_report_write(coercion_path)
   coercion_written <- TRUE
   log_msg(paste("ParquetBackEndCreate function complete. Final checkpoint size:", length(completed_checkpoint)), log_path = LogPath)
+   
+  # Phase 2: Auto-cleanup of temporary Parquet files
+  if (isTRUE(AutoCleanup) && CleanupAfterPhase %in% c("all", "database")) {
+    log_msg("[CLEANUP PHASE] Starting cleanup of temporary Parquet files after write operations", log_path = LogPath)
+    cleanup_result <- tryCatch({
+      cleanup_stats <- cleanup_temp_files(
+        parent_dir = ParquetBasePath,
+        max_age_hours = MaxTempAgeHours,
+        dry_run = FALSE,
+        verbose = TRUE
+      )
+      cleanup_result_summary <- sprintf(
+        "Cleanup completed: %d files scanned, %d files removed",
+        nrow(cleanup_stats), sum(!is.na(cleanup_stats$file))
+      )
+      log_msg(sprintf("[CLEANUP COMPLETE] %s", cleanup_result_summary), log_path = LogPath)
+      TRUE
+    }, error = function(e) {
+      log_msg(sprintf("[CLEANUP ERROR] Temporary file cleanup failed: %s", conditionMessage(e)), log_path = LogPath)
+      FALSE
+    })
+  }
+   
   flush_log_buffer(log_path = LogPath)
   if (nrow(db_failures) > 0L && isTRUE(StopOnDatabaseError)) {
     stop(sprintf("ParquetBackEndCreate failed for %d database phase(s). Run summary: %s", nrow(db_failures), RunSummaryPath), call. = FALSE)
