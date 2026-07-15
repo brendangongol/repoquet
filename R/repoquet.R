@@ -649,127 +649,169 @@ cleanup_temp_files <- function(parent_dir, pattern = "^.*\\.tmp_.*\\.parquet$",
 }
 
 ################################################################################
-#### Multi-year CSV file splitting ############################################
+#### CSV file splitting by partition spec #####################################
 ################################################################################
 
-#' Split multi-year CSV files into year-specific files
+#' Split CSV files by partition specification
 #'
-#' When a CSV file contains data for multiple years but the MDT row specifies
-#' only one year (partition mismatch), automatically split the file by YEAR
-#' column into separate year-specific files. This resolves partition validation
-#' errors without blocking the workflow.
+#' When a CSV file contains data for multiple partition values but the MDT row
+#' specifies a single partition value (partition mismatch), automatically split
+#' the file by the partition column into separate files. This resolves partition
+#' validation errors without blocking the workflow.
+#'
+#' Partition specs are the source of truth for splitting; data content is never
+#' checked. This ensures alignment with hive partition structure and works for
+#' any partition key, not just YEAR.
 #'
 #' @param path Character. Full path to the CSV file to potentially split.
-#' @param expected_year Integer. The year specified in the MDT row.
+#' @param partition_keys Character vector. Partition key column name(s)
+#'   (e.g., "YEAR" or c("YEAR", "REGION")).
+#' @param partition_values Character vector. Expected partition value(s)
+#'   (e.g., "2020" or c("2020", "WEST")). Must match length of partition_keys.
 #' @param LogPath Character. Optional path for logging split operations.
 #' @param dry_run Logical. If TRUE, log what would happen without creating files.
 #'
 #' @return Invisibly returns a data frame with columns:
 #'   - original_file: Original CSV filename
-#'   - year: Year value found in data
-#'   - split_file: Path to new year-specific file (NA if not split)
-#'   - n_rows: Number of rows in year-specific file
+#'   - partition_value: Partition value found in data
+#'   - split_file: Path to new partition-specific file (NA if not split)
+#'   - n_rows: Number of rows in partition-specific file
 #'   - status: "unchanged", "split", or "error"
 #'   - message: Summary message
 #'
 #' @keywords internal
-split_multi_year_csv <- function(path, expected_year = NULL, LogPath = NULL, dry_run = FALSE) {
+split_csv_by_partition <- function(path, partition_keys = "YEAR", partition_values = NULL,
+                                   LogPath = NULL, dry_run = FALSE) {
   if (!file.exists(path)) {
     log_msg(sprintf("[SPLIT ERROR] File not found: %s", path), log_path = LogPath)
     return(invisible(NULL))
   }
 
+  if (length(partition_keys) != length(partition_values)) {
+    log_msg(sprintf("[SPLIT ERROR] Partition keys (%d) and values (%d) length mismatch for %s",
+                    length(partition_keys), length(partition_values), basename(path)), log_path = LogPath)
+    return(invisible(NULL))
+  }
+
   original_name <- basename(path)
   file_dir <- dirname(path)
+  partition_spec <- paste(partition_keys, "=", partition_values, sep = "", collapse = "/")
 
-  log_msg(sprintf("[SPLIT CHECK] Examining %s for year partition mismatch", original_name), log_path = LogPath)
+  log_msg(sprintf("[SPLIT CHECK] Examining %s for partition mismatch (expected: %s)",
+                  original_name, partition_spec), log_path = LogPath)
 
   tryCatch({
-    # Read CSV with minimal overhead (just YEAR column)
-    df <- data.table::fread(path, select = c("YEAR"), colClasses = c("YEAR" = "integer"), nrows = 1000000L)
+    # Read CSV sampling first partition columns (minimal overhead)
+    col_names <- tryCatch({
+      df_sample <- data.table::fread(path, nrows = 1L)
+      names(df_sample)
+    }, error = function(e) character(0))
 
-    if (nrow(df) == 0L) {
+    missing_cols <- setdiff(toupper(partition_keys), toupper(col_names))
+    if (length(missing_cols) > 0L) {
+      log_msg(sprintf("[SPLIT ERROR] Partition column(s) not found in %s: %s",
+                      original_name, paste(missing_cols, collapse = ", ")), log_path = LogPath)
+      return(invisible(NULL))
+    }
+
+    # Normalize column names to match data (handle case sensitivity)
+    actual_cols <- col_names[tolower(col_names) %in% tolower(partition_keys)]
+    if (length(actual_cols) == 0L) {
+      log_msg(sprintf("[SPLIT ERROR] Could not match partition columns in %s", original_name), log_path = LogPath)
+      return(invisible(NULL))
+    }
+
+    # For now, handle single-key partitions (multi-key future expansion)
+    if (length(partition_keys) > 1L) {
+      log_msg(sprintf("[SPLIT WARNING] Multi-key partitioning not yet supported for %s (keys: %s)",
+                      original_name, paste(partition_keys, collapse = ";")), log_path = LogPath)
+      return(invisible(NULL))
+    }
+
+    partition_col <- actual_cols[1]
+    df_sample <- data.table::fread(path, select = c(partition_col), nrows = 100000L)
+
+    if (nrow(df_sample) == 0L) {
       log_msg(sprintf("[SPLIT INFO] %s is empty, no split needed", original_name), log_path = LogPath)
       return(invisible(NULL))
     }
 
-    unique_years <- sort(unique(df$YEAR))
-    n_unique_years <- length(unique_years)
+    # Get unique values in partition column
+    unique_vals <- sort(unique(df_sample[[partition_col]]))
+    n_unique_vals <- length(unique_vals)
+    expected_val <- as.character(partition_values[1])
 
     # Check if split is needed
-    if (n_unique_years == 1L) {
-      actual_year <- unique_years[1]
-      if (!is.na(expected_year) && actual_year == expected_year) {
-        log_msg(sprintf("[SPLIT OK] %s contains only year %d (matches MDT), no split needed",
-                        original_name, actual_year), log_path = LogPath)
+    if (n_unique_vals == 1L) {
+      actual_val <- as.character(unique_vals[1])
+      if (actual_val == expected_val) {
+        log_msg(sprintf("[SPLIT OK] %s contains only %s=%s (matches MDT), no split needed",
+                        original_name, partition_col, actual_val), log_path = LogPath)
         return(invisible(NULL))
       }
     }
 
-    log_msg(sprintf("[SPLIT NEEDED] %s contains %d year(s): %s (expected: %s)",
-                    original_name, n_unique_years, paste(unique_years, collapse = ", "),
-                    if (is.na(expected_year)) "unknown" else expected_year),
+    log_msg(sprintf("[SPLIT NEEDED] %s contains %d %s value(s): %s (expected: %s)",
+                    original_name, n_unique_vals, partition_col,
+                    paste(unique_vals, collapse = ", "), expected_val),
             log_path = LogPath)
 
     # Read full file for splitting
-    log_msg(sprintf("[SPLIT READING] Reading full file %s (%s rows)...", original_name,
-                    formatC(nrow(df), format = "d", big.mark = ",")),
-            log_path = LogPath)
-
-    df_full <- data.table::fread(path, colClasses = c("YEAR" = "integer"))
+    log_msg(sprintf("[SPLIT READING] Reading full file %s...", original_name), log_path = LogPath)
+    df_full <- data.table::fread(path)
 
     if (!dry_run) {
-      # Split and write year-specific files
+      # Split and write partition-specific files
       split_results <- list()
-      for (yr in unique_years) {
-        df_year <- df_full[YEAR == yr, ]
-        n_rows <- nrow(df_year)
+      for (pval in unique_vals) {
+        df_part <- df_full[df_full[[partition_col]] == pval, , drop = FALSE]
+        n_rows <- nrow(df_part)
 
-        # Create year-specific filename
+        # Create partition-specific filename
         base_name <- sub("\\.csv$", "", original_name, ignore.case = TRUE)
-        new_name <- sprintf("%s_%d.csv", base_name, yr)
+        new_name <- sprintf("%s_%s.csv", base_name, pval)
         new_path <- file.path(file_dir, new_name)
 
-        # Write year-specific file
-        data.table::fwrite(df_year, new_path)
-        split_results[[as.character(yr)]] <- list(year = yr, path = new_path, n_rows = n_rows)
+        # Write partition-specific file
+        data.table::fwrite(df_part, new_path)
+        split_results[[as.character(pval)]] <- list(value = pval, path = new_path, n_rows = n_rows)
 
         log_msg(sprintf("[SPLIT OK] Created %s (%s rows)", new_name,
                         formatC(n_rows, format = "d", big.mark = ",")),
                 log_path = LogPath)
       }
 
-      log_msg(sprintf("[SPLIT COMPLETE] %s split into %d year-specific file(s)",
+      log_msg(sprintf("[SPLIT COMPLETE] %s split into %d partition-specific file(s)",
                       original_name, length(split_results)),
               log_path = LogPath)
 
       # Create result summary
       split_df <- data.frame(
         original_file = original_name,
-        year = sapply(split_results, "[[", "year"),
+        partition_value = sapply(split_results, "[[", "value"),
         split_file = sapply(split_results, "[[", "path"),
         n_rows = sapply(split_results, "[[", "n_rows"),
         status = "split",
-        message = sprintf("Split from %s", original_name),
+        message = sprintf("Split by %s from %s", partition_col, original_name),
         stringsAsFactors = FALSE
       )
       return(invisible(split_df))
 
     } else {
       # Dry run: report what would happen
-      for (yr in unique_years) {
-        df_year <- df_full[YEAR == yr, ]
-        n_rows <- nrow(df_year)
+      for (pval in unique_vals) {
+        df_part <- df_full[df_full[[partition_col]] == pval, , drop = FALSE]
+        n_rows <- nrow(df_part)
         base_name <- sub("\\.csv$", "", original_name, ignore.case = TRUE)
-        new_name <- sprintf("%s_%d.csv", base_name, yr)
+        new_name <- sprintf("%s_%s.csv", base_name, pval)
 
         log_msg(sprintf("[SPLIT DRY-RUN] Would create %s (%s rows)", new_name,
                         formatC(n_rows, format = "d", big.mark = ",")),
                 log_path = LogPath)
       }
 
-      log_msg(sprintf("[SPLIT DRY-RUN] %s would be split into %d year-specific file(s)",
-                      original_name, n_unique_years),
+      log_msg(sprintf("[SPLIT DRY-RUN] %s would be split into %d partition-specific file(s)",
+                      original_name, n_unique_vals),
               log_path = LogPath)
 
       return(invisible(NULL))
@@ -8212,13 +8254,17 @@ generic_db_loader <- function(files, base_path, db_prefix, completed_checkpoint,
     Comp <- FALSE
     empty_ok <- FALSE
      
-    # Pre-process: Check for and split multi-year CSV files
+    # Pre-process: Check for and split CSV files by partition spec
     if (tolower(tools::file_ext(source_path)) == "csv" && file.exists(full_source_path)) {
       tryCatch({
-        expected_year <- if ("Year" %in% names(row_meta)) as.integer(row_meta$Year[1]) else NA_integer_
-        split_result <- split_multi_year_csv(full_source_path, expected_year = expected_year, LogPath = LogPath)
+        # Get partition spec from MDT row
+        pspec <- partition_spec_for_row(row_meta)
+        split_result <- split_csv_by_partition(full_source_path, 
+                                               partition_keys = pspec$keys,
+                                               partition_values = pspec$values,
+                                               LogPath = LogPath)
         if (!is.null(split_result) && nrow(split_result) > 0L) {
-          log_msg(sprintf("[SPLIT RESULT] %s was split into %d year-specific file(s)", 
+          log_msg(sprintf("[SPLIT RESULT] %s was split into %d partition-specific file(s)", 
                          basename(source_path), nrow(split_result)),
                   log_path = LogPath)
         }
