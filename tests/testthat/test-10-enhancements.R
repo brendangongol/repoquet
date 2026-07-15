@@ -68,7 +68,7 @@ test_that("search_labels finds variables by label, column, and value text", {
   fx <- dictionary_fixture(); on.exit(unlink(fx$root, recursive = TRUE))
   hits <- search_labels("hospitalization", TableSchemaPath = fx$ts)
   expect_identical(hits$Column, "DIED")
-  expect_identical(hits$CanonicalType, "integer")     # registry-resolved type merged in
+  expect_identical(hits$CanonicalType, "numeric")     # data-derived labelled storage type
   hits2 <- search_labels("^LOS$", TableSchemaPath = fx$ts, search_in = "column")
   expect_identical(hits2$VariableLabel, "Length of stay")
   hits3 <- search_labels("Female", TableSchemaPath = fx$ts, search_in = "values")

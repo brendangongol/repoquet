@@ -1,7 +1,6 @@
 \name{repoquet-api}
 \alias{repoquet-api}
 \alias{acquire_repository_lock}
-\alias{add_year_if_missing}
 \alias{align_columns}
 \alias{allowed_canonical_types}
 \alias{apply_builtin_schema_registry_policies}
@@ -25,6 +24,14 @@
 \alias{PrepareSchemaRegistry}
 \alias{FinalizeSchemaRegistry}
 \alias{GetSchemaObservations}
+\alias{load_value_dictionary}
+\alias{load_column_dictionary}
+\alias{column_dictionary_path}
+\alias{value_dictionary_path}
+\alias{describe_column}
+\alias{decode_column}
+\alias{cleanup_temp_files}
+\alias{safe_unlink}
 \alias{call_reader}
 \alias{canonical_colnames}
 \alias{canonical_type_to_arrow}
@@ -47,11 +54,14 @@
 \alias{duckdb_type_matches}
 \alias{duckdb_type_pattern}
 \alias{enforce_col_classes}
+\alias{ExportRepositoryMetadata}
 \alias{excel_sheet_name}
 \alias{flush_log_buffer}
 \alias{fread_col_classes}
 \alias{fread_col_classes_positional}
 \alias{generate_example_repository}
+\alias{generate_real_world_repository}
+\alias{real_world_source_catalog}
 \alias{generic_db_loader}
 \alias{get_file_reader}
 \alias{harvest_sav_labels}
@@ -78,10 +88,12 @@
 \alias{manifest_path_default}
 \alias{manifest_table_name}
 \alias{manifest_transaction}
+\alias{metadata_workbook_path_default}
 \alias{MDTCompleteStatus}
 \alias{merge_key_name_candidate}
 \alias{merge_table_schema_catalog}
 \alias{migrate_checkpoint_keys}
+\alias{MaterializeRemoteSources}
 \alias{new_repository_run_id}
 \alias{normalize_character_encoding}
 \alias{normalize_repo_path}
@@ -183,6 +195,16 @@ Start with \code{create_repository_project()} for a scaffolded project,
 Parquet-backed observation survey and compact review workbook, then
 \code{FinalizeSchemaRegistry()} to produce the approved table catalog. Use
 \code{GetSchemaObservations()} for focused access to detailed evidence.
+Use \code{ExportRepositoryMetadata()} to create a navigable Excel snapshot of
+the authoritative transactional manifest.
+Low-cardinality value evidence appears in the review workbook's
+\code{ValuePreview} sheet and the finalized catalog's
+\code{ValueDictionary} sheet.
+Source-provided and user-approved code meanings are reviewed in
+\code{DictionaryReview} and finalized to the partition-aware
+\code{ColumnDictionary} sheet. Use \code{describe_column()} to inspect the
+schema and both value layers, or \code{decode_column()} for a bounded DuckDB
+query with a decoded label column.
 The legacy \code{BuildRepositoryCatalog()} remains available. Use
 \code{audit_repository()} and \code{validate_data_contracts()} to inspect
 and validate the resulting repository. See the package README for complete

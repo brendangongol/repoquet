@@ -15,9 +15,19 @@ test_that("a clean MDT passes with zero errors", {
 })
 
 test_that("mixed partition key sets within a table error", {
-  b <- base_mdt(); b$PartitionKey <- c("SITE", NA); b$PartitionValue <- c("M", NA); b$Year <- 2020
+  b <- base_mdt(); b$PartitionKey <- c("SITE", "YEAR"); b$PartitionValue <- c("M", "2020")
   iss <- quiet_preflight(b, strict = FALSE)
   expect_true("mixed_partition_keys" %in% iss$Check)
+})
+
+test_that("explicit partition fields are required", {
+  missing_key <- base_mdt(); missing_key$PartitionKey <- NULL
+  iss_key <- quiet_preflight(missing_key, strict = FALSE)
+  expect_true("required_columns" %in% iss_key$Check)
+
+  blank_value <- base_mdt(); blank_value$PartitionValue[1] <- NA_character_
+  iss_value <- quiet_preflight(blank_value, strict = FALSE)
+  expect_true("blank_required_values" %in% iss_value$Check)
 })
 
 test_that("partition value sanitization collisions error", {

@@ -4,6 +4,8 @@ Title: Build Self-Auditing Parquet Data Repositories
 Version: 0.1.0
 Authors@R: person("Brendan", "Gongol",
     email = "b.gongol@ruhealth.org", role = c("aut", "cre"))
+Author: Brendan Gongol [aut, cre]
+Maintainer: Brendan Gongol <b.gongol@ruhealth.org>
 Description: A schema-aware, self-auditing engine that transforms heterogeneous
     source files into refreshable, query-ready Parquet repositories for
     larger-than-memory analytics. A metadata-driven workflow combines

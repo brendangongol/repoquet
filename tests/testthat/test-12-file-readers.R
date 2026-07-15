@@ -149,4 +149,93 @@ test_that("chunked delimited loads validate partition columns and clean up on fa
   ydir <- file.path(fx$pq, "REG_T", "year=2019")
   n_left <- if (dir.exists(ydir)) length(list.files(ydir, pattern = "parquet$")) else 0L
   expect_identical(n_left, 0L)   # partial chunk outputs removed
+  expect_false(dir.exists(file.path(fx$pq, "REG_T"))) # empty partition/table directories removed
+})
+
+test_that("multi-partition delimited sources stream directly to Hive partitions", {
+  fx <- new_repo_fixture(); on.exit(unlink(fx$root, recursive = TRUE))
+  source <- file.path(fx$src, "combined_2019_2020.csv")
+  data.table::fwrite(data.table::data.table(
+    YEAR = rep(c(2019L, 2020L), each = 12L), ID = sprintf("R%02d", 1:24)), source)
+  source_before <- unname(tools::md5sum(source))
+  M <- data.frame(Database = "REG", MDBDir = "REG", TableName = "T",
+                  Path = basename(source), FileType = "csv",
+                  PartitionKey = "year", PartitionValue = "2019")
+
+  r <- run_loader(fx, M, "REG")
+  expect_length(r$checkpoint, 1L)
+  expect_true(any(grepl("streamed directly to 2 Hive partitions", r$output)))
+  expect_true(dir.exists(file.path(fx$pq, "REG_T", "year=2019")))
+  expect_true(dir.exists(file.path(fx$pq, "REG_T", "year=2020")))
+  parquet <- list.files(file.path(fx$pq, "REG_T"), pattern = "\\.parquet$",
+                        recursive = TRUE, full.names = TRUE)
+  got <- data.table::rbindlist(lapply(parquet, function(path) {
+    data.table::as.data.table(arrow::read_parquet(path))
+  }))
+  expect_identical(nrow(got), 24L)
+  expect_false("YEAR" %in% names(got))
+  expect_identical(unname(tools::md5sum(source)), source_before)
+  expect_length(setdiff(list.files(fx$src), basename(source)), 0L)
+})
+
+test_that("source-defined routing supports arbitrary nested partition keys", {
+  fx <- new_repo_fixture(); on.exit(unlink(fx$root, recursive = TRUE))
+  source <- file.path(fx$src, "combined_sites_years.csv")
+  data.table::fwrite(data.table::data.table(
+    SITE = rep(c("North", "North", "South"), each = 8L),
+    YEAR = rep(c(2020L, 2021L, 2021L), each = 8L),
+    ID = seq_len(24L)), source)
+  M <- data.frame(Database = "REG", MDBDir = "REG", TableName = "T",
+                  Path = basename(source), FileType = "csv",
+                  PartitionKey = "SITE;YEAR", PartitionValue = "North;2020")
+
+  r <- run_loader(fx, M, "REG")
+  expect_length(r$checkpoint, 1L)
+  expect_true(any(grepl("streamed directly to 3 Hive partitions", r$output)))
+  expected <- file.path(fx$pq, "REG_T", c(
+    "site=North/year=2020", "site=North/year=2021", "site=South/year=2021"))
+  expect_true(all(dir.exists(expected)))
+  parquet <- list.files(file.path(fx$pq, "REG_T"), pattern = "\\.parquet$",
+                        recursive = TRUE, full.names = TRUE)
+  got <- data.table::rbindlist(lapply(parquet, arrow::read_parquet))
+  expect_identical(nrow(got), 24L)
+  expect_false(any(c("SITE", "YEAR") %in% names(got)))
+})
+
+test_that("failed source routing removes partial files and empty Hive directories", {
+  fx <- new_repo_fixture(); on.exit(unlink(fx$root, recursive = TRUE))
+  source <- file.path(fx$src, "bad_sites.csv")
+  data.table::fwrite(data.table::data.table(
+    SITE = c(rep("North", 10L), rep("", 10L)), ID = seq_len(20L)), source)
+  M <- data.frame(Database = "REG", MDBDir = "REG", TableName = "T",
+                  Path = basename(source), FileType = "csv",
+                  PartitionKey = "SITE", PartitionValue = "North")
+
+  r <- run_loader(fx, M, "REG")
+  expect_length(r$checkpoint, 0L)
+  expect_true(any(grepl("every row must map to a Hive partition", r$output)))
+  expect_false(dir.exists(file.path(fx$pq, "REG_T")))
+})
+
+test_that("delimited readers support declared headers and named sections", {
+  root <- tempfile("reader_options_"); dir.create(root)
+  on.exit(unlink(root, recursive = TRUE), add = TRUE)
+  headerless <- file.path(root, "headerless.data")
+  writeLines(c("1,M,2.5", "2,B,3.5"), headerless)
+  options <- list(Delimiter = ",", Header = FALSE,
+                  ColumnNames = c("ID", "DIAGNOSIS", "VALUE"))
+  got <- read_delimited_full(headerless, reader_options = options)
+  expect_identical(names(got), c("ID", "DIAGNOSIS", "VALUE"))
+  expect_equal(nrow(got), 2L)
+  expect_identical(.read_delimited_header(headerless, options),
+                   c("ID", "DIAGNOSIS", "VALUE"))
+
+  sections <- file.path(root, "sections.csv")
+  writeLines(c("first_id,description", "1,One", "2,Two", "",
+               "second_id,description", "7,Seven", "8,Eight"), sections)
+  section_options <- list(Delimiter = ",", SectionHeader = "second_id")
+  section <- read_delimited_full(sections, reader_options = section_options)
+  expect_identical(names(section), c("SECOND_ID", "DESCRIPTION"))
+  expect_equal(section$SECOND_ID, c(7L, 8L))
+  expect_equal(.count_delimited_rows(sections, section_options), 2L)
 })

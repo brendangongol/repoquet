@@ -41,9 +41,9 @@ test_that("physical parquet schemas are identical across years despite type drif
   s19 <- sch(list.files(file.path(fx$pq, "REG_Core", "year=2019"), full.names = TRUE)[1])
   s20 <- sch(list.files(file.path(fx$pq, "REG_Core", "year=2020"), full.names = TRUE)[1])
   expect_identical(s19[sort(names(s19))], s20[sort(names(s20))])
-  expect_identical(unname(s19[["KEY_X"]]), "string")   # registry-forced join key
+  expect_identical(unname(s19[["KEY_X"]]), "int32")    # data-derived in generic profile
   expect_identical(unname(s19[["AGE"]]), "double")     # promoted
-  expect_identical(unname(s19[["DIED"]]), "int32")     # registry-forced
+  expect_identical(unname(s19[["DIED"]]), "int32")     # consistently integer-like
 })
 
 test_that("stale chunks from a previous run are removed before rewriting", {

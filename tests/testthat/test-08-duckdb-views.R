@@ -28,12 +28,12 @@ test_that("DuckDB views expose normalized types and join without casts", {
     }
   })
   d <- DBI::dbGetQuery(con, "DESCRIBE A_Core")
-  expect_identical(d$column_type[d$column_name == "KEY_X"], "VARCHAR")
+  expect_identical(d$column_type[d$column_name == "KEY_X"], "INTEGER")
   expect_identical(d$column_type[d$column_name == "AGE"], "DOUBLE")
   q1 <- DBI::dbGetQuery(con, "SELECT c.KEY_X FROM A_Core c INNER JOIN A_Link l ON c.KEY_X = l.KEY_X")
-  expect_identical(sort(q1$KEY_X), c("101", "104"))
+  expect_identical(sort(q1$KEY_X), c(101L, 104L))
   q2 <- DBI::dbGetQuery(con, "SELECT c.KEY_X FROM A_Core c INNER JOIN B_Ev b ON c.KEY_X = b.KEY_X")
-  expect_identical(sort(q2$KEY_X), c("101", "104"))
+  expect_identical(sort(q2$KEY_X), c(101L, 104L))
   q3 <- DBI::dbGetQuery(con, "SELECT COUNT(*) n FROM A_Core WHERE YEAR >= 2020")
   expect_identical(q3$n[1], 2)
 

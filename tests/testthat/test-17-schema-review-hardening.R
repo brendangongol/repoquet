@@ -17,6 +17,27 @@ test_that("parallel schema surveys initialize delimited readers in sourced worke
   expect_false(any(grepl("PARALLEL FALLBACK", output, fixed = TRUE)))
 })
 
+test_that("parallel header and class inference initialize nested reader callbacks", {
+  skip_if_not_installed("future")
+  skip_if_not_installed("future.apply")
+  fx <- new_repo_fixture(); on.exit(unlink(fx$root, recursive = TRUE))
+  paths <- file.path(fx$src, c("header_a.csv", "header_b.csv"))
+  data.table::fwrite(data.table::data.table(ID = 1:2, VALUE = c("A", "B")), paths[1])
+  data.table::fwrite(data.table::data.table(ID = 3:4, EXTRA = c(1.5, 2.5)), paths[2])
+
+  output <- utils::capture.output({
+    headers <- build_comprehensive(
+      files = paths, base_path = "", suffixes = c("Core", "Core"),
+      uni_suffixes = "Core", reader = c("csv", "csv"), n_workers = 2)
+    classes <- build_col_classes(
+      files = paths, base_path = "", reader = c("csv", "csv"), n_workers = 2)
+  })
+
+  expect_setequal(headers$Core, c("ID", "VALUE", "EXTRA"))
+  expect_identical(classes$ID, "integer")
+  expect_false(any(grepl("PARALLEL FALLBACK", output, fixed = TRUE)))
+})
+
 test_that("an unconfigured short record remains a structural warning", {
   internal <- function(name) get(name, envir = environment(PrepareSchemaRegistry))
   warning <- paste0("Stopped early on line 4. Expected 4 fields but found 1. ",

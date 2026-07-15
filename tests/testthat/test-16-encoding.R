@@ -97,7 +97,7 @@ test_that("schema observations record the encoding used and contain UTF-8-valid 
   rows <- survey$observations[SurveyStatus == "ok"]
   expect_true(nrow(rows) > 0L)
   expect_true(all(rows$EncodingUsed == "windows-1252"))
-  expect_true(all(rows$EncodingValidationStatus == "sample_valid_utf8"))
+  expect_true(all(rows$EncodingValidationStatus == "full_stream_valid_utf8"))
   expect_identical(digest::digest(file = source, algo = "sha256"), before)
 })
 

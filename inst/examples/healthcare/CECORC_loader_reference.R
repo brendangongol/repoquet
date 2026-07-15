@@ -19,22 +19,36 @@ if (!file.exists(RepoquetSourcePath)) {
 source(RepoquetSourcePath, local = .GlobalEnv)
 
 ################################################################################
-#### Configuration #############################################################
+#### 1. Initialize the HCUP run ################################################
 ################################################################################
+#### This is the HCUP specialization of the canonical README workflow. Paths  ####
+#### and tuning below are deployment-specific; the seven operational stages   ####
+#### and their validation behavior intentionally match the generic example.   ####
 MasterDBPath <- "X:/National Databases"
 FormattedDBPath <- "X:/Brendan/NationalDatabases/formattedDatabases"
 ParquetBasePath <- file.path(FormattedDBPath, "parquet")
 CheckpointPath <- file.path(FormattedDBPath, "load_checkpoint.rds")
 LogPath <- file.path(FormattedDBPath, "load_log.txt")
+MDTPath <- "C:/Users/e282219/Downloads/github/repoquet/inst/extdata/DBSetupV2.xlsx"
 SupportingInfoPath <- "C:/Users/e282219/Downloads/github/CECORC/inst/Misc/DatabaseLoadInfo.xlsx"
+DuckDBName <- "DuckDBRelationalDatabase.duckdb"
+DuckDBTempPath <- file.path(FormattedDBPath, "duckdb_temp")
+DuckDB_GB <- "48GB"
+n_workers <- min(15L, max(1L, parallel::detectCores() - 1L))
+PartitionBy <- "FAIL"
+RAMThreshold <- 30
+SAV_ROW_THRESHOLD <- 4000000L
+SAV_CHUNK_SIZE <- 4000000L
+MaxCoerceNAPct <- 25
+SourceFingerprintMode <- "metadata"
 RepositoryPaths <- RepositoryInitialize(FormattedDBPath = FormattedDBPath,
                                         ParquetBasePath = ParquetBasePath,
                                         CheckpointPath = CheckpointPath,
                                         LogPath = LogPath,
                                         profile = "hcup")
 RunId <- new_repository_run_id()
-n_workers <- min(15L, max(1L, parallel::detectCores() - 1L))
 dir.create(ParquetBasePath, recursive = TRUE, showWarnings = FALSE)
+dir.create(DuckDBTempPath, recursive = TRUE, showWarnings = FALSE)
 
 ###############################################################################
 #### Cleanup handler ##########################################################
@@ -61,9 +75,9 @@ if (!isTRUE(getOption("CECORC.cleanup_installed"))) {
   reg.finalizer(.GlobalEnv, function(e) .cleanup_con(), onexit = TRUE)
 }
 
-##############################
-#### Load Master DB Table ####
-##############################
+################################################################################
+#### 2. Validate the HCUP source inventory #####################################
+################################################################################
 #### DBSetupV2.xlsx drives hive partitioning with two columns (the legacy    ####
 #### Year column has been retired -- its values now live in PartitionValue): ####
 ####   PartitionKey   -- hive key name(s) for each file's partition dir      ####
@@ -75,20 +89,21 @@ if (!isTRUE(getOption("CECORC.cleanup_installed"))) {
 #### Nested partitions use ";" in both:                                      ####
 ####   PartitionKey = "SITE;YEAR", PartitionValue = "MGH;2019"               ####
 ####   -> parquet/<DB>_<Table>/site=MGH/year=2019/*.parquet                  ####
-#### Checkpoint identity includes PartitionKey for generalized partitions;   ####
-#### classic year rows remain bit-identical to old Year-based keys, so       ####
-#### previously loaded files stay recognized. Rules enforced by              ####
+#### Checkpoint identity is derived uniformly from PartitionKey and           ####
+#### PartitionValue. Existing value-only checkpoint keys remain readable as  ####
+#### a migration bridge, while all new keys include the partition name.       ####
+#### Rules enforced by                                                        ####
 #### ValidateMDTPreflight before anything is written: all rows of one table  ####
 #### share the same PartitionKey; YEAR-keyed values must be whole years;     ####
-#### no two values may sanitize to the same directory. Legacy workbooks      ####
-#### with a Year column still work (blank spec falls back to YEAR + Year).   ####
+#### no two values may sanitize to the same directory. PartitionKey and      ####
+#### PartitionValue are required on every row; Year is not a fallback.       ####
 #### Optional column AcceptPartial: set TRUE on a row after verifying that   ####
 #### its file is permanently truncated (rows_written < declared ncases) and  ####
 #### you accept the partial data -- the loader then checkpoints it with a    ####
 #### [WARN] and manifest Status="partial_accepted" instead of failing and    ####
 #### re-reading the whole file on every run. Verified-empty files (declared  ####
 #### and confirmed 0 rows) checkpoint automatically with Status="empty".     ####
-MDT <- openxlsx::read.xlsx("C:/Users/e282219/Downloads/github/repoquet/inst/extdata/DBSetupV2.xlsx", sheet = "Sheet1")
+MDT <- openxlsx::read.xlsx(MDTPath, sheet = "Sheet1")
 
 #### ONE-TIME MIGRATION (2026-07-11): the case-collision preflight found     ####
 #### three tables whose workbook spellings differed only by case, and the    ####
@@ -97,9 +112,9 @@ MDT <- openxlsx::read.xlsx("C:/Users/e282219/Downloads/github/repoquet/inst/extd
 #### identity, so run the migration below ONCE on the loading machine        ####
 #### (DryRun = TRUE first) to keep already-loaded files recognized. Remove   ####
 #### this block after it has been run.                                       ####
-# rename_checkpoint_table(CheckpointPath, MDT, "NRD",  "CORE",      "Core",      ManifestPath, DryRun = TRUE)
-# rename_checkpoint_table(CheckpointPath, MDT, "NIS",  "MISC",      "Misc",      ManifestPath, DryRun = TRUE)
-# rename_checkpoint_table(CheckpointPath, MDT, "NEDS", "Core_MISC", "Core_Misc", ManifestPath, DryRun = TRUE)
+# rename_checkpoint_table(CheckpointPath, MDT, "NRD",  "CORE",      "Core",      RepositoryPaths$ManifestPath, DryRun = TRUE)
+# rename_checkpoint_table(CheckpointPath, MDT, "NIS",  "MISC",      "Misc",      RepositoryPaths$ManifestPath, DryRun = TRUE)
+# rename_checkpoint_table(CheckpointPath, MDT, "NEDS", "Core_MISC", "Core_Misc", RepositoryPaths$ManifestPath, DryRun = TRUE)
 #### REVIEW NEEDED: the workbook also contains NRD/CostChargeRatio (3 rows)  ####
 #### and NRD/CosttoChargeRatios (6 rows) -- two DuckDB tables that look like ####
 #### one dataset split by naming drift. If they are the same product, pick   ####
@@ -128,18 +143,32 @@ ValidateMDTPreflight(MDT = MDT, strict = TRUE, logStatus = TRUE,
                      ParquetBasePath = ParquetBasePath,
                      MaxFileStemTruncate = TRUE,
                      TerminalHivePartition = FALSE,
+                     MasterDBPath = MasterDBPath,
                      LogPath = LogPath, RunId = RunId)
-MDTCompleteStatus(MDT = MDT, CheckpointPath = CheckpointPath, verbose = TRUE, logStatus = TRUE)
+#### Optional remote acquisition. SourceURI must be a direct HTTP/HTTPS file ####
+#### URL; Path remains its stable logical filename. Remote files are copied  ####
+#### atomically into SourceCache and every later stage reads that managed    ####
+#### local copy. Existing local HCUP rows pass through unchanged.            ####
+MDT <- MaterializeRemoteSources(
+  MDT = MDT, DownloadCachePath = RepositoryPaths$DownloadCachePath,
+  Offline = FALSE, DefaultDownloadPolicy = "if_missing",
+  LogPath = LogPath, RunId = RunId)
+pending <- MDTCompleteStatus(MDT = MDT, CheckpointPath = CheckpointPath,
+                             verbose = TRUE, logStatus = TRUE)
 
 ###############################################################################
-#### Schema discovery: survey, review, and finalize ###########################
+#### 3. Survey HCUP sources and recommend schemas #############################
 ###############################################################################
 #### The survey reads every source through its configured reader and stores  ####
 #### detailed per-file/per-column evidence in SchemaObservations.parquet.    ####
 #### Recommendations are derived from those observations rather than HCUP    ####
-#### naming rules. Open StartHere first. ColumnDecisions and                  ####
-#### CompatibilityDecisions contain only unfinished work; PolicyReport is    ####
-#### informational. Advanced registries/history are hidden but available.     ####
+#### naming rules. Open StartHere first. ColumnDecisions,                     ####
+#### CompatibilityDecisions, and DictionaryReview expose unfinished work;    ####
+#### missing semantic labels remain optional. Stable source labels are        ####
+#### automatic, while label drift across partitions requires a decision.     ####
+#### PolicyReport is informational. ValuePreview shows low-cardinality values ####
+#### and how they vary across partitions; identifiers remain suppressed.      ####
+#### Advanced registries/history are hidden but available.                    ####
 #### DBLoad derives from DBSetupV2.xlsx. Override it only for a staged load.  ####
 DBLoad <- sort(unique(MDT$Database))
 PrepareSchemaRegistry(
@@ -149,8 +178,11 @@ PrepareSchemaRegistry(
   ObservationPath = RepositoryPaths$SchemaObservationPath,
   SchemaReviewPath = RepositoryPaths$SchemaReviewPath,
   n_workers = n_workers,
-  SourceFingerprintMode = "metadata",
+  SourceFingerprintMode = SourceFingerprintMode,
   StrictReaders = FALSE,
+  ValuePreviewMaxDistinct = 15L,
+  ValuePreviewTypes = c("character", "integer", "int64", "logical"),
+  ValuePreviewIdentifiers = FALSE,
   #### This policy workbook is optional and visible. The survey remains     ####
   #### data-derived; matched HCUP policies and conflicts appear explicitly  ####
   #### in SchemaReview.xlsx instead of being applied invisibly.             ####
@@ -170,7 +202,7 @@ schema_issues <- GetSchemaObservations(
 if (nrow(schema_issues) > 0L) print(schema_issues)
 
 ###############################################################################
-#### Schema review gate #######################################################
+#### 4. Review decisions and finalize the HCUP catalog ########################
 ###############################################################################
 #### StartHere identifies every blocking item and its worksheet.              ####
 #### ColumnDecisions contains only genuinely ambiguous evidence or reader     ####
@@ -183,6 +215,11 @@ if (nrow(schema_issues) > 0L) print(schema_issues)
 ####   Accept   = use RecommendedCommonType for that approved merge group.   ####
 ####   Override = use ApprovedCommonType instead.                            ####
 ####   Ignore   = the similarly named fields are intentionally kept apart.   ####
+#### DictionaryReview contains code meanings such as 1 = Yes:                ####
+####   Accept   = keep a proposed source label for this partition scope.      ####
+####   Add      = add an optional label where no source meaning exists.       ####
+####   Override = replace a source label with ApprovedLabel.                  ####
+####   Ignore   = omit a conflicting mapping from the finalized dictionary.  ####
 #### PolicyPattern/PolicyType show every SchemaRegistry.xlsx match, including ####
 #### cases where the observed data makes the policy potentially lossy.       ####
 #### After review, run FinalizeSchemaRegistry below; a second survey is not  ####
@@ -197,9 +234,9 @@ repository_catalog <- FinalizeSchemaRegistry(
   strict = TRUE
 )
 
-##############################################################################################
-#### Convert Datasets to parquet files and store in a formal database directory structure ####
-##############################################################################################
+################################################################################
+#### 5. Load reviewed HCUP schemas to partitioned Parquet #####################
+################################################################################
 run_result <- ParquetBackEndCreate(MDT = MDT,
                                               DBLoad = DBLoad,
                                               MasterDBPath = MasterDBPath,
@@ -210,27 +247,30 @@ run_result <- ParquetBackEndCreate(MDT = MDT,
                                               n_workers = n_workers,
                                               MaxFileStemTruncate = TRUE,
                                               PrintStatus = TRUE,
-                                              PartitionBy = "FAIL",
+                                              PartitionBy = PartitionBy,
                                               TerminalHivePartition = FALSE,
-                                              RAMThreshold = 30,
-                                              SAV_ROW_THRESHOLD = 4000000L,
-                                              SAV_CHUNK_SIZE = 4000000L,
+                                              RAMThreshold = RAMThreshold,
+                                              SAV_ROW_THRESHOLD = SAV_ROW_THRESHOLD,
+                                              SAV_CHUNK_SIZE = SAV_CHUNK_SIZE,
                                               chunk_size_decrement = NULL,
                                               min_chunk_size = NULL,
                                               SchemaRegistryPath = RepositoryPaths$SchemaRegistryPath,
                                               ManifestPath = RepositoryPaths$ManifestPath,
+                                              MetadataWorkbookPath = RepositoryPaths$ManifestWorkbookPath,
                                               TableSchemaPath = RepositoryPaths$TableSchemaPath,
                                               UseSchemaCatalog = TRUE,
                                               StrictPreflight = TRUE,
                                               StrictSchemaValidation = TRUE,
                                               RunPreflight = FALSE, # already validated structurally above
-                                              SourceFingerprintMode = "metadata",
+                                              DownloadCachePath = RepositoryPaths$DownloadCachePath,
+                                              MaterializeRemote = FALSE, # materialized once before schema survey
+                                              SourceFingerprintMode = SourceFingerprintMode,
                                               StopOnFileError = TRUE,
                                               ReturnRunResult = TRUE,
                                               RunId = RunId,
                                               AutoCleanup = TRUE, 
                                               CleanupAfterPhase = "database",
-                                              MaxCoerceNAPct = 25) # fail a file when type coercion destroys >25% of a column's present values;
+                                              MaxCoerceNAPct = MaxCoerceNAPct) # fail a file when type coercion destroys >25% of a column's present values;
                                                                    # per-column damage totals land in CoercionReport.csv next to the manifest
 #### Note: the loader snapshots the four state files (checkpoint, manifest,  ####
 #### catalog, registry) to <FormattedDBPath>/StateBackups/<timestamp>/ at    ####
@@ -260,23 +300,29 @@ log_msg(sprintf("Checkpoint after load: %d files recorded", length(completed_che
 ################################################################################
 SummaryVerification(MDT = MDT, CheckpointPath = CheckpointPath, LogPath = LogPath,
                     logStatus = FALSE, RunId = run_result$run_id,
-                    MasterDBPath = MasterDBPath, SourceFingerprintMode = "metadata")
+                    MasterDBPath = MasterDBPath,
+                    SourceFingerprintMode = SourceFingerprintMode)
 
-##########################################################################################
-#### Create a single persistent connection to DuckDB #####################################
-##########################################################################################
-dir.create(file.path(FormattedDBPath, "duckdb_temp"), recursive = TRUE, showWarnings = FALSE)
+#### ParquetBackEndCreate refreshes this accessible workbook automatically. ####
+#### Call the exporter directly whenever the DuckDB manifest changes outside ####
+#### the loader and a fresh presentation snapshot is needed.                 ####
+# ExportRepositoryMetadata(RepositoryPaths$ManifestPath,
+#                          RepositoryPaths$ManifestWorkbookPath)
+
+################################################################################
+#### 6. Register and strictly validate HCUP DuckDB views ######################
+################################################################################
 con <- open_duckdb(FormattedDBPath = FormattedDBPath,                 # To create a new view, change the directory
-                   DBName = "DuckDBRelationalDatabase.duckdb",        # To create a new view, change the name
-                   TempDirPath = 'X:/Brendan/NationalDatabases/formattedDatabases/duckdb_temp',
-                   GB = '48GB', ProgressBar = TRUE, ReadOnly = FALSE) # adjust RAM to ~75% of your RAM: 64 * 0.75 = 48 GB
+                   DBName = DuckDBName,                               # To create a new view, change the name
+                   TempDirPath = DuckDBTempPath,
+                   GB = DuckDB_GB, ProgressBar = TRUE, ReadOnly = FALSE) # adjust RAM to ~75% of available RAM
 
-##########################
-#### Build viwes to DB ###
-##########################
 completed_checkpoint <- load_checkpoint(path = CheckpointPath)
-completed_mdt <- MDT[checkpoint_completed_mask(MDT, completed_checkpoint),]
-register_parquet_view_compile(con = con, ParquetBasePath = ParquetBasePath, verbose = TRUE, logStatus = FALSE,
+completed_mdt <- MDT[checkpoint_completed_mask(
+  MDT, completed_checkpoint,
+  MasterDBPath = MasterDBPath,
+  SourceFingerprintMode = SourceFingerprintMode),]
+register_parquet_view_compile(con = con, ParquetBasePath = ParquetBasePath, verbose = TRUE, logStatus = TRUE,
                                SchemaRegistryPath = RepositoryPaths$SchemaRegistryPath,
                                TableSchemaPath = RepositoryPaths$TableSchemaPath,
                                validate = TRUE, strict_validation = TRUE,
@@ -289,15 +335,16 @@ contract_results <- validate_data_contracts(con, RepositoryPaths$DataContractPat
 #### Adjust connection to read only, which is faster for queries ####
 #####################################################################
 if(exists("con") && DBI::dbIsValid(con)){ DBI::dbDisconnect(con, shutdown = TRUE) }
-con <- open_duckdb(FormattedDBPath = FormattedDBPath, DBName = "DuckDBRelationalDatabase.duckdb",
-                   TempDirPath = 'X:/Brendan/NationalDatabases/formattedDatabases/duckdb_temp',
-                   GB = '48GB', ProgressBar = TRUE, ReadOnly = TRUE)
+con <- open_duckdb(FormattedDBPath = FormattedDBPath, DBName = DuckDBName,
+                   TempDirPath = DuckDBTempPath,
+                   GB = DuckDB_GB, ProgressBar = TRUE, ReadOnly = TRUE)
 
 ###############################################################################
-#### Repository reconciliation (fsck) ########################################
+#### 7. Reconcile HCUP repository state (non-destructive fsck) ###############
 ###############################################################################
-#### Cross-checks the four sources of truth -- checkpoint, manifest, Parquet ####
-#### on disk, and DuckDB row counts -- and reports any divergence (files the ####
+#### Cross-checks the five sources of truth -- inventory, checkpoint,         ####
+#### manifest, Parquet on disk, and DuckDB row counts -- and reports any      ####
+#### divergence (files the                                                     ####
 #### manifest claims but disk lost, orphan parquet no manifest row claims,   ####
 #### checkpointed rows with no output, per-table count mismatches). Purely   ####
 #### a report: it deletes and changes nothing. Inspect the returned detail   ####
@@ -311,14 +358,23 @@ repo_audit <- audit_repository(MDT = MDT,
                                LogPath = LogPath, RunId = RunId)
 repo_audit$issues
 
+################################################################################
+#### HCUP-specific post-load capabilities ######################################
+################################################################################
+#### The canonical seven-stage repository build is complete above. The       ####
+#### remaining examples demonstrate healthcare dictionaries, survey-weighted ####
+#### estimates, repository summaries, and HCUP-oriented analytical queries.   ####
+
 ###############################################################################
 #### Data dictionary: find variables and validate content against it #########
 ###############################################################################
-#### Finalization preserves an existing Labels sheet in TableSchemas.xlsx.  ####
-#### This first survey redesign does not harvest new variable/value labels,  ####
-#### so these helpers require a dictionary retained from an earlier catalog. ####
-# search_labels("payer", TableSchemaPath = TableSchemaPath, ParquetBasePath = ParquetBasePath)
-# search_labels("^DIED$", TableSchemaPath = TableSchemaPath, search_in = "column")
+#### Schema discovery harvests available variable and value labels from       ####
+#### labeled sources. Finalization writes approved mappings to                ####
+#### TableSchemas.xlsx for search, decoding, and content validation.          ####
+# search_labels("payer", TableSchemaPath = RepositoryPaths$TableSchemaPath,
+#               ParquetBasePath = ParquetBasePath)
+# search_labels("^DIED$", TableSchemaPath = RepositoryPaths$TableSchemaPath,
+#               search_in = "column")
 #### validate_against_dictionary() checks stored values against each         ####
 #### labeled column's code domain (e.g. DIED must be 0/1) and reports the    ####
 #### out-of-domain share per column -- content integrity, worst-first.       ####

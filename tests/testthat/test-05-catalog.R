@@ -17,10 +17,10 @@ build_cat <- function(fx, ...) {
   res
 }
 
-test_that("registry forces join keys to character in the built catalog", {
+test_that("generic catalog derives identifier types from the data", {
   fx <- catalog_fixture(); on.exit(unlink(fx$root, recursive = TRUE))
   cat1 <- build_cat(fx)
-  expect_identical(cat1$col_classes$DEMO$Core$KEY_D, "character")
+  expect_identical(cat1$col_classes$DEMO$Core$KEY_D, "integer")
 })
 
 test_that("manual CanonicalType overrides survive a preflight re-run", {

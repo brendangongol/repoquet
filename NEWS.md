@@ -4,6 +4,10 @@
 - Added schema-aware ingestion, generalized Hive partitions, source
   fingerprints, transactional manifests, resumable checkpoints, data
   contracts, repository auditing, and validated DuckDB view registration.
+- Added optional direct HTTP/HTTPS source acquisition through `SourceURI`,
+  atomic managed caching, refresh policies, offline/manual modes, SHA-256
+  verification, and remote provenance in repository metadata. Source files and
+  inventory workbooks remain read-only.
 - Added a project scaffold, command-line workflow, reproducible dependency
   lockfile, continuous integration, and a 274-expectation regression suite.
 - Added a user-guided schema workflow: detailed source observations are stored
@@ -16,6 +20,24 @@
   numeric, and added explicit completion messages to empty review worksheets.
 - Restored full column, compatibility, and type-history overview tabs after the
   action tabs, with a sheet-by-sheet guide on `StartHere`.
+- Added partition-aware semantic dictionaries. Labeled source formats retain
+  exact variable/value-label evidence in `SchemaObservations.parquet`; stable
+  meanings are automatic, conflicts are resolved in `DictionaryReview`, and
+  approved mappings are written to `ColumnDictionary` with query helpers.
+- Made `PartitionKey` and `PartitionValue` mandatory and authoritative for
+  partition placement and checkpoint identity. Removed the legacy `Year`
+  fallback and stopped synthesizing physical `YEAR` columns during ingestion.
+- Added an atomic `RepositoryMetadata.xlsx` presentation snapshot with table,
+  run, issue, field-guide, and paginated raw-manifest sheets. The DuckDB
+  manifest remains authoritative and Excel export failures do not invalidate a
+  completed repository load.
+- Corrected `load_repository_config()` runtime precedence. Users can now
+  override file-defined resource settings and required paths with explicit
+  arguments or a named `overrides` list without editing the configuration file.
+- Reconciled the generic README, generated runner, CLI, and HCUP reference
+  around one documented seven-stage production workflow. Every entry point now
+  creates and propagates `new_repository_run_id()` for traceable operations;
+  HCUP-specific policies, tuning, and analytical extensions remain explicit.
 - Cross-database compatibility decisions now supersede narrower
   within-database decisions, and the generic schema-policy registry is an empty
   template rather than a collection of domain assumptions.
@@ -31,4 +53,10 @@
   ("all" after all writes, "database" after each batch, "none" to disable).
   This prevents orphaned `.tmp_*.parquet` files from accumulating without
   requiring manual cleanup calls.
-
+* Added curated real-world repository profiles for the MIMIC-III demo, NHANES
+  demographic cycles, UCI healthcare datasets, and ClinVar summaries.
+* Added `inst/extdata/DBSetupV2WithInternetDownload.xlsx`, preserving the
+  current HCUP inventory and appending the complete curated public catalog.
+* Remote acquisition now supports explicit ZIP members with atomic extraction,
+  path-traversal protection, headerless delimited sources, and sectioned lookup
+  files while preserving source files unchanged.

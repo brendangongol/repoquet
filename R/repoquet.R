@@ -20,7 +20,7 @@ NULL
 
 utils::globalVariables(c(
   ".", "AppliesTo", "Candidate", "CandidateMergeKey", "CanonicalColumn",
-  "CanonicalType", "ChunkStem", "Column", "Column_Left", "Column_Right",
+  "CanonicalType", "CachePath", "ChunkStem", "Column", "Column_Left", "Column_Right",
   "ColumnPattern", "Database", "Dir",
   "DirKey", "DuckDBTable", "DuckDBTable_Left", "DuckDBTable_Right", "Enabled",
   "ExplicitMergeKey", "ExplicitGroup", "FileType", "FileTypeLower", "FromClass", "InferredType",
@@ -42,9 +42,19 @@ utils::globalVariables(c(
   "RecommendedCommonType", "ApprovedCommonType", "SuggestedRole", "Scope",
   "DeclaredEncoding", "DetectedEncoding", "EncodingConfidence", "EncodingUsed",
   "EncodingDetectionMethod", "EncodingValidationStatus",
-  "SourceFingerprint", "TableName", "ToClass",
+  "SourceFingerprint", "TableName", "ToClass", "BlankCount",
+  "DistinctValueCount", "ObservedValues", "PartitionCount", "PartitionLabel",
+  "PartitionsPresent", "FirstPartition", "LastPartition", "ProfileStatus", "SourcesProfiled",
+  "Value", "ValueCount", "ValuePercent", "ValueProfileStatus", "ValueSet",
+  "ValuesChangeAcrossPartitions", "VariableLabel", "ValueLabel", "LabelSource",
+  "ProposedLabel", "ApprovedLabel", "EvidenceLabels", "EvidenceSources",
+  "PartitionsObserved", "LabelCoverage", "DictionarySignature", "Specific", "Label",
+  "..key_columns", "..key_fields", "NLabels", "RecommendationReason", "UserNotes",
+  "ValueLabels", "VariableLabelHistory", "VariableLabelStatus",
+  "StatusNormalized", "NRows", "run_time", "LastUpdate",
+  "age_hours", "mtime", "should_clean", "size_bytes",
   "TypeSet", "code", "column_name", "database_table", "diagnosis_column",
-  "n_keysets", "n_raw", "n_rows", "n_typesets", "pct_of_table"
+  "URI", "URIs", "n_keysets", "n_raw", "n_rows", "n_typesets", "pct_of_table"
 ))
 
 # Internal globals
@@ -269,13 +279,327 @@ source_fingerprint <- function(path, mode = c("metadata", "sha256", "none")) {
 }
 
 source_path_for_row <- function(row_meta, MasterDBPath) {
+  if ("ResolvedSourcePath" %in% names(row_meta)) {
+    resolved <- as.character(row_meta$ResolvedSourcePath[1])
+    if (!is.na(resolved) && nzchar(trimws(resolved))) return(trimws(resolved))
+  }
   file.path(MasterDBPath, as.character(row_meta$MDBDir[1]), as.character(row_meta$Path[1]))
+}
+
+.remote_source_uri <- function(row_meta) {
+  if (!"SourceURI" %in% names(row_meta)) return(NA_character_)
+  uri <- as.character(row_meta$SourceURI[1])
+  if (is.na(uri) || !nzchar(trimws(uri))) return(NA_character_)
+  trimws(uri)
+}
+
+.remote_cache_path_for_row <- function(row_meta, DownloadCachePath) {
+  uri <- .remote_source_uri(row_meta)
+  if (is.na(uri)) return(NA_character_)
+  db <- gsub("[^A-Za-z0-9_.-]+", "_", as.character(row_meta$Database[1]))
+  if (!nzchar(db)) db <- "repository"
+  logical_name <- basename(as.character(row_meta$Path[1]))
+  logical_name <- gsub("[^A-Za-z0-9_.-]+", "_", logical_name)
+  if (!nzchar(logical_name) || logical_name %in% c(".", "..")) logical_name <- "source.bin"
+  uri_hash <- substr(digest::digest(uri, algo = "sha256", serialize = FALSE), 1L, 16L)
+  file.path(DownloadCachePath, db, paste0(uri_hash, "_", logical_name))
+}
+
+.remote_archive_spec <- function(row_meta) {
+  type <- if ("ArchiveType" %in% names(row_meta)) {
+    tolower(trimws(as.character(row_meta$ArchiveType[1])))
+  } else ""
+  if (is.na(type) || type %in% c("", "none")) type <- "none"
+  member <- if ("ArchiveMember" %in% names(row_meta)) {
+    trimws(as.character(row_meta$ArchiveMember[1]))
+  } else ""
+  if (is.na(member)) member <- ""
+  list(Type = type, Member = member)
+}
+
+.archive_member_is_safe <- function(member) {
+  if (length(member) != 1L || is.na(member) || !nzchar(trimws(member))) return(FALSE)
+  member <- gsub("\\\\", "/", trimws(member))
+  parts <- strsplit(member, "/", fixed = TRUE)[[1]]
+  !grepl("^/|^[A-Za-z]:", member) && !any(parts %in% c("", ".", "..")) &&
+    !grepl("[[:cntrl:]]", member)
+}
+
+.remote_download_path_for_row <- function(row_meta, DownloadCachePath) {
+  spec <- .remote_archive_spec(row_meta)
+  if (spec$Type == "none") return(.remote_cache_path_for_row(row_meta, DownloadCachePath))
+  uri <- .remote_source_uri(row_meta)
+  if (is.na(uri)) return(NA_character_)
+  uri_path <- sub("[?#].*$", "", uri)
+  archive_name <- basename(utils::URLdecode(uri_path))
+  archive_name <- gsub("[^A-Za-z0-9_.-]+", "_", archive_name)
+  if (!nzchar(archive_name) || archive_name %in% c(".", "..")) {
+    archive_name <- paste0("source.", spec$Type)
+  }
+  uri_hash <- substr(digest::digest(uri, algo = "sha256", serialize = FALSE), 1L, 16L)
+  file.path(DownloadCachePath, "_archives", paste0(uri_hash, "_", archive_name))
+}
+
+.extract_remote_archive_member <- function(archive_path, archive_type, member, destination) {
+  archive_type <- tolower(trimws(archive_type))
+  member <- gsub("\\\\", "/", trimws(member))
+  if (archive_type != "zip") stop("ArchiveType currently supports only 'zip'.")
+  if (!.archive_member_is_safe(member)) stop("ArchiveMember is blank or unsafe.")
+  listing <- utils::unzip(archive_path, list = TRUE)
+  listed <- gsub("\\\\", "/", as.character(listing$Name))
+  hits <- which(listed == member)
+  if (length(hits) != 1L) {
+    stop(sprintf("ArchiveMember '%s' was found %d time(s) in %s.",
+                 member, length(hits), basename(archive_path)))
+  }
+  extract_dir <- tempfile(pattern = "repoquet_extract_", tmpdir = dirname(destination))
+  dir.create(extract_dir, recursive = TRUE, showWarnings = FALSE)
+  on.exit(unlink(extract_dir, recursive = TRUE, force = TRUE), add = TRUE)
+  utils::unzip(archive_path, files = listing$Name[hits], exdir = extract_dir,
+               overwrite = TRUE, junkpaths = FALSE)
+  extracted <- do.call(file.path, as.list(c(extract_dir,
+    strsplit(member, "/", fixed = TRUE)[[1]])))
+  if (!file.exists(extracted) || is.na(file.info(extracted)$size[1])) {
+    stop(sprintf("Archive extraction did not produce '%s'.", member))
+  }
+  dir.create(dirname(destination), recursive = TRUE, showWarnings = FALSE)
+  tmp <- tempfile(pattern = paste0(basename(destination), ".part_"),
+                  tmpdir = dirname(destination))
+  if (!file.copy(extracted, tmp, overwrite = TRUE)) {
+    stop(sprintf("Could not stage extracted archive member '%s'.", member))
+  }
+  replace_file_safely(tmp, destination)
+  invisible(destination)
+}
+
+#' Materialize remote source files into the repository cache
+#'
+#' Rows with a non-empty \code{SourceURI} are downloaded to a managed local
+#' cache before schema discovery or loading. Original sources and the MDT
+#' workbook are never modified. \code{Path} remains the stable logical source
+#' name; the returned MDT adds \code{ResolvedSourcePath} for runtime reads and
+#' provenance fields describing the cached object.
+#'
+#' Remote acquisition accepts direct HTTP or HTTPS file URLs and explicit ZIP
+#' members declared with \code{ArchiveType="zip"} and \code{ArchiveMember}.
+#' It does not scrape web pages or store credentials. Use \code{DownloadFunction} for a
+#' caller-managed authenticated download without placing secrets in the MDT.
+#'
+#' @param MDT Master Database Table data frame.
+#' @param DownloadCachePath Directory used for managed source copies.
+#' @param Offline If TRUE, never access the network and require cached copies.
+#' @param DefaultDownloadPolicy Default for blank \code{DownloadPolicy} cells:
+#'   \code{"if_missing"}, \code{"if_changed"}, \code{"always"}, or
+#'   \code{"manual"}.
+#' @param DownloadMethod Method passed to \code{utils::download.file()}.
+#' @param TimeoutSeconds Minimum download timeout in seconds.
+#' @param Strict Stop if any remote row cannot be materialized.
+#' @param DownloadFunction Optional function with arguments \code{uri} and
+#'   \code{destination}. It must write the destination file. This supports
+#'   caller-managed authentication and deterministic tests.
+#' @param LogPath,RunId Optional repository logging context.
+#' @return A copy of \code{MDT} with resolved paths and remote provenance.
+#' @export
+MaterializeRemoteSources <- function(
+    MDT,
+    DownloadCachePath,
+    Offline = FALSE,
+    DefaultDownloadPolicy = c("if_missing", "if_changed", "always", "manual"),
+    DownloadMethod = "auto",
+    TimeoutSeconds = 600,
+    Strict = TRUE,
+    DownloadFunction = NULL,
+    LogPath = NULL,
+    RunId = NULL) {
+  DefaultDownloadPolicy <- match.arg(DefaultDownloadPolicy)
+  if (missing(DownloadCachePath) || length(DownloadCachePath) != 1L ||
+      is.na(DownloadCachePath) || !nzchar(trimws(DownloadCachePath))) {
+    stop("DownloadCachePath must be one non-empty directory path.")
+  }
+  TimeoutSeconds <- suppressWarnings(as.numeric(TimeoutSeconds))
+  if (length(TimeoutSeconds) != 1L || is.na(TimeoutSeconds) || TimeoutSeconds < 1) {
+    stop("TimeoutSeconds must be a positive number.")
+  }
+  previous_run <- if (!is.null(LogPath) || !is.null(RunId)) {
+    begin_repository_run(LogPath, RunId)
+  } else NULL
+  if (!is.null(previous_run)) on.exit(restore_repository_run(previous_run), add = TRUE)
+  out <- data.table::copy(data.table::as.data.table(MDT))
+  n <- nrow(out)
+  ensure_character <- function(field) {
+    if (!field %in% names(out)) out[, (field) := rep(NA_character_, n)]
+    else out[, (field) := as.character(get(field))]
+  }
+  for (field in c("SourceURI", "DownloadPolicy", "ExpectedSHA256",
+                  "ArchiveType", "ArchiveMember", "RemoteArchivePath",
+                  "ResolvedSourcePath", "RemoteSourceSHA256",
+                  "RemoteDownloadedAt", "RemoteCacheStatus",
+                  "RemoteDownloadMessage")) ensure_character(field)
+  if (n == 0L) return(out[])
+
+  remote <- !is.na(out$SourceURI) & nzchar(trimws(out$SourceURI))
+  if (!any(remote)) return(out[])
+  if (!requireNamespace("digest", quietly = TRUE)) {
+    stop("Remote acquisition requires the 'digest' package for cache identity and SHA-256 validation.")
+  }
+  dir.create(DownloadCachePath, recursive = TRUE, showWarnings = FALSE)
+  cache_lock <- acquire_repository_lock(
+    file.path(DownloadCachePath, ".materialize.lock"),
+    stale_minutes = 720, owner_note = "MaterializeRemoteSources")
+  on.exit(release_repository_lock(cache_lock), add = TRUE)
+  stale_parts <- list.files(DownloadCachePath, pattern = "\\.part_", recursive = TRUE,
+                            full.names = TRUE, all.files = TRUE)
+  if (length(stale_parts) > 0L) {
+    removed <- vapply(stale_parts, safe_unlink, logical(1), log_failures = TRUE)
+    if (any(removed)) log_msg(sprintf("[REMOTE CLEANUP] Removed %d abandoned partial download(s).", sum(removed)))
+  }
+  cache_paths <- vapply(which(remote), function(i) {
+    .remote_cache_path_for_row(out[i], DownloadCachePath)
+  }, character(1))
+  archive_members <- vapply(which(remote), function(i) {
+    .remote_archive_spec(out[i])$Member
+  }, character(1))
+  cache_map <- data.table::data.table(Row = which(remote), URI = trimws(out$SourceURI[remote]),
+                                     Member = archive_members,
+                                     CachePath = normalizePath(cache_paths, winslash = "/", mustWork = FALSE))
+  collisions <- cache_map[, .(Sources = data.table::uniqueN(paste(URI, Member, sep = "||"))),
+                          by = CachePath][Sources > 1L]
+  if (nrow(collisions) > 0L) {
+    stop("Different SourceURI values resolve to the same remote cache path.")
+  }
+
+  old_timeout <- getOption("timeout")
+  options(timeout = max(as.numeric(old_timeout %||% 60), TimeoutSeconds))
+  on.exit(options(timeout = old_timeout), add = TRUE)
+  failures <- character(0)
+  allowed <- c("if_missing", "if_changed", "always", "manual")
+  downloader <- if (is.null(DownloadFunction)) {
+    function(uri, destination) {
+      utils::download.file(uri, destination, mode = "wb", quiet = TRUE,
+                           method = DownloadMethod)
+    }
+  } else DownloadFunction
+  if (!is.function(downloader)) stop("DownloadFunction must be NULL or a function.")
+
+  for (i in which(remote)) {
+    uri <- trimws(out$SourceURI[i])
+    policy <- tolower(trimws(out$DownloadPolicy[i]))
+    if (is.na(policy) || !nzchar(policy)) policy <- DefaultDownloadPolicy
+    out$DownloadPolicy[i] <- policy
+    archive <- .remote_archive_spec(out[i])
+    cache_path <- .remote_cache_path_for_row(out[i], DownloadCachePath)
+    download_path <- .remote_download_path_for_row(out[i], DownloadCachePath)
+    out$ResolvedSourcePath[i] <- cache_path
+    out$RemoteArchivePath[i] <- if (archive$Type == "none") NA_character_ else download_path
+    row_label <- sprintf("row %d (%s)", i, out$Path[i])
+    error_message <- tryCatch({
+      if (!grepl("^https?://[^[:space:]]+$", uri, ignore.case = TRUE)) {
+        stop("SourceURI must be a direct HTTP or HTTPS URL.")
+      }
+      if (grepl("^https?://[^/@:]+:[^/@]*@", uri, ignore.case = TRUE)) {
+        stop("SourceURI must not contain embedded credentials; use DownloadFunction instead.")
+      }
+      if (!policy %in% allowed) {
+        stop(sprintf("DownloadPolicy must be one of: %s.", paste(allowed, collapse = ", ")))
+      }
+      if (!archive$Type %in% c("none", "zip")) {
+        stop("ArchiveType must be blank, 'none', or 'zip'.")
+      }
+      if (archive$Type == "zip" && !.archive_member_is_safe(archive$Member)) {
+        stop("ArchiveType='zip' requires one safe relative ArchiveMember path.")
+      }
+      if (archive$Type == "none" && nzchar(archive$Member)) {
+        stop("ArchiveMember requires ArchiveType='zip'.")
+      }
+      expected <- tolower(trimws(out$ExpectedSHA256[i]))
+      if (is.na(expected) || !nzchar(expected)) expected <- NA_character_
+      if (!is.na(expected) && !grepl("^[0-9a-f]{64}$", expected)) {
+        stop("ExpectedSHA256 must be blank or a 64-character hexadecimal SHA-256 value.")
+      }
+      cache_exists <- file.exists(download_path)
+      resolved_exists <- file.exists(cache_path)
+      network_allowed <- !isTRUE(Offline) && policy != "manual"
+      should_download <- network_allowed && (
+        policy %in% c("always", "if_changed") ||
+          (policy == "if_missing" && !cache_exists))
+      if (!should_download && !cache_exists) {
+        reason <- if (isTRUE(Offline)) "Offline=TRUE" else if (policy == "manual") "DownloadPolicy='manual'" else "cache unavailable"
+        stop(sprintf("No cached source is available while %s.", reason))
+      }
+
+      status <- if (isTRUE(Offline)) "offline_cached" else if (policy == "manual") "manual_cached" else "cached"
+      if (should_download) {
+        dir.create(dirname(download_path), recursive = TRUE, showWarnings = FALSE)
+        tmp <- tempfile(pattern = paste0(basename(download_path), ".part_"),
+                        tmpdir = dirname(download_path))
+        tryCatch({
+          result <- downloader(uri, tmp)
+          if (!file.exists(tmp) || is.na(file.info(tmp)$size[1])) {
+            stop("Downloader did not create a readable destination file.")
+          }
+          if (is.logical(result) && length(result) == 1L && !is.na(result) && !result) {
+            stop("Downloader reported failure.")
+          }
+          if (is.numeric(result) && length(result) == 1L && !is.na(result) && result != 0) {
+            stop(sprintf("Downloader returned status %s.", result))
+          }
+          downloaded_sha <- tolower(digest::digest(file = tmp, algo = "sha256", serialize = FALSE))
+          if (!is.na(expected) && !identical(downloaded_sha, expected)) {
+            stop(sprintf("SHA-256 mismatch: expected %s, received %s.", expected, downloaded_sha))
+          }
+          existing_sha <- if (cache_exists && policy == "if_changed") {
+            tolower(digest::digest(file = download_path, algo = "sha256", serialize = FALSE))
+          } else NA_character_
+          if (cache_exists && policy == "if_changed" && identical(downloaded_sha, existing_sha)) {
+            unlink(tmp)
+            status <- "unchanged"
+          } else {
+            status <- if (cache_exists) "updated" else "downloaded"
+            replace_file_safely(tmp, download_path)
+          }
+        }, finally = {
+          if (exists("tmp", inherits = FALSE) && file.exists(tmp)) unlink(tmp)
+        })
+      }
+      if (archive$Type == "zip" &&
+          (!resolved_exists || (should_download && status != "unchanged"))) {
+        .extract_remote_archive_member(download_path, archive$Type,
+                                       archive$Member, cache_path)
+        status <- paste0(status, "_extracted")
+      }
+      if (!file.exists(cache_path)) {
+        stop(sprintf("Resolved source is unavailable after materialization: %s", cache_path))
+      }
+      cache_sha <- tolower(digest::digest(file = download_path, algo = "sha256", serialize = FALSE))
+      if (!is.na(expected) && !identical(cache_sha, expected)) {
+        stop(sprintf("Cached SHA-256 mismatch: expected %s, found %s.", expected, cache_sha))
+      }
+      out$RemoteSourceSHA256[i] <- cache_sha
+      out$RemoteDownloadedAt[i] <- format(file.info(download_path)$mtime[1], "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")
+      out$RemoteCacheStatus[i] <- status
+      out$RemoteDownloadMessage[i] <- NA_character_
+      log_msg(sprintf("[REMOTE %s] %s -> %s", toupper(status), uri, cache_path), log_path = LogPath)
+      NA_character_
+    }, error = function(e) conditionMessage(e))
+    if (!is.na(error_message)) {
+      out$RemoteCacheStatus[i] <- "failed"
+      out$RemoteDownloadMessage[i] <- error_message
+      out$ResolvedSourcePath[i] <- NA_character_
+      failures <- c(failures, sprintf("%s: %s", row_label, error_message))
+      log_msg(sprintf("[REMOTE ERROR] %s: %s", row_label, error_message), log_path = LogPath)
+    }
+  }
+  if (length(failures) > 0L && isTRUE(Strict)) {
+    stop(sprintf("Remote source materialization failed for %d row(s); first: %s",
+                 length(failures), failures[1]))
+  }
+  out[]
 }
 
 repository_checkpoint_key <- function(MDT, MasterDBPath = NULL,
                                       SourceFingerprintMode = c("none", "metadata", "sha256")) {
   SourceFingerprintMode <- match.arg(SourceFingerprintMode)
-  required <- c("Database", "TableName", "MDBDir", "Path")
+  required <- c("Database", "TableName", "MDBDir", "Path", "PartitionKey", "PartitionValue")
   missing_required <- setdiff(required, names(MDT))
   if (length(missing_required) > 0L) {
     stop(sprintf("Cannot build repository checkpoint key; missing columns: %s",
@@ -283,11 +607,7 @@ repository_checkpoint_key <- function(MDT, MasterDBPath = NULL,
   }
   partition_identity <- vapply(seq_len(nrow(MDT)), function(i) {
     spec <- partition_spec_for_row(MDT[i, , drop = FALSE])
-    if (identical(spec$keys, "YEAR")) {
-      paste(spec$values, collapse = ";")
-    } else {
-      paste(paste0(spec$keys, "=", spec$values), collapse = ";")
-    }
+    paste(paste0(spec$keys, "=", spec$values), collapse = ";")
   }, character(1))
   base_keys <- paste(MDT$Database, MDT$TableName, partition_identity, MDT$MDBDir, MDT$Path, sep = "||")
   if (SourceFingerprintMode == "none") return(base_keys)
@@ -546,6 +866,22 @@ safe_unlink <- function(path, max_attempts = 3L, wait_sec = c(0, 1, 5),
   return(FALSE)
 }
 
+.prune_empty_output_directories <- function(root) {
+  if (is.null(root) || length(root) != 1L || is.na(root) || !nzchar(root) ||
+      !dir.exists(root)) return(0L)
+  dirs <- unique(c(list.dirs(root, recursive = TRUE, full.names = TRUE), root))
+  dirs <- dirs[order(nchar(dirs), decreasing = TRUE)]
+  removed <- 0L
+  for (directory in dirs) {
+    if (!dir.exists(directory)) next
+    contents <- list.files(directory, all.files = TRUE, no.. = TRUE)
+    if (length(contents) == 0L && identical(unlink(directory, recursive = TRUE), 0L)) {
+      removed <- removed + 1L
+    }
+  }
+  removed
+}
+
 #' Clean up temporary Parquet write files
 #'
 #' Scans a directory for temporary files left behind by atomic write operations
@@ -649,190 +985,14 @@ cleanup_temp_files <- function(parent_dir, pattern = "^.*\\.tmp_.*\\.parquet$",
 }
 
 ################################################################################
-#### CSV file splitting by partition spec #####################################
-################################################################################
-
-#' Split CSV files by partition specification
-#'
-#' When a CSV file contains data for multiple partition values but the MDT row
-#' specifies a single partition value (partition mismatch), automatically split
-#' the file by the partition column into separate files. This resolves partition
-#' validation errors without blocking the workflow.
-#'
-#' Partition specs are the source of truth for splitting; data content is never
-#' checked. This ensures alignment with hive partition structure and works for
-#' any partition key, not just YEAR.
-#'
-#' @param path Character. Full path to the CSV file to potentially split.
-#' @param partition_keys Character vector. Partition key column name(s)
-#'   (e.g., "YEAR" or c("YEAR", "REGION")).
-#' @param partition_values Character vector. Expected partition value(s)
-#'   (e.g., "2020" or c("2020", "WEST")). Must match length of partition_keys.
-#' @param LogPath Character. Optional path for logging split operations.
-#' @param dry_run Logical. If TRUE, log what would happen without creating files.
-#'
-#' @return Invisibly returns a data frame with columns:
-#'   - original_file: Original CSV filename
-#'   - partition_value: Partition value found in data
-#'   - split_file: Path to new partition-specific file (NA if not split)
-#'   - n_rows: Number of rows in partition-specific file
-#'   - status: "unchanged", "split", or "error"
-#'   - message: Summary message
-#'
-#' @keywords internal
-split_csv_by_partition <- function(path, partition_keys = "YEAR", partition_values = NULL,
-                                   LogPath = NULL, dry_run = FALSE) {
-  if (!file.exists(path)) {
-    log_msg(sprintf("[SPLIT ERROR] File not found: %s", path), log_path = LogPath)
-    return(invisible(NULL))
-  }
-
-  if (length(partition_keys) != length(partition_values)) {
-    log_msg(sprintf("[SPLIT ERROR] Partition keys (%d) and values (%d) length mismatch for %s",
-                    length(partition_keys), length(partition_values), basename(path)), log_path = LogPath)
-    return(invisible(NULL))
-  }
-
-  original_name <- basename(path)
-  file_dir <- dirname(path)
-  partition_spec <- paste(partition_keys, "=", partition_values, sep = "", collapse = "/")
-
-  log_msg(sprintf("[SPLIT CHECK] Examining %s for partition mismatch (expected: %s)",
-                  original_name, partition_spec), log_path = LogPath)
-
-  tryCatch({
-    # Read CSV sampling first partition columns (minimal overhead)
-    col_names <- tryCatch({
-      df_sample <- data.table::fread(path, nrows = 1L)
-      names(df_sample)
-    }, error = function(e) character(0))
-
-    missing_cols <- setdiff(toupper(partition_keys), toupper(col_names))
-    if (length(missing_cols) > 0L) {
-      log_msg(sprintf("[SPLIT ERROR] Partition column(s) not found in %s: %s",
-                      original_name, paste(missing_cols, collapse = ", ")), log_path = LogPath)
-      return(invisible(NULL))
-    }
-
-    # Normalize column names to match data (handle case sensitivity)
-    actual_cols <- col_names[tolower(col_names) %in% tolower(partition_keys)]
-    if (length(actual_cols) == 0L) {
-      log_msg(sprintf("[SPLIT ERROR] Could not match partition columns in %s", original_name), log_path = LogPath)
-      return(invisible(NULL))
-    }
-
-    # For now, handle single-key partitions (multi-key future expansion)
-    if (length(partition_keys) > 1L) {
-      log_msg(sprintf("[SPLIT WARNING] Multi-key partitioning not yet supported for %s (keys: %s)",
-                      original_name, paste(partition_keys, collapse = ";")), log_path = LogPath)
-      return(invisible(NULL))
-    }
-
-    partition_col <- actual_cols[1]
-    df_sample <- data.table::fread(path, select = c(partition_col), nrows = 100000L)
-
-    if (nrow(df_sample) == 0L) {
-      log_msg(sprintf("[SPLIT INFO] %s is empty, no split needed", original_name), log_path = LogPath)
-      return(invisible(NULL))
-    }
-
-    # Get unique values in partition column
-    unique_vals <- sort(unique(df_sample[[partition_col]]))
-    n_unique_vals <- length(unique_vals)
-    expected_val <- as.character(partition_values[1])
-
-    # Check if split is needed
-    if (n_unique_vals == 1L) {
-      actual_val <- as.character(unique_vals[1])
-      if (actual_val == expected_val) {
-        log_msg(sprintf("[SPLIT OK] %s contains only %s=%s (matches MDT), no split needed",
-                        original_name, partition_col, actual_val), log_path = LogPath)
-        return(invisible(NULL))
-      }
-    }
-
-    log_msg(sprintf("[SPLIT NEEDED] %s contains %d %s value(s): %s (expected: %s)",
-                    original_name, n_unique_vals, partition_col,
-                    paste(unique_vals, collapse = ", "), expected_val),
-            log_path = LogPath)
-
-    # Read full file for splitting
-    log_msg(sprintf("[SPLIT READING] Reading full file %s...", original_name), log_path = LogPath)
-    df_full <- data.table::fread(path)
-
-    if (!dry_run) {
-      # Split and write partition-specific files
-      split_results <- list()
-      for (pval in unique_vals) {
-        df_part <- df_full[df_full[[partition_col]] == pval, , drop = FALSE]
-        n_rows <- nrow(df_part)
-
-        # Create partition-specific filename
-        base_name <- sub("\\.csv$", "", original_name, ignore.case = TRUE)
-        new_name <- sprintf("%s_%s.csv", base_name, pval)
-        new_path <- file.path(file_dir, new_name)
-
-        # Write partition-specific file
-        data.table::fwrite(df_part, new_path)
-        split_results[[as.character(pval)]] <- list(value = pval, path = new_path, n_rows = n_rows)
-
-        log_msg(sprintf("[SPLIT OK] Created %s (%s rows)", new_name,
-                        formatC(n_rows, format = "d", big.mark = ",")),
-                log_path = LogPath)
-      }
-
-      log_msg(sprintf("[SPLIT COMPLETE] %s split into %d partition-specific file(s)",
-                      original_name, length(split_results)),
-              log_path = LogPath)
-
-      # Create result summary
-      split_df <- data.frame(
-        original_file = original_name,
-        partition_value = sapply(split_results, "[[", "value"),
-        split_file = sapply(split_results, "[[", "path"),
-        n_rows = sapply(split_results, "[[", "n_rows"),
-        status = "split",
-        message = sprintf("Split by %s from %s", partition_col, original_name),
-        stringsAsFactors = FALSE
-      )
-      return(invisible(split_df))
-
-    } else {
-      # Dry run: report what would happen
-      for (pval in unique_vals) {
-        df_part <- df_full[df_full[[partition_col]] == pval, , drop = FALSE]
-        n_rows <- nrow(df_part)
-        base_name <- sub("\\.csv$", "", original_name, ignore.case = TRUE)
-        new_name <- sprintf("%s_%s.csv", base_name, pval)
-
-        log_msg(sprintf("[SPLIT DRY-RUN] Would create %s (%s rows)", new_name,
-                        formatC(n_rows, format = "d", big.mark = ",")),
-                log_path = LogPath)
-      }
-
-      log_msg(sprintf("[SPLIT DRY-RUN] %s would be split into %d partition-specific file(s)",
-                      original_name, n_unique_vals),
-              log_path = LogPath)
-
-      return(invisible(NULL))
-    }
-
-  }, error = function(e) {
-    log_msg(sprintf("[SPLIT ERROR] Failed to split %s: %s", original_name, conditionMessage(e)),
-            log_path = LogPath)
-    return(invisible(NULL))
-  })
-}
-
-################################################################################
 #### Hive partition specification ##############################################
 ################################################################################
-#### Each MDT row maps one source file to exactly one hive partition          ####
-#### directory. The optional MDT columns PartitionKey / PartitionValue drive  ####
-#### this: blank or absent means the classic YEAR partition using the row's   ####
-#### Year value, so existing workbooks behave identically. Multi-level        ####
-#### partitions use ";" in both fields ("SITE;YEAR" / "MGH;2019" ->           ####
-#### SITE=MGH/year-style nested directories).                                 ####
+#### Each MDT row declares its hive partition keys and an anchor value. A      ####
+#### source without physical partition columns is written to that directory.  ####
+#### A chunkable delimited source containing every configured key can span    ####
+#### multiple values and is routed directly to the corresponding directories; ####
+#### the declared anchor must be present. Multi-level partitions use ";" in   ####
+#### both fields ("SITE;YEAR" / "MGH;2019").                                  ####
 
 #' Sanitize a value for use in a hive partition directory name
 #' @export
@@ -844,10 +1004,10 @@ sanitize_partition_value <- function(x) {
 #' Resolve the hive partition keys and values for one MDT row
 #'
 #' Returns the partition specification driving where a source file's Parquet
-#' output lands. Defaults reproduce the historical behavior: partition key
-#' \code{YEAR} with the row's \code{Year} as its value. When
-#' \code{PartitionValue} is blank the key must be \code{YEAR} (there is nothing
-#' to default a non-year value to).
+#' output lands, or the validated anchor when the source carries multiple
+#' physical values for all configured partition keys. Both
+#' \code{PartitionKey} and \code{PartitionValue} are required; no column-name
+#' or year-based defaults are inferred.
 #' @param row_meta One row of the MDT (data.frame or data.table).
 #' @return A list with \code{keys} (canonical uppercase character vector),
 #'   \code{values} (sanitized character vector, same length), and \code{dir}
@@ -861,38 +1021,32 @@ partition_spec_for_row <- function(row_meta) {
   split_spec <- function(x) trimws(strsplit(as.character(x), ";", fixed = TRUE)[[1]])
   raw_key <- if ("PartitionKey" %in% names(row_meta)) as.character(row_meta$PartitionKey[1]) else NA_character_
   raw_val <- if ("PartitionValue" %in% names(row_meta)) as.character(row_meta$PartitionValue[1]) else NA_character_
-  keys <- if (is.na(raw_key) || !nzchar(trimws(raw_key))) "YEAR" else canonical_colnames(split_spec(raw_key))
+  source_label <- if ("Path" %in% names(row_meta)) as.character(row_meta$Path[1]) else "<unknown source>"
+  if (is.na(raw_key) || !nzchar(trimws(raw_key))) {
+    stop(sprintf("PartitionKey is required and cannot be blank for %s.", source_label))
+  }
+  if (is.na(raw_val) || !nzchar(trimws(raw_val))) {
+    stop(sprintf("PartitionValue is required and cannot be blank for %s.", source_label))
+  }
+  keys <- canonical_colnames(split_spec(raw_key))
   invalid_keys <- !grepl("^[A-Z][A-Z0-9_]*$", keys)
   if (any(invalid_keys)) {
     stop(sprintf("Invalid PartitionKey name(s) for %s: %s. Use letters, digits, and underscores, beginning with a letter.",
-                 row_meta$Path[1], paste(keys[invalid_keys], collapse = ", ")))
+                 source_label, paste(keys[invalid_keys], collapse = ", ")))
   }
   if (anyDuplicated(keys)) {
     stop(sprintf("PartitionKey contains duplicate level name(s) for %s: %s.",
-                 row_meta$Path[1], paste(keys[duplicated(keys)], collapse = ", ")))
+                 source_label, paste(keys[duplicated(keys)], collapse = ", ")))
   }
-  if (is.na(raw_val) || !nzchar(trimws(raw_val))) {
-    if (!identical(keys, "YEAR")) {
-      stop(sprintf("PartitionValue is blank for %s but PartitionKey is '%s'; only the default YEAR partition can fall back to the Year column.",
-                   paste(row_meta$Path[1], collapse = ""), paste(keys, collapse = ";")))
-    }
-    fallback_year <- if ("Year" %in% names(row_meta)) row_meta$Year[1] else NA
-    if (is.na(fallback_year) || !nzchar(trimws(as.character(fallback_year)))) {
-      stop(sprintf("Row for %s has neither a PartitionValue nor a Year column to fall back to. Populate PartitionKey/PartitionValue in the MDT workbook.",
-                   row_meta$Path[1]))
-    }
-    values <- as.character(fallback_year)
-  } else {
-    values <- split_spec(raw_val)
-  }
+  values <- split_spec(raw_val)
   if (length(keys) != length(values)) {
     stop(sprintf("PartitionKey ('%s') and PartitionValue ('%s') disagree on the number of levels for %s.",
-                 paste(keys, collapse = ";"), paste(values, collapse = ";"), row_meta$Path[1]))
+                 paste(keys, collapse = ";"), paste(values, collapse = ";"), source_label))
   }
   values <- sanitize_partition_value(values)
   if (any(!nzchar(values))) {
     stop(sprintf("Empty partition value after sanitization for %s (PartitionKey '%s').",
-                 row_meta$Path[1], paste(keys, collapse = ";")))
+                 source_label, paste(keys, collapse = ";")))
   }
   list(keys = keys, values = values,
        dir = paste(paste0(tolower(keys), "=", values), collapse = "/"))
@@ -997,10 +1151,12 @@ table_partition_keys <- function(rows_tbl) {
 #'
 #' Compares the Master Database Table (\code{MDT}) against the completed-files
 #' checkpoint to identify which files have not yet been loaded.  Also detects
-#' duplicate \code{Year:basename(Path)} entries in \code{MDT}, which would
+#' duplicate repository identities derived from database, table, explicit
+#' partition specification, source directory, and path, which would
 #' cause silent overwrite collisions during loading.
 #' @param MDT Data frame. Master Database Table with at minimum columns
-#'   \code{Year} and \code{Path}.
+#'   \code{Database}, \code{TableName}, \code{MDBDir}, \code{Path},
+#'   \code{PartitionKey}, and \code{PartitionValue}.
 #' @param CheckpointPath Character. Path to the checkpoint \code{.rds} file,
 #'   read via \code{\link{load_checkpoint}}.
 #' @param verbose Logical. If \code{TRUE} (default), logs or prints the number
@@ -1012,8 +1168,9 @@ table_partition_keys <- function(rows_tbl) {
 #' @seealso \code{\link{load_checkpoint}}, \code{\link{SummaryVerification}}
 #' @examples
 #' \dontrun{
-#' MDT <- data.frame(Year = 2018:2019,
+#' MDT <- data.frame(Database = "DEMO", TableName = "Core", MDBDir = "DEMO",
 #'                   Path = c("DEMO_2018_Core.sav", "DEMO_2019_Core.sav"),
+#'                   PartitionKey = "YEAR", PartitionValue = c("2018", "2019"),
 #'                   stringsAsFactors = FALSE)
 #' tmp_cp <- tempfile(fileext = ".rds")
 #' saveRDS("DEMO_2018_Core.sav", tmp_cp)   # 2018 already done
@@ -1162,8 +1319,9 @@ arrow_schema_from_classes <- function(arrow_tbl, col_classes = NULL) {
 
 #' Write a data frame to a hive-partitioned Parquet file
 #'
-#' Writes \code{df} to a Parquet file under a \code{year=<year_val>}
-#' subdirectory of \code{file.path(ParquetBasePath, table_name)}.  The output
+#' Writes \code{df} to a Parquet file under the explicit Hive partition
+#' directory defined by \code{partition_keys} and \code{partition_values}.
+#' The output
 #' filename is derived from \code{source_path} with non-alphanumeric characters
 #' replaced by underscores, so each source SAV/CSV file produces a uniquely
 #' named Parquet file.
@@ -1180,8 +1338,9 @@ arrow_schema_from_classes <- function(arrow_tbl, col_classes = NULL) {
 #' @param ParquetBasePath Character. Root directory of the Parquet store.
 #' @param table_name Character. Table name used as the first directory level
 #'   (e.g. \code{"NIS_Core"}).
-#' @param year_val Integer or character. Year value used as the hive
-#'   partition key (e.g. \code{2019}).
+#' @param year_val Integer or character. Derived year value retained for
+#'   backward compatibility with callers; partition placement is controlled by
+#'   \code{partition_keys} and \code{partition_values}.
 #' @param source_path Character. Original source file path; used to derive
 #'   the output filename.
 #' @param col_classes Named list (optional). Maps column names to their
@@ -1212,7 +1371,6 @@ write_year_parquet <- function(df, ParquetBasePath, table_name, year_val, source
                                max_coerce_na_pct = NULL){
   partition_dir <- paste(paste0(tolower(partition_keys), "=", sanitize_partition_value(partition_values)), collapse = "/")
   year_dir  <- file.path(ParquetBasePath, table_name, partition_dir)
-  dir.create(year_dir, recursive = TRUE, showWarnings = FALSE)
   safe_stem <- parquet_output_stem(source_path, partition_dir = year_dir,
                                    MaxFileStemTruncate = MaxFileStemTruncate)
   fname    <- paste0(safe_stem, ".parquet")
@@ -1241,6 +1399,7 @@ write_year_parquet <- function(df, ParquetBasePath, table_name, year_val, source
                  basename(source_path), conditionMessage(e)))
   })
   rm(df)
+  dir.create(year_dir, recursive = TRUE, showWarnings = FALSE)
   write_attempts <- 3L
   write_wait_s   <- c(0L, 10L, 30L)
   tmp_path <- NULL
@@ -1265,8 +1424,10 @@ write_year_parquet <- function(df, ParquetBasePath, table_name, year_val, source
                         tmp_path))
       }
     }
-    if (attempt == write_attempts)
+    if (attempt == write_attempts) {
+      .prune_empty_output_directories(year_dir)
       stop(write_err)
+    }
     log_msg(sprintf("[WRITE RETRY] Write attempt %d failed: %s", attempt, write_err$message))
   }
   invisible(out_path)
@@ -1921,41 +2082,6 @@ enforce_col_classes <- function(df, col_classes = NULL, max_coerce_na_pct = NULL
   df
 }
 
-##########################################################
-#### Add a year column to a data table if it's absent ####
-##########################################################
-#' Add a \code{year} column to a data frame if absent
-#'
-#' Checks for both \code{"year"} and \code{"YEAR"} column names (case
-#' insensitive).  If neither is present, adds a \code{year} column with the
-#' scalar value \code{year_value}.
-#' @param df A data frame or data.table.
-#' @param year_value Integer or character. The year value to assign.
-#' @return The input \code{df} with a \code{year} column guaranteed to be
-#'   present.
-#' @examples
-#' \dontrun{
-#' set.seed(1)
-#' df1 <- data.frame(AGE = sample(18:90, 5), SEX = sample(c("M","F"), 5, replace = TRUE))
-#' df1 <- add_year_if_missing(df1, 2019)
-#' stopifnot("year" %in% names(df1))
-#' #### Already has a year column -- left untouched ####
-#' df2 <- data.frame(AGE = sample(18:90, 5), year = 2018L)
-#' df2 <- add_year_if_missing(df2, 2019)
-#' unique(df2$year)  # still 2018, not overwritten
-#' }
-#' @export
-add_year_if_missing <- function(df, year_value) {
-  if (!data.table::is.data.table(df)) data.table::setDT(df)
-  df <- canonicalize_dataframe_names(df)
-  if (!"YEAR" %in% colnames(df)) {
-    data.table::set(df, j = "YEAR", value = as.integer(year_value))
-  } else {
-    data.table::set(df, j = "YEAR", value = as.integer(df[["YEAR"]]))
-  }
-  return(df)
-}
-
 ################################################################################
 #### Pluggable file readers ####################################################
 ################################################################################
@@ -2111,10 +2237,61 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
                encoding = "unknown",
                colClasses = fread_col_classes(col_classes, header),
                keepLeadingZeros = isTRUE(keep_leading_zeros))
+  header_mode <- reader_options$Header %||% NULL
+  if (!is.null(header_mode)) {
+    if (is.character(header_mode)) {
+      key <- tolower(trimws(header_mode[1]))
+      if (!key %in% c("true", "t", "yes", "y", "1", "false", "f", "no", "n", "0")) {
+        stop("ReaderOptions$Header must be TRUE or FALSE.")
+      }
+      header_mode <- key %in% c("true", "t", "yes", "y", "1")
+    }
+    if (!is.logical(header_mode) || length(header_mode) != 1L || is.na(header_mode)) {
+      stop("ReaderOptions$Header must be TRUE or FALSE.")
+    }
+    args$header <- header_mode
+  }
+  column_names <- reader_options$ColumnNames %||% NULL
+  if (!is.null(column_names)) {
+    column_names <- as.character(unlist(column_names, use.names = FALSE))
+    if (length(column_names) == 0L || anyNA(column_names) || any(!nzchar(trimws(column_names)))) {
+      stop("ReaderOptions$ColumnNames must contain non-empty column names.")
+    }
+    args$col.names <- column_names
+  }
   if (!is.null(sep) && nzchar(sep)) args$sep <- sep
   if (!is.null(reader_options$Quote)) args$quote <- as.character(reader_options$Quote)
   if (!is.null(reader_options$DecimalMark)) args$dec <- as.character(reader_options$DecimalMark)
   args[!vapply(args, is.null, logical(1))]
+}
+
+.sectioned_delimited_text <- function(path, reader_options = list()) {
+  section <- trimws(as.character(reader_options$SectionHeader %||% "")[1])
+  if (is.na(section) || !nzchar(section)) return(NULL)
+  delimiter <- reader_options$Delimiter %||% NULL
+  if (identical(delimiter, "\\t")) delimiter <- "\t"
+  if (is.null(delimiter) || nchar(as.character(delimiter[1]), type = "chars") != 1L) {
+    stop("ReaderOptions$SectionHeader requires an explicit one-character Delimiter.")
+  }
+  encoding <- reader_options$.EncodingInfo$EncodingUsed %||% "UTF-8"
+  con <- .open_delimited_text_connection(path, encoding)
+  on.exit(close(con), add = TRUE)
+  lines <- readLines(con, warn = FALSE)
+  prefix <- paste0(section, as.character(delimiter[1]))
+  starts <- which(startsWith(lines, prefix))
+  if (length(starts) != 1L) {
+    stop(sprintf("SectionHeader '%s' was found %d time(s) in %s.",
+                 section, length(starts), basename(path)))
+  }
+  after <- if (starts < length(lines)) seq.int(starts + 1L, length(lines)) else integer(0)
+  blanks <- after[!nzchar(trimws(lines[after]))]
+  end <- if (length(blanks) > 0L) blanks[1] - 1L else length(lines)
+  paste(lines[starts:end], collapse = "\n")
+}
+
+.delimited_input <- function(path, reader_options = list()) {
+  section_text <- .sectioned_delimited_text(path, reader_options)
+  if (is.null(section_text)) list(file = path) else list(text = section_text)
 }
 
 .delimited_repair_settings <- function(reader_options = list()) {
@@ -2211,7 +2388,13 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
   }, integer(1))
   best <- which.max(counts)
   if (counts[best] <= 1L) {
-    stop(sprintf("Unable to determine a multi-column delimiter from the header of %s.", basename(path)))
+    # A legitimate one-column file has no delimiter in its header. Use the
+    # format convention so its later rows can still be shape-validated.
+    if (grepl("\\.tsv(?:\\.(?:gz|gzip))?$", path, ignore.case = TRUE)) return("\t")
+    if (grepl("\\.(?:csv|txt)(?:\\.(?:gz|gzip))?$|\\.(?:gz|gzip)$", path,
+              ignore.case = TRUE)) return(",")
+    stop(sprintf("Unable to determine a delimiter from the header of %s; set ReaderOptions$Delimiter explicitly.",
+                 basename(path)))
   }
   candidates[best]
 }
@@ -2250,7 +2433,7 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
     c(list(text = header_line, nrows = 0L, header = TRUE), args), path)
   header_df <- normalize_character_encoding(header_df, "UTF-8")
   header <- names(header_df)
-  if (length(header) < 2L) stop("Delimited source header resolved to fewer than two columns: ", path)
+  if (length(header) < 1L) stop("Delimited source header contains no columns: ", path)
   list(Header = header, HeaderLine = header_line, HeaderPhysicalLine = physical_line,
        Delimiter = delimiter, ReaderOptions = reader_options)
 }
@@ -2273,7 +2456,7 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
   options <- header_info$ReaderOptions
   repair <- .delimited_repair_settings(options)
   parse_classes <- col_classes
-  if (!is.null(parse_classes)) {
+  if (!is.null(parse_classes) && repair$Policy == "append_previous") {
     names(parse_classes) <- canonical_colnames(names(parse_classes))
     parse_classes[[canonical_colnames(repair$Column)]] <- "character"
   }
@@ -2286,17 +2469,19 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
     stop(sprintf("Logical-record parser produced %d rows from %d assembled records in %s.",
                  nrow(df), length(records), basename(path)))
   }
-  target <- match(canonical_colnames(repair$Column), canonical_colnames(names(df)))
-  if (is.na(target)) {
-    stop(sprintf("ContinuationColumn '%s' is not present in %s.", repair$Column, basename(path)))
-  }
-  if (!is.character(df[[target]])) data.table::set(df, j = target, value = as.character(df[[target]]))
   repaired_rows <- which(lengths(continuations) > 0L)
-  for (i in repaired_rows) {
-    addition <- paste(as.character(continuations[[i]]), collapse = repair$Join)
-    current <- df[[target]][i]
-    combined <- if (is.na(current) || !nzchar(current)) addition else paste0(current, repair$Join, addition)
-    data.table::set(df, i = i, j = target, value = combined)
+  if (length(repaired_rows) > 0L) {
+    target <- match(canonical_colnames(repair$Column), canonical_colnames(names(df)))
+    if (is.na(target)) {
+      stop(sprintf("ContinuationColumn '%s' is not present in %s.", repair$Column, basename(path)))
+    }
+    if (!is.character(df[[target]])) data.table::set(df, j = target, value = as.character(df[[target]]))
+    for (i in repaired_rows) {
+      addition <- paste(as.character(continuations[[i]]), collapse = repair$Join)
+      current <- df[[target]][i]
+      combined <- if (is.na(current) || !nzchar(current)) addition else paste0(current, repair$Join, addition)
+      data.table::set(df, i = i, j = target, value = combined)
+    }
   }
   df <- normalize_character_encoding(df, "UTF-8")
   canonicalize_dataframe_names(df)
@@ -2310,9 +2495,6 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
   header_info <- .delimited_header_info(path, reader_options)
   options <- header_info$ReaderOptions
   repair <- .delimited_repair_settings(options)
-  if (repair$Policy != "append_previous") {
-    stop("Logical-record streaming currently requires MalformedRowPolicy='append_previous'.")
-  }
   chunk_size <- max(1L, as.integer(chunk_size))
   max_rows <- if (is.infinite(max_rows)) Inf else max(0, as.numeric(max_rows))
   expected_fields <- length(header_info$Header)
@@ -2392,14 +2574,19 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
         if (done) break
         pending_record <- complete
         pending_line <- start_line
-      } else if (shape$Fields == 1L && !is.null(pending_record)) {
+      } else if (shape$Fields == 1L && !is.null(pending_record) &&
+                 repair$Policy == "append_previous") {
         value <- .decode_continuation_value(complete, header_info$Delimiter, options, path)
         pending_continuations <- c(pending_continuations, value)
         repair_lines <- c(repair_lines, start_line)
       } else {
-        stop(sprintf(paste0("Malformed delimited record at physical line %d in %s: expected %d fields, found %d. ",
-                            "Automatic repair only accepts a one-field continuation following a complete record."),
-                     start_line, basename(path), expected_fields, shape$Fields), call. = FALSE)
+        suffix <- if (repair$Policy == "append_previous") {
+          " Automatic repair only accepts a one-field continuation following a complete record."
+        } else {
+          " Set MalformedRowPolicy='append_previous' with a ContinuationColumn only when this is a verified continuation line."
+        }
+        stop(sprintf("Malformed delimited record at physical line %d in %s: expected %d fields, found %d.%s",
+                     start_line, basename(path), expected_fields, shape$Fields, suffix), call. = FALSE)
       }
     }
   }
@@ -2462,7 +2649,8 @@ read_delimited_full <- function(path, col_classes = NULL, reader_options = list(
   if (.uses_delimited_logical_stream(reader_options)) {
     return(.collect_delimited_logical_records(path, reader_options, Inf, col_classes))
   }
-  args <- c(list(file = path), delimited_fread_args(reader_options, col_classes = col_classes))
+  args <- c(.delimited_input(path, reader_options),
+            delimited_fread_args(reader_options, col_classes = col_classes))
   df <- .fread_with_structural_errors(args, path)
   df <- .normalize_delimited_frame(df, reader_options, path)
   canonicalize_dataframe_names(df)
@@ -2477,7 +2665,8 @@ read_delimited_full <- function(path, col_classes = NULL, reader_options = list(
     return(header)
   }
   df <- .fread_with_structural_errors(
-    c(list(file = path, nrows = 0L), delimited_fread_args(reader_options)), path)
+    c(.delimited_input(path, reader_options), list(nrows = 0L),
+      delimited_fread_args(reader_options)), path)
   df <- .normalize_delimited_frame(df, reader_options, path)
   names(df)
 }
@@ -2488,7 +2677,8 @@ read_delimited_full <- function(path, col_classes = NULL, reader_options = list(
     return(.collect_delimited_logical_records(path, reader_options, 100000L))
   }
   df <- .fread_with_structural_errors(
-    c(list(file = path, nrows = 100000L), delimited_fread_args(reader_options)), path)
+    c(.delimited_input(path, reader_options), list(nrows = 100000L),
+      delimited_fread_args(reader_options)), path)
   df <- .normalize_delimited_frame(df, reader_options, path)
   canonicalize_dataframe_names(df)
 }
@@ -2503,13 +2693,21 @@ read_delimited_full <- function(path, col_classes = NULL, reader_options = list(
     return(as.numeric(count))
   }
   nrow(.fread_with_structural_errors(
-    c(list(file = path, select = 1L), delimited_fread_args(reader_options)), path))
+    c(.delimited_input(path, reader_options), list(select = 1L),
+      delimited_fread_args(reader_options)), path))
 }
 
 .read_delimited_chunk <- function(path, offset, n_max, header, col_classes = NULL,
                                   reader_options = list()) {
   reader_options <- .resolve_delimited_reader_options(path, reader_options)
+  if (!is.null(.sectioned_delimited_text(path, reader_options))) {
+    all_rows <- read_delimited_full(path, col_classes, reader_options)
+    if (offset >= nrow(all_rows)) return(all_rows[0])
+    return(all_rows[seq.int(offset + 1L, min(nrow(all_rows), offset + n_max))])
+  }
   args <- delimited_fread_args(reader_options)
+  args$header <- NULL
+  args$col.names <- NULL
   args$colClasses <- fread_col_classes_positional(col_classes, header)
   df <- .fread_with_structural_errors(
     c(list(file = path, skip = offset + 1L, nrows = n_max,
@@ -2760,10 +2958,17 @@ build_col_classes <- function(files, base_path, n_workers = 1, reader = "sav",
   if (!is.list(reader_options) || length(reader_options) != length(all_paths)) {
     stop("reader_options must be a list with one element per file.")
   }
+  reader_callbacks <- lapply(readers, get_file_reader)
   scan_one <- function(i) {
+    # Multisession workers receive the reader registry as a serialized
+    # environment, but future's global discovery cannot see private helpers
+    # referenced only from callbacks stored inside that environment. Calling
+    # the built-in initializer here makes those callback dependencies explicit
+    # globals on the worker before the selected reader is invoked.
+    register_builtin_file_readers()
     p <- all_paths[i]
     tryCatch({
-      rd <- get_file_reader(readers[i])
+      rd <- reader_callbacks[[i]]
       df <- call_reader(rd, "read_sample", p, reader_options = reader_options[[i]])
       df <- strip_haven(df)
       cls <- sapply(df, function(col) {
@@ -2878,8 +3083,8 @@ safe_read_sav <- function(path){
 #'   years for this table, passed to \code{\link{align_columns}}.
 #' @param col_classes Named list (optional). Column class map from
 #'   \code{\link{build_col_classes}}, used for type enforcement.
-#' @param year_val Integer or character (optional). Year value passed to
-#'   \code{\link{add_year_if_missing}}.
+#' @param year_val Integer or character (optional). Derived value recorded in
+#'   legacy manifest fields when \code{YEAR} is an explicit partition key.
 #' @param chunk_size_decrement Integer (optional). Rows to subtract from the
 #'   chunk size after a chunk fails (e.g. with a memory-allocation error).
 #'   Defaults to 10\% of \code{chunk_size}. The reduction is local to this
@@ -3011,7 +3216,6 @@ safe_read_sav_chunked <- function(path, chunk_size = 1000000L, TerminalHiveParti
             df_chunk <- strip_haven(df_chunk)
             df_chunk <- normalize_character_encoding(df_chunk, reader_options$Encoding %||% NULL)
             if (direct_write) {
-              if (!is.null(year_val) && "YEAR" %in% partition_keys){ df_chunk <- add_year_if_missing(df_chunk, year_val) }
               if (!is.null(all_cols)){ df_chunk <- align_columns(df_chunk, all_cols, col_classes, max_coerce_na_pct = max_coerce_na_pct) }
             } else {
               df_chunk <- canonicalize_dataframe_names(df_chunk)
@@ -3145,7 +3349,6 @@ safe_read_sav_chunked <- function(path, chunk_size = 1000000L, TerminalHiveParti
               data.table::set(tail_df, j = col, value = as.character(tail_df[[col]])) }
             tail_df <- normalize_character_encoding(tail_df, reader_options$Encoding %||% NULL)
             if(direct_write) {
-              if(!is.null(year_val) && "YEAR" %in% partition_keys){ tail_df <- add_year_if_missing(tail_df, year_val) }
               if(!is.null(all_cols)){ tail_df <- align_columns(tail_df, all_cols, col_classes, max_coerce_na_pct = max_coerce_na_pct) }
             } else {
               tail_df <- canonicalize_dataframe_names(tail_df)
@@ -3255,6 +3458,7 @@ safe_read_sav_chunked <- function(path, chunk_size = 1000000L, TerminalHiveParti
       log_msg(sprintf("[CHUNKED] Removed %d partial output%s after failed read of %s",
                       n_cleaned, ifelse(n_cleaned == 1L, "", "s"), basename(path)))
     }
+    .prune_empty_output_directories(year_dir)
     log_msg(sprintf("[CHUNKED] Post-loop error %s: %s", basename(path), e$message))
     stop(e)
   })
@@ -3280,6 +3484,7 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
                                    all_cols = NULL, col_classes = NULL, year_val = NULL,
                                    TerminalHivePartition = FALSE,
                                    partition_keys = "YEAR", partition_values = NULL,
+                                   route_source_partitions = FALSE, table_dir = NULL,
                                    max_coerce_na_pct = NULL,
                                    ManifestPath = NULL, Database = NULL, TableName = NULL,
                                    DuckDBTable = NULL, SourcePath = NULL, SchemaHash = NA_character_,
@@ -3292,6 +3497,13 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
   if (is.null(rd$read_chunk)) stop(sprintf("Reader '%s' has no read_chunk callback.", reader))
   logical_stream <- .uses_delimited_logical_stream(reader_options)
   header <- call_reader(rd, "read_header", path, reader_options = reader_options)
+  header_canonical <- canonical_colnames(header)
+  route_source_partitions <- isTRUE(route_source_partitions) &&
+    length(partition_keys) > 0L && all(partition_keys %in% header_canonical)
+  if (route_source_partitions && (is.null(table_dir) || !nzchar(table_dir))) {
+    table_dir <- year_dir
+    for (i in seq_along(partition_keys)) table_dir <- dirname(table_dir)
+  }
   total_rows <- if (logical_stream) NA_real_ else
     as.numeric(call_reader(rd, "count_rows", path, reader_options = reader_options))
   log_msg(sprintf("[CHUNKED-DELIM] %s: %s (chunk_size=%d)", basename(path),
@@ -3310,12 +3522,14 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
   file_stem <- parquet_chunk_stem(path, partition_dir = year_dir,
                                   TerminalHivePartition = TerminalHivePartition,
                                   MaxFileStemTruncate = MaxFileStemTruncate)
-  if (!is.null(year_dir) && dir.exists(year_dir)) {
+  stale_root <- if (route_source_partitions) table_dir else year_dir
+  if (!is.null(stale_root) && dir.exists(stale_root)) {
     stale <- if (TerminalHivePartition) {
-      d <- list.dirs(year_dir, recursive = FALSE, full.names = TRUE)
+      d <- list.dirs(stale_root, recursive = route_source_partitions, full.names = TRUE)
       d[grepl(paste0("^batch_id=", regex_escape(file_stem), "_[0-9]{5}$"), basename(d), ignore.case = TRUE)]
     } else {
-      list.files(year_dir, pattern = paste0("^", regex_escape(file_stem), "_[0-9]{5}\\.parquet$"), full.names = TRUE)
+      list.files(stale_root, pattern = paste0("^", regex_escape(file_stem), "_[0-9]{5}\\.parquet$"),
+                 recursive = route_source_partitions, full.names = TRUE)
     }
     if (length(stale) > 0L) {
       remove_parquet_manifest_rows(ManifestPath = ManifestPath, SourcePath = SourcePath %||% path,
@@ -3335,24 +3549,34 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
     invisible(length(targets))
   }
   ref_schema <- NULL
-  offset <- 0L; chunk_num <- 1L; total_written <- 0L
-  process_chunk <- function(df_chunk) {
-    if (!is.data.frame(df_chunk)) stop(sprintf("Reader '%s' did not return a data frame chunk.", reader))
-    data.table::setDT(df_chunk)
-    df_chunk <- normalize_character_encoding(df_chunk, "UTF-8")
-    if (!is.null(year_val) && "YEAR" %in% partition_keys) df_chunk <- add_year_if_missing(df_chunk, year_val)
-    if (!is.null(all_cols)) df_chunk <- align_columns(df_chunk, all_cols, col_classes,
-                                                      max_coerce_na_pct = max_coerce_na_pct)
-    num_cols <- names(df_chunk)[sapply(df_chunk, is.numeric)]
-    for (col in num_cols) {
-      bad_idx <- which(!is.finite(df_chunk[[col]]) & !is.na(df_chunk[[col]]))
-      if (length(bad_idx) > 0L) data.table::set(df_chunk, i = bad_idx, j = col, value = NA_real_)
+  offset <- 0L; total_written <- 0L
+  chunk_counters <- new.env(parent = emptyenv())
+  partition_records <- list()
+  normalize_partition_vector <- function(x) {
+    if (is.numeric(x)) {
+      rounded <- suppressWarnings(round(x))
+      value <- ifelse(!is.na(x) & abs(x - rounded) < 1e-9,
+                      format(rounded, scientific = FALSE, trim = TRUE), as.character(x))
+    } else {
+      value <- trimws(as.character(x))
     }
-    validate_partition_column_values(df_chunk, partition_keys, partition_values,
-                                     source_label = basename(path))
-    for (pk in intersect(partition_keys, names(df_chunk))) df_chunk[, (pk) := NULL]
-    arrow_tbl <- arrow::as_arrow_table(df_chunk)
-    rm(df_chunk)
+    value[is.na(x) | !nzchar(value)] <- NA_character_
+    ok <- !is.na(value)
+    value[ok] <- sanitize_partition_value(value[ok])
+    value
+  }
+  write_piece <- function(df_piece, actual_values, target_dir, partition_signature) {
+    for (pk in intersect(partition_keys, names(df_piece))) df_piece[, (pk) := NULL]
+    if (!is.null(all_cols)) df_piece <- align_columns(df_piece, all_cols, col_classes,
+                                                      max_coerce_na_pct = max_coerce_na_pct)
+    for (pk in intersect(partition_keys, names(df_piece))) df_piece[, (pk) := NULL]
+    num_cols <- names(df_piece)[sapply(df_piece, is.numeric)]
+    for (col in num_cols) {
+      bad_idx <- which(!is.finite(df_piece[[col]]) & !is.na(df_piece[[col]]))
+      if (length(bad_idx) > 0L) data.table::set(df_piece, i = bad_idx, j = col, value = NA_real_)
+    }
+    arrow_tbl <- arrow::as_arrow_table(df_piece)
+    rm(df_piece)
     if (is.null(ref_schema)) {
       if (!is.null(col_classes)) {
         ref_schema <<- arrow_schema_from_classes(arrow_tbl, col_classes)
@@ -3361,29 +3585,64 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
       }
     }
     arrow_tbl <- arrow_tbl$cast(ref_schema)
+    chunk_num <- chunk_counters[[partition_signature]] %||% 1L
+    dir.create(target_dir, recursive = TRUE, showWarnings = FALSE)
     chunk_file <- if (TerminalHivePartition) {
-      bd <- file.path(year_dir, sprintf("batch_id=%s_%05d", file_stem, chunk_num))
+      bd <- file.path(target_dir, sprintf("batch_id=%s_%05d", file_stem, chunk_num))
       dir.create(bd, recursive = TRUE, showWarnings = FALSE)
       file.path(bd, "data.parquet")
     } else {
-      file.path(year_dir, sprintf("%s_%05d.parquet", file_stem, chunk_num))
+      file.path(target_dir, sprintf("%s_%05d.parquet", file_stem, chunk_num))
     }
     write_arrow_table_safely(arrow_tbl, chunk_file)
     written_files <<- unique(c(written_files, chunk_file))
     n_written <- arrow_tbl$num_rows
     rm(arrow_tbl)
+    actual_year <- if ("YEAR" %in% partition_keys) actual_values[match("YEAR", partition_keys)] else year_val
     update_parquet_manifest(ManifestPath = ManifestPath, Database = Database, TableName = TableName,
-                            DuckDBTable = DuckDBTable, Year = year_val, SourcePath = SourcePath %||% path,
+                            DuckDBTable = DuckDBTable, Year = actual_year, SourcePath = SourcePath %||% path,
                             ParquetPath = chunk_file, NRows = n_written,
                             SchemaHash = SchemaHash, Status = "written",
                             Notes = sprintf("chunk_%05d", chunk_num),
-                            PartitionKey = partition_keys, PartitionValue = partition_values)
+                            PartitionKey = partition_keys, PartitionValue = actual_values)
     total_written <<- total_written + n_written
+    chunk_counters[[partition_signature]] <- chunk_num + 1L
+    partition_records[[length(partition_records) + 1L]] <<- data.table::data.table(
+      PartitionKey = paste(partition_keys, collapse = ";"),
+      PartitionValue = paste(actual_values, collapse = ";"),
+      Year = as.character(actual_year), Directory = target_dir)
     log_msg(sprintf("[CHUNKED-DELIM] %s chunk %d: %d rows -> %s", basename(path), chunk_num,
                     n_written, basename(chunk_file)))
-    chunk_num <<- chunk_num + 1L
     touch_repository_lock(RepositoryLock)
     gc(verbose = FALSE)
+    invisible(NULL)
+  }
+  process_chunk <- function(df_chunk) {
+    if (!is.data.frame(df_chunk)) stop(sprintf("Reader '%s' did not return a data frame chunk.", reader))
+    data.table::setDT(df_chunk)
+    df_chunk <- canonicalize_dataframe_names(normalize_character_encoding(df_chunk, "UTF-8"))
+    if (route_source_partitions) {
+      values <- lapply(partition_keys, function(pk) normalize_partition_vector(df_chunk[[pk]]))
+      bad <- Reduce(`|`, lapply(values, is.na))
+      if (any(bad)) {
+        stop(sprintf("Partition column(s) %s in %s contain missing or empty values at %d row(s); every row must map to a Hive partition.",
+                     paste(partition_keys, collapse = ", "), basename(path), sum(bad)))
+      }
+      signatures <- do.call(paste, c(values, sep = "\034"))
+      groups <- split(seq_len(nrow(df_chunk)), signatures, drop = TRUE)
+      for (signature in names(groups)) {
+        idx <- groups[[signature]]
+        actual_values <- vapply(values, function(v) v[idx[1]], character(1))
+        target_dir <- file.path(table_dir,
+                                paste(paste0(tolower(partition_keys), "=", actual_values), collapse = "/"))
+        write_piece(data.table::copy(df_chunk[idx]), actual_values, target_dir, signature)
+      }
+    } else {
+      validate_partition_column_values(df_chunk, partition_keys, partition_values,
+                                       source_label = basename(path))
+      signature <- paste(sanitize_partition_value(partition_values), collapse = "\034")
+      write_piece(df_chunk, partition_values, year_dir, signature)
+    }
     invisible(NULL)
   }
   tryCatch({
@@ -3413,11 +3672,33 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
       stop(sprintf("file=%s | issue=row_count_mismatch | counted=%d | rows_written=%d",
                    basename(path), total_rows, total_written))
     }
-    list(written = TRUE, n_rows = total_written, status = "completed")
+    partitions <- if (length(partition_records) > 0L) {
+      unique(data.table::rbindlist(partition_records, fill = TRUE))
+    } else data.table::data.table()
+    if (route_source_partitions && nrow(partitions) > 0L) {
+      actual <- gsub(";", "\034", partitions$PartitionValue, fixed = TRUE)
+      expected <- paste(sanitize_partition_value(partition_values), collapse = "\034")
+      if (length(actual) == 1L && !identical(actual, expected)) {
+        stop(sprintf("Partition column %s in %s contains value(s) [%s] that disagree with the workbook partition value '%s'.",
+                     paste(partition_keys, collapse = ";"), basename(path),
+                     partitions$PartitionValue[1], paste(partition_values, collapse = ";")))
+      }
+      if (length(actual) > 1L && !expected %in% actual) {
+        stop(sprintf("Multi-partition source %s does not contain its workbook anchor partition '%s'. Found: %s.",
+                     basename(path), paste(partition_values, collapse = ";"),
+                     paste(partitions$PartitionValue, collapse = ", ")))
+      }
+      if (length(actual) > 1L) {
+        log_msg(sprintf("[PARTITION ROUTE] %s was streamed directly to %d Hive partitions: %s",
+                        basename(path), length(actual), paste(partitions$PartitionValue, collapse = ", ")))
+      }
+    }
+    list(written = TRUE, n_rows = total_written, status = "completed", partitions = partitions)
   }, error = function(e) {
     n_cleaned <- cleanup_outputs()
     if (n_cleaned > 0L) log_msg(sprintf("[CHUNKED-DELIM] Removed %d partial output(s) after failure of %s",
                                         n_cleaned, basename(path)))
+    .prune_empty_output_directories(if (route_source_partitions) table_dir else year_dir)
     stop(e)
   })
 }
@@ -3510,8 +3791,12 @@ build_comprehensive <- function(files, base_path, suffixes, uni_suffixes, reader
   if (!is.list(reader_options) || length(reader_options) != length(all_paths)) {
     stop("reader_options must be a list with one element per file.")
   }
+  reader_callbacks <- lapply(readers, get_file_reader)
   scan_one <- function(i) tryCatch({
-    rd <- get_file_reader(readers[i])
+    # See build_col_classes(): make nested reader callback dependencies
+    # available in clean multisession R processes.
+    register_builtin_file_readers()
+    rd <- reader_callbacks[[i]]
     header <- canonical_colnames(call_reader(rd, "read_header", all_paths[i],
                                              reader_options = reader_options[[i]]))
     list(ok = TRUE, path = all_paths[i], header = header, error = NA_character_)
@@ -4069,7 +4354,7 @@ audit_repository <- function(MDT, ParquetBasePath, CheckpointPath, ManifestPath 
 #' It should remain small; ordinary table-specific columns are still inferred
 #' from the source files. The generic profile is an empty template with no
 #' naming assumptions. Domain conventions are available only through explicit
-#' profiles such as code{"hcup"} or user-authored rows.
+#' profiles such as \code{"hcup"} or user-authored rows.
 #' @return data.table with ColumnPattern, CanonicalType, Role, AppliesTo, Notes.
 #' @export
 build_default_schema_registry <- function(profile = c("generic", "hcup")) {
@@ -4297,6 +4582,16 @@ manifest_is_duckdb <- function(path) {
 
 manifest_table_name <- function() "parquet_manifest"
 
+#' Default path for the accessible Excel metadata snapshot
+#' @export
+metadata_workbook_path_default <- function(ManifestPath) {
+  if (is.null(ManifestPath) || length(ManifestPath) != 1L || is.na(ManifestPath) ||
+      !nzchar(trimws(ManifestPath))) {
+    stop("ManifestPath must be one non-empty path.")
+  }
+  file.path(dirname(ManifestPath), paste0(tools::file_path_sans_ext(basename(ManifestPath)), ".xlsx"))
+}
+
 #' Read the Parquet manifest from CSV or its transactional DuckDB store
 #' @export
 read_parquet_manifest <- function(ManifestPath) {
@@ -4308,6 +4603,278 @@ read_parquet_manifest <- function(ManifestPath) {
   on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
   if (!manifest_table_name() %in% DBI::dbListTables(con)) return(data.table::data.table())
   data.table::as.data.table(DBI::dbReadTable(con, manifest_table_name()))
+}
+
+.metadata_excel_clean <- function(x) {
+  if (!is.character(x)) return(x)
+  x <- iconv(x, from = "", to = "UTF-8", sub = "byte")
+  gsub("[\x01-\x08\x0B\x0C\x0E-\x1F]", " ", x, perl = TRUE)
+}
+
+.metadata_status_summary <- function(x) {
+  x <- as.character(x)
+  x[is.na(x) | !nzchar(trimws(x))] <- "unknown"
+  counts <- sort(table(x), decreasing = TRUE)
+  paste(paste0(names(counts), "=", as.integer(counts)), collapse = "; ")
+}
+
+.metadata_latest_value <- function(x) {
+  x <- as.character(x)
+  x <- x[!is.na(x) & nzchar(trimws(x))]
+  if (length(x) == 0L) NA_character_ else max(x)
+}
+
+.metadata_sheet_widths <- function(value) {
+  if (ncol(value) == 0L) return(numeric(0))
+  vapply(seq_along(value), function(i) {
+    sample_values <- utils::head(as.character(value[[i]]), 500L)
+    sample_values <- sample_values[!is.na(sample_values)]
+    observed <- if (length(sample_values) == 0L) 0L else max(nchar(sample_values), na.rm = TRUE)
+    min(45, max(12, nchar(names(value)[i]) + 2L, observed + 2L))
+  }, numeric(1))
+}
+
+.write_metadata_sheet <- function(wb, sheet, value, tab_colour = "#5B9BD5",
+                                  table_style = "TableStyleMedium2") {
+  value <- data.table::as.data.table(value)
+  openxlsx::addWorksheet(wb, sheet, gridLines = FALSE, tabColour = tab_colour)
+  if (ncol(value) == 0L) {
+    value <- data.table::data.table(Message = "No records are available.")
+  }
+  if (nrow(value) > 0L) {
+    openxlsx::writeDataTable(wb, sheet, value, tableStyle = table_style)
+  } else {
+    openxlsx::writeData(wb, sheet, value, colNames = TRUE)
+  }
+  openxlsx::freezePane(wb, sheet, firstRow = TRUE)
+  openxlsx::setColWidths(wb, sheet, cols = seq_len(ncol(value)),
+                         widths = .metadata_sheet_widths(value))
+  wide_cols <- which(names(value) %in% c(
+    "Description", "Purpose", "Statuses", "SourcePath", "ParquetPath",
+    "RepositoryKey", "Notes", "SourceFingerprint", "SourceURI",
+    "ResolvedSourcePath"))
+  if (length(wide_cols) > 0L) {
+    openxlsx::setColWidths(wb, sheet, cols = wide_cols, widths = 45)
+    if (nrow(value) > 0L) {
+      openxlsx::addStyle(
+        wb, sheet, openxlsx::createStyle(wrapText = TRUE, valign = "top"),
+        rows = 2:(nrow(value) + 1L), cols = wide_cols,
+        gridExpand = TRUE, stack = TRUE)
+      if (sheet == "ColumnGuide") {
+        openxlsx::setRowHeights(wb, sheet, rows = 2:(nrow(value) + 1L), heights = 30)
+      }
+    }
+  }
+  numeric_cols <- which(names(value) %in% c(
+    "ManifestRows", "Databases", "Tables", "Sources", "Partitions",
+    "ParquetFiles", "RowsWritten", "Records", "IssueRecords", "NRows",
+    "SourceSize", "ManifestSchemaVersion"))
+  if (length(numeric_cols) > 0L && nrow(value) > 0L) {
+    openxlsx::addStyle(
+      wb, sheet, openxlsx::createStyle(numFmt = "#,##0"),
+      rows = 2:(nrow(value) + 1L), cols = numeric_cols,
+      gridExpand = TRUE, stack = TRUE)
+  }
+  invisible(NULL)
+}
+
+#' Export the transactional repository manifest to an accessible Excel catalog
+#'
+#' Reads one consistent snapshot from \code{RepositoryMetadata.duckdb} (or a
+#' legacy CSV manifest) and creates a presentation-only workbook. The DuckDB
+#' manifest remains authoritative; editing this workbook never changes the
+#' repository. Every manifest row is included in numbered \code{Manifest_*}
+#' sheets, with summary and navigation sheets placed first.
+#'
+#' @param ManifestPath Path to the authoritative DuckDB or CSV manifest.
+#' @param OutputPath Destination \code{.xlsx} path. Defaults beside the manifest.
+#' @param MaxRowsPerSheet Maximum detail rows per numbered manifest sheet.
+#' @param IncludeDetails Include the complete raw manifest snapshot.
+#' @param LogPath,RunId Optional logging context.
+#' @return Invisibly, a list containing the output path and exported row/sheet counts.
+#' @export
+ExportRepositoryMetadata <- function(
+    ManifestPath,
+    OutputPath = metadata_workbook_path_default(ManifestPath),
+    MaxRowsPerSheet = 200000L,
+    IncludeDetails = TRUE,
+    LogPath = NULL,
+    RunId = NULL) {
+  if (length(OutputPath) != 1L || is.na(OutputPath) || !nzchar(trimws(OutputPath)) ||
+      tolower(tools::file_ext(OutputPath)) != "xlsx") {
+    stop("OutputPath must be one non-empty .xlsx file path.")
+  }
+  MaxRowsPerSheet <- suppressWarnings(as.integer(MaxRowsPerSheet))
+  if (length(MaxRowsPerSheet) != 1L || is.na(MaxRowsPerSheet) ||
+      MaxRowsPerSheet < 1L || MaxRowsPerSheet > 1048575L) {
+    stop("MaxRowsPerSheet must be an integer from 1 through 1,048,575.")
+  }
+  manifest <- data.table::copy(read_parquet_manifest(ManifestPath))
+  manifest[] <- lapply(manifest, .metadata_excel_clean)
+  expected <- c(
+    "run_time", "RunId", "ManifestSchemaVersion", "Database", "TableName",
+    "DuckDBTable", "Year", "PartitionKey", "PartitionValue", "RepositoryKey",
+    "SourcePath", "SourceSize", "SourceMTimeUTC", "SourceSHA256",
+    "SourceFingerprint", "SourceURI", "ResolvedSourcePath", "DownloadPolicy",
+    "DownloadSHA256", "DownloadTimeUTC", "DownloadStatus",
+    "ParquetPath", "NRows", "SchemaHash", "Status", "Notes")
+  for (field in setdiff(expected, names(manifest))) manifest[, (field) := NA]
+  data.table::setcolorder(manifest, c(expected, setdiff(names(manifest), expected)))
+  manifest[, StatusNormalized := tolower(trimws(as.character(Status)))]
+
+  tables <- if (nrow(manifest) == 0L) {
+    data.table::data.table(
+      Database = character(), TableName = character(), DuckDBTable = character(),
+      PartitionKeys = character(), Partitions = integer(), Sources = integer(),
+      ParquetFiles = integer(), RowsWritten = numeric(), Statuses = character(),
+      LatestUpdate = character())
+  } else manifest[, {
+    written <- StatusNormalized == "written"
+    partition_id <- paste(as.character(PartitionKey), as.character(PartitionValue), sep = "=")
+    list(
+      PartitionKeys = paste(sort(unique(stats::na.omit(as.character(PartitionKey)))), collapse = "; "),
+      Partitions = data.table::uniqueN(partition_id[!is.na(PartitionValue)]),
+      Sources = data.table::uniqueN(as.character(SourcePath), na.rm = TRUE),
+      ParquetFiles = data.table::uniqueN(as.character(ParquetPath[written & grepl("\\.parquet$", ParquetPath, ignore.case = TRUE)]), na.rm = TRUE),
+      RowsWritten = sum(as.numeric(NRows[written]), na.rm = TRUE),
+      Statuses = .metadata_status_summary(Status),
+      LatestUpdate = .metadata_latest_value(run_time))
+  }, by = .(Database, TableName, DuckDBTable)]
+
+  runs <- if (nrow(manifest) == 0L) {
+    data.table::data.table(
+      RunId = character(), FirstUpdate = character(), LastUpdate = character(),
+      Records = integer(), Sources = integer(), ParquetFiles = integer(),
+      RowsWritten = numeric(), Statuses = character())
+  } else {
+    run_view <- data.table::copy(manifest)
+    run_view[is.na(RunId) | !nzchar(trimws(as.character(RunId))), RunId := "(legacy/no run id)"]
+    run_view[, {
+      written <- StatusNormalized == "written"
+      list(
+        FirstUpdate = { z <- as.character(run_time); z <- z[!is.na(z) & nzchar(z)]; if (length(z)) min(z) else NA_character_ },
+        LastUpdate = .metadata_latest_value(run_time),
+        Records = .N,
+        Sources = data.table::uniqueN(as.character(SourcePath), na.rm = TRUE),
+        ParquetFiles = data.table::uniqueN(as.character(ParquetPath[written & grepl("\\.parquet$", ParquetPath, ignore.case = TRUE)]), na.rm = TRUE),
+        RowsWritten = sum(as.numeric(NRows[written]), na.rm = TRUE),
+        Statuses = .metadata_status_summary(Status))
+    }, by = RunId][order(LastUpdate, decreasing = TRUE)]
+  }
+
+  issue_statuses <- c("partial_accepted", "failed", "failure", "error", "invalid", "missing")
+  issues <- manifest[StatusNormalized %in% issue_statuses]
+  issues[, StatusNormalized := NULL]
+  detail <- data.table::copy(manifest)
+  detail[, StatusNormalized := NULL]
+  written_mask <- manifest$StatusNormalized == "written"
+  detail_sheets <- if (isTRUE(IncludeDetails)) {
+    as.integer(max(1L, ceiling(nrow(detail) / MaxRowsPerSheet)))
+  } else 0L
+  generated_at <- format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")
+  start_here <- data.table::data.table(
+    Item = c(
+      "Workbook purpose", "Authoritative metadata store", "Generated at (UTC)",
+      "Manifest table", "Manifest schema version", "Manifest rows", "Databases",
+      "Tables", "Sources", "Parquet files", "Rows written", "Runs",
+      "Issue records", "Detail coverage", "Refresh method"),
+    Value = c(
+      "Readable snapshot; editing this workbook does not update the repository.",
+      normalizePath(ManifestPath, winslash = "/", mustWork = FALSE), generated_at,
+      manifest_table_name(), paste(sort(unique(stats::na.omit(manifest$ManifestSchemaVersion))), collapse = ", "),
+      format(nrow(manifest), big.mark = ",", scientific = FALSE),
+      format(data.table::uniqueN(manifest$Database, na.rm = TRUE), big.mark = ","),
+      format(nrow(tables), big.mark = ","),
+      format(data.table::uniqueN(manifest$SourcePath, na.rm = TRUE), big.mark = ","),
+      format(data.table::uniqueN(manifest$ParquetPath[written_mask & grepl("\\.parquet$", manifest$ParquetPath, ignore.case = TRUE)], na.rm = TRUE), big.mark = ","),
+      format(sum(as.numeric(manifest$NRows[written_mask]), na.rm = TRUE), big.mark = ",", scientific = FALSE),
+      format(nrow(runs), big.mark = ","), format(nrow(issues), big.mark = ","),
+      if (isTRUE(IncludeDetails)) sprintf("All %s manifest row(s) across %d sheet(s).", format(nrow(detail), big.mark = ","), detail_sheets) else "Summary sheets only.",
+      "Regenerated after repository loading or by calling ExportRepositoryMetadata()."))
+  guide <- data.table::data.table(
+    Sheet = c("StartHere", "Tables", "Runs", "Issues", "ColumnGuide", "Manifest_###"),
+    Purpose = c(
+      "Snapshot identity, coverage, and navigation.",
+      "One row per repository table with partitions, sources, files, rows, and statuses.",
+      "One row per run ID with timing and load totals.",
+      "Manifest records requiring attention, including partial or failed states.",
+      "Plain-language definitions for manifest fields.",
+      "Complete authoritative manifest snapshot, split only for Excel row limits."))
+  field_description <- c(
+    run_time = "Time the manifest record was written.", RunId = "Repository execution identifier.",
+    ManifestSchemaVersion = "Version of the manifest record layout.", Database = "Logical source database.",
+    TableName = "Logical table name.", DuckDBTable = "Physical Parquet directory and DuckDB view name.",
+    Year = "Derived compatibility field populated only for explicit YEAR partitions.",
+    PartitionKey = "Canonical Hive partition key or semicolon-separated key list.",
+    PartitionValue = "Hive partition value or semicolon-separated value list.",
+    RepositoryKey = "Checkpoint identity for the source and partition.", SourcePath = "Original source path recorded in the MDT.",
+    SourceSize = "Source size in bytes at load time.", SourceMTimeUTC = "Source modification timestamp in UTC.",
+    SourceSHA256 = "Optional SHA-256 source hash.", SourceFingerprint = "Fingerprint used for source-change detection.",
+    SourceURI = "Optional direct HTTP/HTTPS location declared in the MDT.",
+    ResolvedSourcePath = "Managed local cache file used for a remote source.",
+    DownloadPolicy = "Remote refresh policy used for the source.",
+    DownloadSHA256 = "SHA-256 of the cached remote object.",
+    DownloadTimeUTC = "Modification time of the cached remote object in UTC.",
+    DownloadStatus = "Remote cache result such as downloaded, updated, unchanged, or cached.",
+    ParquetPath = "Written Parquet file or partition directory.", NRows = "Rows represented by this record.",
+    SchemaHash = "Hash of the resolved table schema.", Status = "Load or output status.", Notes = "Additional loader context.")
+  column_guide <- data.table::data.table(
+    Column = expected,
+    Description = unname(field_description[expected]))
+
+  wb <- openxlsx::createWorkbook(creator = "repoquet")
+  openxlsx::addWorksheet(wb, "StartHere", gridLines = FALSE, tabColour = "#1F4E78")
+  openxlsx::mergeCells(wb, "StartHere", cols = 1:3, rows = 1)
+  openxlsx::writeData(wb, "StartHere", "Repository Metadata Snapshot", startRow = 1, startCol = 1)
+  openxlsx::writeData(wb, "StartHere", "The DuckDB file is authoritative. This workbook is a generated, read-only presentation snapshot.", startRow = 2, startCol = 1)
+  openxlsx::mergeCells(wb, "StartHere", cols = 1:3, rows = 2)
+  openxlsx::writeDataTable(wb, "StartHere", start_here, startRow = 4, tableStyle = "TableStyleMedium2")
+  guide_row <- 6L + nrow(start_here)
+  openxlsx::writeData(wb, "StartHere", "Workbook Guide", startRow = guide_row, startCol = 1)
+  openxlsx::writeDataTable(wb, "StartHere", guide, startRow = guide_row + 1L, tableStyle = "TableStyleMedium2")
+  title_style <- openxlsx::createStyle(fontSize = 18, fontColour = "#FFFFFF", fgFill = "#1F4E78", textDecoration = "bold")
+  note_style <- openxlsx::createStyle(fontColour = "#404040", fgFill = "#D9EAF7", wrapText = TRUE, valign = "center")
+  section_style <- openxlsx::createStyle(fontSize = 12, fontColour = "#FFFFFF", fgFill = "#1F4E78", textDecoration = "bold")
+  openxlsx::addStyle(wb, "StartHere", title_style, rows = 1, cols = 1:3, gridExpand = TRUE)
+  openxlsx::addStyle(wb, "StartHere", note_style, rows = 2, cols = 1:3, gridExpand = TRUE)
+  openxlsx::addStyle(wb, "StartHere", section_style, rows = guide_row, cols = 1:3, gridExpand = TRUE)
+  openxlsx::setRowHeights(wb, "StartHere", rows = c(1, 2, guide_row), heights = c(28, 34, 24))
+  openxlsx::setColWidths(wb, "StartHere", cols = 1:3, widths = c(31, 68, 18))
+  openxlsx::addStyle(
+    wb, "StartHere", openxlsx::createStyle(wrapText = TRUE, valign = "top"),
+    rows = 5:(4L + nrow(start_here)), cols = 2, gridExpand = TRUE, stack = TRUE)
+  openxlsx::setRowHeights(wb, "StartHere", rows = 5:(4L + nrow(start_here)), heights = 30)
+  openxlsx::freezePane(wb, "StartHere", firstActiveRow = 4)
+
+  .write_metadata_sheet(wb, "Tables", tables, "#70AD47")
+  .write_metadata_sheet(wb, "Runs", runs, "#5B9BD5")
+  .write_metadata_sheet(wb, "Issues", if (nrow(issues)) issues else data.table::data.table(Status = "COMPLETE", Notes = "No manifest issue records were identified."),
+                        if (nrow(issues)) "#C00000" else "#70AD47")
+  .write_metadata_sheet(wb, "ColumnGuide", column_guide, "#A5A5A5")
+  if (isTRUE(IncludeDetails)) {
+    if (nrow(detail) == 0L) {
+      .write_metadata_sheet(wb, "Manifest_001", detail, "#4472C4")
+    } else {
+      for (chunk in seq_len(detail_sheets)) {
+        first <- (chunk - 1L) * MaxRowsPerSheet + 1L
+        last <- min(chunk * MaxRowsPerSheet, nrow(detail))
+        .write_metadata_sheet(wb, sprintf("Manifest_%03d", chunk), detail[first:last], "#4472C4")
+      }
+    }
+  }
+
+  dir.create(dirname(OutputPath), recursive = TRUE, showWarnings = FALSE)
+  tmp <- tempfile(pattern = paste0(basename(OutputPath), ".tmp_"),
+                  tmpdir = dirname(OutputPath), fileext = ".xlsx")
+  on.exit(if (file.exists(tmp)) safe_unlink(tmp), add = TRUE)
+  openxlsx::saveWorkbook(wb, tmp, overwrite = TRUE)
+  replace_file_safely(tmp, OutputPath)
+  log_msg(sprintf("[METADATA EXPORT] Wrote %d manifest row(s) to %s.", nrow(manifest), OutputPath),
+          log_path = LogPath, run_id = RunId)
+  invisible(list(
+    path = normalizePath(OutputPath, winslash = "/", mustWork = FALSE),
+    manifest_rows = nrow(manifest), detail_sheets = detail_sheets,
+    generated_at = generated_at))
 }
 
 manifest_transaction <- function(ManifestPath, code) {
@@ -4409,7 +4976,10 @@ update_parquet_manifest <- function(ManifestPath, Database, TableName, DuckDBTab
                                     PartitionKey = NA_character_, PartitionValue = NA_character_,
                                     RunId = NULL, RepositoryKey = NA_character_,
                                     SourceSize = NA_real_, SourceMTimeUTC = NA_character_,
-                                    SourceSHA256 = NA_character_, SourceFingerprint = NA_character_) {
+                                    SourceSHA256 = NA_character_, SourceFingerprint = NA_character_,
+                                    SourceURI = NA_character_, ResolvedSourcePath = NA_character_,
+                                    DownloadPolicy = NA_character_, DownloadSHA256 = NA_character_,
+                                    DownloadTimeUTC = NA_character_, DownloadStatus = NA_character_) {
   if (is.null(ManifestPath) || !nzchar(ManifestPath)) return(invisible(NULL))
   dir.create(dirname(ManifestPath), recursive = TRUE, showWarnings = FALSE)
   manifest_year <- suppressWarnings(as.integer(Year[1]))
@@ -4419,7 +4989,7 @@ update_parquet_manifest <- function(ManifestPath, Database, TableName, DuckDBTab
   row <- data.table::data.table(
     run_time = format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
     RunId = resolve_run_id(RunId),
-    ManifestSchemaVersion = 2,
+    ManifestSchemaVersion = 3,
     Database = as.character(Database),
     TableName = as.character(TableName),
     DuckDBTable = as.character(DuckDBTable),
@@ -4432,6 +5002,12 @@ update_parquet_manifest <- function(ManifestPath, Database, TableName, DuckDBTab
     SourceMTimeUTC = as.character(SourceMTimeUTC),
     SourceSHA256 = as.character(SourceSHA256),
     SourceFingerprint = as.character(SourceFingerprint),
+    SourceURI = as.character(SourceURI),
+    ResolvedSourcePath = as.character(ResolvedSourcePath),
+    DownloadPolicy = as.character(DownloadPolicy),
+    DownloadSHA256 = as.character(DownloadSHA256),
+    DownloadTimeUTC = as.character(DownloadTimeUTC),
+    DownloadStatus = as.character(DownloadStatus),
     ParquetPath = as.character(ParquetPath),
     NRows = suppressWarnings(as.numeric(NRows)),
     SchemaHash = as.character(SchemaHash),
@@ -4476,6 +5052,50 @@ update_parquet_manifest <- function(ManifestPath, Database, TableName, DuckDBTab
   }
   write_parquet_manifest_atomic(data.table::rbindlist(list(old, row), fill = TRUE), ManifestPath)
   invisible(row)
+}
+
+update_manifest_source_provenance <- function(ManifestPath, Database, TableName,
+                                              SourcePath, row_meta) {
+  uri <- .remote_source_uri(row_meta)
+  if (is.na(uri) || is.null(ManifestPath) || !nzchar(ManifestPath) ||
+      !file.exists(ManifestPath)) return(invisible(0L))
+  field <- function(name) {
+    if (!name %in% names(row_meta)) return(NA_character_)
+    value <- as.character(row_meta[[name]][1])
+    if (is.na(value) || !nzchar(trimws(value))) NA_character_ else trimws(value)
+  }
+  values <- data.table::data.table(
+    SourceURI = uri,
+    ResolvedSourcePath = field("ResolvedSourcePath"),
+    DownloadPolicy = field("DownloadPolicy"),
+    DownloadSHA256 = field("RemoteSourceSHA256"),
+    DownloadTimeUTC = field("RemoteDownloadedAt"),
+    DownloadStatus = field("RemoteCacheStatus"))
+  if (manifest_is_duckdb(ManifestPath)) {
+    return(invisible(manifest_transaction(ManifestPath, function(con) {
+      manifest_add_missing_columns(con, values)
+      assignments <- paste(sprintf("%s = ?", vapply(names(values), quote_duckdb_ident, character(1))), collapse = ", ")
+      sql <- paste0("UPDATE ", quote_duckdb_ident(manifest_table_name()), " SET ", assignments,
+                    " WHERE COALESCE(CAST(Database AS VARCHAR), '') = ?",
+                    " AND COALESCE(CAST(TableName AS VARCHAR), '') = ?",
+                    " AND COALESCE(CAST(SourcePath AS VARCHAR), '') = ?")
+      DBI::dbExecute(con, sql, params = c(as.list(values[1]),
+        list(as.character(Database), as.character(TableName), as.character(SourcePath))))
+    })))
+  }
+  manifest <- read_parquet_manifest(ManifestPath)
+  for (name in names(values)) {
+    if (!name %in% names(manifest)) manifest[, (name) := NA_character_]
+    else manifest[, (name) := as.character(get(name))]
+  }
+  hit <- as.character(manifest$Database) == as.character(Database) &
+    as.character(manifest$TableName) == as.character(TableName) &
+    as.character(manifest$SourcePath) == as.character(SourcePath)
+  if (any(hit)) {
+    for (name in names(values)) data.table::set(manifest, which(hit), name, values[[name]][1])
+    write_parquet_manifest_atomic(manifest, ManifestPath)
+  }
+  invisible(sum(hit))
 }
 
 quote_duckdb_ident <- function(x) paste0('"', gsub('"', '""', x), '"')
@@ -4706,8 +5326,8 @@ validate_duckdb_table <- function(con, table_name, schema_registry = NULL, stric
 #'   written when chunking is used.
 #' @param col_classes Named list (optional). Column class map from
 #'   \code{\link{build_col_classes}}.
-#' @param year_val Integer or character (optional). Year value
-#'   passed to \code{\link{add_year_if_missing}}.
+#' @param year_val Integer or character (optional). Derived value recorded in
+#'   legacy manifest fields when \code{YEAR} is an explicit partition key.
 #' @param PrintStatus Logical. If \code{TRUE}, prints progress
 #'   messages to the console in addition to the log file. Default \code{FALSE}.
 #' @param TerminalHivePartition Logical. If \code{TRUE}, chunk files are
@@ -4762,7 +5382,8 @@ validate_duckdb_table <- function(con, table_name, schema_registry = NULL, stric
 #'                         MDBDir = "DEMO",
 #'                         Path = "DEMO_2020_Core.sav",
 #'                         TableName = "Core",
-#'                         Year = 2020,
+#'                         PartitionKey = "YEAR",
+#'                         PartitionValue = "2020",
 #'                         FileType = "sav",
 #'                         stringsAsFactors = FALSE)
 #' LogPath <- tempfile(fileext = ".txt")
@@ -4786,7 +5407,7 @@ validate_duckdb_table <- function(con, table_name, schema_registry = NULL, stric
 #' unlink(c(MasterDBPath, year_dir, LogPath), recursive = TRUE)
 #' }
 #' @export
-read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL,
+read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL, table_dir = NULL,
                     col_classes = NULL, year_val = NULL, PrintStatus = FALSE, TerminalHivePartition = FALSE,
                     MDTSelect, MasterDBPath, reader, PartitionBy, SAV_ROW_THRESHOLD, RAMThreshold, SAV_CHUNK_SIZE,
                     chunk_size_decrement = NULL, min_chunk_size = NULL, partition_keys = "YEAR",
@@ -4796,17 +5417,33 @@ read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL,
                     MaxFileStemTruncate = FALSE, accept_partial = FALSE,
                     RepositoryLock = NULL) {
   PartitionBy <- match.arg(PartitionBy, c("NRows", "RAMEstimate", "FAIL"))
-  file_mdbdir <- MDTSelect[MDTSelect$Path == path, ]$MDBDir[1]
   row_options <- MDTSelect[MDTSelect$Path == path, , drop = FALSE]
   reader_options <- if (nrow(row_options) > 0L) reader_options_for_row(row_options[1, , drop = FALSE]) else list()
-  full_path <- file.path(MasterDBPath, file_mdbdir, path)
+  full_path <- if (nrow(row_options) > 0L) {
+    source_path_for_row(row_options[1, , drop = FALSE], MasterDBPath)
+  } else {
+    file.path(MasterDBPath, path)
+  }
   if(!file.exists(full_path)){
     log_msg(sprintf("[ERROR] Check file path. File not found: %s", full_path))
     return(data.frame())
   }
   rd <- get_file_reader(reader)
-  if (tolower(reader) %in% c("csv", "tsv", "txt", "gz")) {
+  if (is.null(table_dir) && !is.null(year_dir)) {
+    table_dir <- year_dir
+    for (i in seq_along(partition_keys)) table_dir <- dirname(table_dir)
+  }
+  delimited_reader <- tolower(reader) %in% c("csv", "tsv", "txt", "gz")
+  route_source_partitions <- FALSE
+  if (delimited_reader) {
     reader_options <- .resolve_delimited_reader_options(full_path, reader_options)
+    source_header <- call_reader(rd, "read_header", full_path, reader_options = reader_options)
+    route_source_partitions <- length(partition_keys) > 0L &&
+      all(canonical_colnames(partition_keys) %in% canonical_colnames(source_header))
+    if (route_source_partitions) {
+      log_msg(sprintf("[PARTITION ROUTE] %s contains all configured partition columns; rows will stream directly to their source-defined Hive partitions.",
+                      basename(full_path)))
+    }
   }
   #### Formats without a chunked implementation are a single full read.     ####
   if (!isTRUE(rd$chunkable)) {
@@ -4816,7 +5453,6 @@ read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL,
       data.frame()
     })
     if (!is.data.frame(df) || nrow(df) == 0L) return(df)
-    if ("YEAR" %in% canonical_colnames(partition_keys)) df <- add_year_if_missing(df, year_val)
     df <- align_columns(df, all_cols, col_classes, max_coerce_na_pct = max_coerce_na_pct)
     return(list(data = df, pre_aligned = TRUE, written = FALSE))
   }
@@ -4858,12 +5494,11 @@ read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL,
       rm(RAMLimit); rm(estimated_size_gb); rm(row_size_bytes)
     }
   }
-  if(PartitionBy == "FAIL"){
+  if(PartitionBy == "FAIL" && !route_source_partitions){
     if(PrintStatus){ print("Performing test read") }
     DFTemp <- tryCatch({
       df <- call_reader(rd, "read_full", full_path, reader_options = reader_options,
                         col_classes = col_classes)
-      if ("YEAR" %in% canonical_colnames(partition_keys)) df <- add_year_if_missing(df, year_val)
       df <- align_columns(df, all_cols, col_classes, max_coerce_na_pct = max_coerce_na_pct)
       list(data = df, error = FALSE, pre_aligned = TRUE)
     }, error = function(e){
@@ -4875,6 +5510,7 @@ read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL,
     log_msg(sprintf("[LOAD CHECK COMPLETE] %s -> %s reader",
                     basename(full_path), ifelse(use_chunked, "chunked", "direct")))
   }
+  if (route_source_partitions) use_chunked <- TRUE
   log_msg(sprintf("[READ] %s: %s rows -> %s reader (PartitionBy=%s)", basename(full_path),
                   ifelse(is.na(ncases), "unknown", formatC(ncases, format="d", big.mark=",")),
                   ifelse(use_chunked, "chunked", "direct"), PartitionBy))
@@ -4898,6 +5534,8 @@ read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL,
                              all_cols = all_cols, col_classes = col_classes, year_val = year_val,
                              TerminalHivePartition = TerminalHivePartition,
                              partition_keys = partition_keys, partition_values = partition_values,
+                             route_source_partitions = route_source_partitions,
+                             table_dir = table_dir,
                              max_coerce_na_pct = max_coerce_na_pct,
                              ManifestPath = ManifestPath, Database = Database, TableName = TableName,
                              DuckDBTable = DuckDBTable, SourcePath = SourcePath %||% path,
@@ -5753,12 +6391,11 @@ discover_schema_relationships <- function(table_schema, include_candidates = TRU
 
 #' Load a repository configuration file
 #'
-#' Reads the \code{repository_config.R} written by
-#' Load repository configuration with optional runtime parameter overrides
-#'
 #' Loads the machine-specific repository configuration from a file and merges
-#' it with optional runtime overrides. This allows users to override defaults
-#' via function arguments without modifying the configuration file.
+#' it with optional runtime overrides. Configuration precedence, from lowest to
+#' highest, is package defaults, values in the configuration file, the named
+#' \code{overrides} list, and explicit function arguments. This lets users
+#' change settings for one run without modifying the configuration file.
 #'
 #' The configuration file must define a list named \code{repository_config}
 #' with required paths and optional performance thresholds. See
@@ -5769,32 +6406,64 @@ discover_schema_relationships <- function(table_schema, include_candidates = TRU
 #'
 #' @param path Character. Path to the repository configuration file (R script
 #'   that defines \code{repository_config} list).
-#' @param SAV_CHUNK_SIZE Integer. Rows per chunk for SAV file streaming.
-#'   Default 1000000L. Override required configuration file value.
+#' @param SAV_CHUNK_SIZE Integer or NULL. Rows per chunk for SAV file streaming.
+#'   NULL retains the configuration-file value or the default of 1000000L.
 #' @param SAV_ROW_THRESHOLD Integer. Rows above which SAV files stream in chunks.
-#'   Default 1000000L. Override required configuration file value.
+#'   NULL retains the configuration-file value or the default of 1000000L.
 #' @param RAMThreshold Numeric. RAM limit in GB for PartitionBy = "RAMEstimate".
-#'   Default 30. Override configuration file value.
+#'   NULL retains the configuration-file value or the default of 30.
 #' @param PartitionBy Character. Partitioning strategy: "NRows" (default),
-#'   "RAMEstimate", or "FAIL". Override configuration file value.
-#' @param n_workers Integer. Number of parallel workers. Default
-#'   max(1L, detectCores() - 1L). Override configuration file value.
+#'   "RAMEstimate", or "FAIL". NULL retains the configuration-file value.
+#' @param n_workers Integer or NULL. Number of parallel workers. The default is
+#'   max(1L, detectCores() - 1L) when the file does not define it.
 #' @param MaxCoerceNAPct Numeric. Fail file when coercion destroys more than
-#'   this percent of a column. Default 25. Override configuration file value.
+#'   this percent of a column. NULL retains the file value or the default of 25.
 #' @param SourceFingerprintMode Character. Source file fingerprinting mode:
-#'   "metadata" (default), "sha256", or "none". Override configuration file value.
-#' @param DBName Character. DuckDB database file name. Default "Repository.duckdb".
-#'   Override configuration file value.
-#' @param DuckDB_GB Character. DuckDB memory limit (e.g., "8GB"). Default "8GB".
-#'   Override configuration file value.
+#'   "metadata" (default), "sha256", or "none". NULL retains the file value.
+#' @param RemoteOffline Logical. If TRUE, remote rows must use cached copies.
+#' @param DownloadPolicy Character default remote refresh policy.
+#' @param DownloadTimeout Numeric remote download timeout in seconds.
+#' @param DBName Character or NULL. DuckDB database file name.
+#' @param DuckDB_GB Character or NULL. DuckDB memory limit (for example, "8GB").
+#' @param MasterDBPath,FormattedDBPath,MDTPath Character or NULL. Optional
+#'   runtime overrides for the three required paths.
+#' @param overrides Named list of configuration values to apply at runtime.
+#'   Explicit function arguments take precedence over this list. Names must
+#'   already exist in the package defaults or the configuration file.
 #'
 #' @return List containing all configuration keys (required + optional with defaults).
-#'   File values take precedence over function defaults, and function arguments
-#'   take precedence over both.
+#'   Runtime overrides do not modify the configuration file.
 #'
 #' @export
 load_repository_config <- function(
     path,
+    SAV_CHUNK_SIZE = NULL,
+    SAV_ROW_THRESHOLD = NULL,
+    RAMThreshold = NULL,
+    PartitionBy = NULL,
+    n_workers = NULL,
+    MaxCoerceNAPct = NULL,
+    SourceFingerprintMode = NULL,
+    RemoteOffline = NULL,
+    DownloadPolicy = NULL,
+    DownloadTimeout = NULL,
+    DBName = NULL,
+    DuckDB_GB = NULL,
+    MasterDBPath = NULL,
+    FormattedDBPath = NULL,
+    MDTPath = NULL,
+    overrides = list()) {
+  if (!file.exists(path)) stop(sprintf("Configuration file not found: %s", path))
+  env <- new.env(parent = baseenv())
+  sys.source(path, envir = env)
+  file_cfg <- get0("repository_config", envir = env, inherits = FALSE)
+  if (!is.list(file_cfg)) stop(sprintf("%s must define a list named 'repository_config'.", path))
+  if (length(file_cfg) > 0L && (is.null(names(file_cfg)) || any(!nzchar(names(file_cfg))))) {
+    stop("repository_config must be a named list.")
+  }
+  if (anyDuplicated(names(file_cfg))) stop("repository_config contains duplicate names.")
+
+  defaults <- list(
     SAV_CHUNK_SIZE = 1000000L,
     SAV_ROW_THRESHOLD = 1000000L,
     RAMThreshold = 30,
@@ -5802,19 +6471,32 @@ load_repository_config <- function(
     n_workers = max(1L, parallel::detectCores() - 1L),
     MaxCoerceNAPct = 25,
     SourceFingerprintMode = "metadata",
+    RemoteOffline = FALSE,
+    DownloadPolicy = "if_missing",
+    DownloadTimeout = 600,
     DBName = "Repository.duckdb",
-    DuckDB_GB = "8GB") {
-  if (!file.exists(path)) stop(sprintf("Configuration file not found: %s", path))
-  env <- new.env(parent = baseenv())
-  sys.source(path, envir = env)
-  cfg <- get0("repository_config", envir = env, inherits = FALSE)
-  if (!is.list(cfg)) stop(sprintf("%s must define a list named 'repository_config'.", path))
-  required <- c("MasterDBPath", "FormattedDBPath", "MDTPath")
-  missing_req <- setdiff(required, names(cfg))
-  if (length(missing_req) > 0L) stop(sprintf("repository_config is missing: %s", paste(missing_req, collapse = ", ")))
+    DuckDB_GB = "8GB"
+  )
+  if (!is.list(overrides) || (length(overrides) > 0L &&
+      (is.null(names(overrides)) || any(!nzchar(names(overrides)))))) {
+    stop("overrides must be a named list.")
+  }
+  if (anyDuplicated(names(overrides))) stop("overrides contains duplicate names.")
+  if (length(overrides) > 0L && any(vapply(overrides, is.null, logical(1)))) {
+    stop("overrides values cannot be NULL; omit a name to retain its file/default value.")
+  }
+  allowed_overrides <- union(c(names(defaults), "MasterDBPath", "FormattedDBPath", "MDTPath"),
+                             names(file_cfg))
+  unknown_overrides <- setdiff(names(overrides), allowed_overrides)
+  if (length(unknown_overrides) > 0L) {
+    stop(sprintf("Unknown configuration override(s): %s",
+                 paste(unknown_overrides, collapse = ", ")))
+  }
 
-  # Create list of function argument overrides (excluding path)
-  function_args <- list(
+  file_cfg <- file_cfg[!vapply(file_cfg, is.null, logical(1))]
+  cfg <- utils::modifyList(defaults, file_cfg)
+  cfg <- utils::modifyList(cfg, overrides)
+  explicit_args <- list(
     SAV_CHUNK_SIZE = SAV_CHUNK_SIZE,
     SAV_ROW_THRESHOLD = SAV_ROW_THRESHOLD,
     RAMThreshold = RAMThreshold,
@@ -5822,16 +6504,36 @@ load_repository_config <- function(
     n_workers = n_workers,
     MaxCoerceNAPct = MaxCoerceNAPct,
     SourceFingerprintMode = SourceFingerprintMode,
+    RemoteOffline = RemoteOffline,
+    DownloadPolicy = DownloadPolicy,
+    DownloadTimeout = DownloadTimeout,
     DBName = DBName,
-    DuckDB_GB = DuckDB_GB
+    DuckDB_GB = DuckDB_GB,
+    MasterDBPath = MasterDBPath,
+    FormattedDBPath = FormattedDBPath,
+    MDTPath = MDTPath
   )
+  supplied <- !vapply(explicit_args, is.null, logical(1))
+  for (nm in names(explicit_args)[supplied]) {
+    cfg[[nm]] <- explicit_args[[nm]]
+  }
 
-  # For each parameter: use config file value if present and not overridden,
-  # else use function argument value
-  for (nm in names(function_args)) {
-    if (is.null(cfg[[nm]])) {
-      cfg[[nm]] <- function_args[[nm]]
-    }
+  required <- c("MasterDBPath", "FormattedDBPath", "MDTPath")
+  missing_req <- required[!vapply(required, function(nm) {
+    value <- cfg[[nm]]
+    is.character(value) && length(value) == 1L && !is.na(value) && nzchar(trimws(value))
+  }, logical(1))]
+  if (length(missing_req) > 0L) {
+    stop(sprintf("repository_config is missing: %s", paste(missing_req, collapse = ", ")))
+  }
+  cfg$DownloadPolicy <- match.arg(tolower(as.character(cfg$DownloadPolicy)),
+                                  c("if_missing", "if_changed", "always", "manual"))
+  cfg$DownloadTimeout <- suppressWarnings(as.numeric(cfg$DownloadTimeout))
+  if (length(cfg$DownloadTimeout) != 1L || is.na(cfg$DownloadTimeout) || cfg$DownloadTimeout < 1) {
+    stop("repository_config DownloadTimeout must be a positive number.")
+  }
+  if (length(cfg$RemoteOffline) != 1L || is.na(cfg$RemoteOffline) || !is.logical(cfg$RemoteOffline)) {
+    stop("repository_config RemoteOffline must be TRUE or FALSE.")
   }
   cfg
 }
@@ -5880,6 +6582,9 @@ create_repository_project <- function(dir, MasterDBPath = file.path(dir, "source
     "  RAMThreshold      = 30,          # GB, for PartitionBy = \"RAMEstimate\"",
     "  MaxCoerceNAPct    = 25,          # fail a file when coercion destroys more than this % of a column",
     "  SourceFingerprintMode = \"metadata\", # metadata | sha256 | none",
+    "  RemoteOffline      = FALSE,        # TRUE uses only previously cached remote sources",
+    "  DownloadPolicy    = \"if_missing\", # if_missing | if_changed | always | manual",
+    "  DownloadTimeout   = 600,          # seconds",
     "  n_workers         = max(1L, parallel::detectCores() - 1L),",
     "  DBName            = \"Repository.duckdb\",",
     "  DuckDB_GB         = \"8GB\"        # DuckDB memory limit (~75% of available RAM)",
@@ -5888,6 +6593,9 @@ create_repository_project <- function(dir, MasterDBPath = file.path(dir, "source
   mdt_template <- data.frame(Database = character(), MDBDir = character(), Path = character(),
                              TableName = character(), FileType = character(),
                              PartitionKey = character(), PartitionValue = character(),
+                             SourceURI = character(), DownloadPolicy = character(),
+                             ExpectedSHA256 = character(), ArchiveType = character(),
+                             ArchiveMember = character(),
                              PartitionType = character(), PhysicalTableName = character(),
                              Encoding = character(), Delimiter = character(), Quote = character(),
                              NAStrings = character(), DecimalMark = character(),
@@ -5905,30 +6613,56 @@ create_repository_project <- function(dir, MasterDBPath = file.path(dir, "source
     "library(data.table); library(openxlsx); library(DBI); library(duckdb)",
     "library(haven); library(arrow); library(glue); library(future); library(future.apply)",
     "",
-    "source(\"<PATH TO DBFunctions>.R\")   # <- point at the workflow source file",
+    "source(\"<PATH TO REPOQUET CLONE>/R/repoquet.R\")   # development mode",
+    "",
+    "#### 1. Initialize paths, configuration, and one traceable run identifier ####",
+    "#### Pass RunId through every stage so logs and validation records align.  ####",
     sprintf("cfg <- load_repository_config(\"%s\")", norm(paths$ConfigPath)),
     "paths <- RepositoryInitialize(FormattedDBPath = cfg$FormattedDBPath)",
     "RunId <- new_repository_run_id()",
-    "",
-    "#### 1. Master Database Table: one row per source file ####",
     "MDT <- openxlsx::read.xlsx(cfg$MDTPath, sheet = \"Sheet1\")",
+    "DBLoad <- sort(unique(MDT$Database))",
+    "",
+    "#### 2. Fail-fast inventory validation before any repository write ########",
+    "#### Checks readers, remote declarations, partitions, names, and outputs. ####",
     "# scan_for_new_source_files(cfg$MasterDBPath, MDT)   # propose rows for new files",
     "ValidateMDTPreflight(MDT, strict = TRUE, ParquetBasePath = paths$ParquetBasePath,",
+    "                     MaxFileStemTruncate = TRUE, TerminalHivePartition = FALSE,",
+    "                     MasterDBPath = cfg$MasterDBPath,",
     "                     LogPath = paths$LogPath, RunId = RunId)",
+    "#### Resolve optional direct HTTP/HTTPS sources to the managed raw cache. ####",
+    "MDT <- MaterializeRemoteSources(MDT, DownloadCachePath = paths$DownloadCachePath,",
+    "                                Offline = isTRUE(cfg$RemoteOffline),",
+    "                                DefaultDownloadPolicy = cfg$DownloadPolicy %||% \"if_missing\",",
+    "                                TimeoutSeconds = cfg$DownloadTimeout %||% 600,",
+    "                                LogPath = paths$LogPath, RunId = RunId)",
+    "pending <- MDTCompleteStatus(MDT, paths$CheckpointPath, verbose = TRUE, logStatus = TRUE)",
     "",
-    "#### 2. Survey sources and write the compact review workbook ####",
-    "PrepareSchemaRegistry(MDT, MasterDBPath = cfg$MasterDBPath,",
+    "#### 3. Survey source evidence and write the compact review workbook ######",
+    "#### Source files stay read-only; detailed observations remain in Parquet. ####",
+    "PrepareSchemaRegistry(MDT, DBLoad = DBLoad, MasterDBPath = cfg$MasterDBPath,",
     "                      ObservationPath = paths$SchemaObservationPath,",
     "                      SchemaReviewPath = paths$SchemaReviewPath,",
     "                      n_workers = cfg$n_workers,",
     "                      SchemaRegistryPath = paths$SchemaRegistryPath,",
+    "                      SourceFingerprintMode = cfg$SourceFingerprintMode,",
+    "                      ValuePreviewMaxDistinct = 15L,",
+    "                      ValuePreviewTypes = c(\"character\", \"integer\", \"int64\", \"logical\"),",
+    "                      ValuePreviewIdentifiers = FALSE,",
     "                      LogPath = paths$LogPath, RunId = RunId)",
-    "# Open StartHere. Complete ColumnDecisions and CompatibilityDecisions; PolicyReport is informational.",
-    "FinalizeSchemaRegistry(SchemaReviewPath = paths$SchemaReviewPath,",
+    "# Optional bounded preview; does not load all observations into R.",
+    "schema_issues <- GetSchemaObservations(paths$SchemaObservationPath, IssuesOnly = TRUE, Limit = 100L)",
+    "if (nrow(schema_issues) > 0L) print(schema_issues)",
+    "",
+    "#### 4. Review StartHere, resolve blocking decisions, and finalize ########",
+    "#### Accept keeps recommendations; Override supplies an approved value;   ####",
+    "#### Ignore separates unrelated compatibility fields or omits a label.    ####",
+    "repository_catalog <- FinalizeSchemaRegistry(SchemaReviewPath = paths$SchemaReviewPath,",
     "                       TableSchemaPath = paths$TableSchemaPath, strict = TRUE)",
     "",
-    "#### 3. Load to hive-partitioned Parquet (checkpointed and resumable) ####",
-    "run_result <- ParquetBackEndCreate(MDT = MDT, DBLoad = sort(unique(MDT$Database)),",
+    "#### 5. Load reviewed schemas to Hive-partitioned, resumable Parquet #######",
+    "#### State files are snapshotted; checkpoints advance only after success.  ####",
+    "run_result <- ParquetBackEndCreate(MDT = MDT, DBLoad = DBLoad,",
     "                                  MasterDBPath = cfg$MasterDBPath,",
     "                                  completed_checkpoint = load_checkpoint(paths$CheckpointPath),",
     "                                  CheckpointPath = paths$CheckpointPath,",
@@ -5937,31 +6671,47 @@ create_repository_project <- function(dir, MasterDBPath = file.path(dir, "source
     "                                  PartitionBy = cfg$PartitionBy, RAMThreshold = cfg$RAMThreshold,",
     "                                  SAV_ROW_THRESHOLD = cfg$SAV_ROW_THRESHOLD,",
     "                                  SAV_CHUNK_SIZE = cfg$SAV_CHUNK_SIZE,",
+    "                                  MaxFileStemTruncate = TRUE, TerminalHivePartition = FALSE,",
     "                                  SchemaRegistryPath = paths$SchemaRegistryPath,",
     "                                  TableSchemaPath = paths$TableSchemaPath,",
     "                                  ManifestPath = paths$ManifestPath,",
+    "                                  MetadataWorkbookPath = paths$ManifestWorkbookPath,",
     "                                  MaxCoerceNAPct = cfg$MaxCoerceNAPct,",
     "                                  SourceFingerprintMode = cfg$SourceFingerprintMode,",
+    "                                  DownloadCachePath = paths$DownloadCachePath,",
+    "                                  MaterializeRemote = FALSE, # resolved before schema survey",
     "                                  StopOnFileError = TRUE, ReturnRunResult = TRUE,",
-    "                                  UseSchemaCatalog = TRUE,",
+    "                                  UseSchemaCatalog = TRUE, StrictSchemaValidation = TRUE,",
+    "                                  AutoCleanup = TRUE, CleanupAfterPhase = \"database\",",
     "                                  RunId = RunId,",
     "                                  RunPreflight = FALSE)",
     "print(run_result)",
+    "SummaryVerification(MDT, paths$CheckpointPath, paths$LogPath, logStatus = FALSE,",
+    "                    RunId = RunId, MasterDBPath = cfg$MasterDBPath,",
+    "                    SourceFingerprintMode = cfg$SourceFingerprintMode)",
     "",
-    "#### 4. Register DuckDB views and verify ####",
+    "#### 6. Register and strictly validate persistent DuckDB views ############",
+    "TempDirPath <- file.path(cfg$FormattedDBPath, \"duckdb_temp\")",
+    "dir.create(TempDirPath, recursive = TRUE, showWarnings = FALSE)",
     "con <- open_duckdb(FormattedDBPath = cfg$FormattedDBPath, DBName = cfg$DBName,",
-    "                   TempDirPath = file.path(cfg$FormattedDBPath, \"duckdb_temp\"),",
+    "                   TempDirPath = TempDirPath,",
     "                   GB = cfg$DuckDB_GB, ReadOnly = FALSE)",
-    "done <- MDT[checkpoint_completed_mask(MDT, load_checkpoint(paths$CheckpointPath)), ]",
+    "done <- MDT[checkpoint_completed_mask(MDT, run_result$checkpoint,",
+    "                                      MasterDBPath = cfg$MasterDBPath,",
+    "                                      SourceFingerprintMode = cfg$SourceFingerprintMode), ]",
     "register_parquet_view_compile(con, ParquetBasePath = paths$ParquetBasePath,",
     "                              tables_written = unique(repository_table_names(done)),",
     "                              SchemaRegistryPath = paths$SchemaRegistryPath,",
     "                              TableSchemaPath = paths$TableSchemaPath,",
+    "                              validate = TRUE, strict_validation = TRUE,",
     "                              LogPath = paths$LogPath, RunId = RunId)",
     "contract_results <- validate_data_contracts(con, paths$DataContractPath, strict = TRUE,",
     "                                           LogPath = paths$LogPath, RunId = RunId)",
+    "DBI::dbDisconnect(con, shutdown = TRUE)",
+    "con <- open_duckdb(FormattedDBPath = cfg$FormattedDBPath, DBName = cfg$DBName,",
+    "                   TempDirPath = TempDirPath, GB = cfg$DuckDB_GB, ReadOnly = TRUE)",
     "",
-    "#### 5. Reconcile the four sources of truth ####",
+    "#### 7. Non-destructively reconcile inventory, state, files, and DuckDB ####",
     "repo_audit <- audit_repository(MDT, paths$ParquetBasePath, paths$CheckpointPath,",
     "                               paths$ManifestPath, con = con,",
     "                               LogPath = paths$LogPath, RunId = RunId)",
@@ -6033,15 +6783,206 @@ generate_example_repository <- function(dir, seed = 1) {
   invisible(paths)
 }
 
+#' Curated official source inventory for real-world examples
+#'
+#' Returns workbook rows for public sources chosen to exercise relational
+#' tables, schema drift, archive members, labelled transport files, and
+#' larger-than-memory loading. No network request is made.
+#' @param profile Example profile: quick, relational, schema_drift, stress, or all.
+#' @param IncludeLarge Include the 74 MB MIMIC CHARTEVENTS table and the large
+#'   weekly ClinVar variant summary. Defaults to TRUE for stress and all.
+#' @return A data frame ready for DBSetup.xlsx.
+#' @export
+real_world_source_catalog <- function(
+    profile = c("quick", "relational", "schema_drift", "stress", "all"),
+    IncludeLarge = NULL) {
+  profile <- match.arg(profile)
+  if (is.null(IncludeLarge)) IncludeLarge <- profile %in% c("stress", "all")
+  row_frame <- function(Database, MDBDir, Path, TableName, FileType, PartitionKey,
+                        PartitionValue, SourceURI, DownloadPolicy = "if_missing",
+                        ExpectedSHA256 = "", ArchiveType = "", ArchiveMember = "",
+                        Delimiter = "", ReaderOptions = "", SourceProvider = "",
+                        SourceRelease = "", SourceLicense = "", CitationURL = "",
+                        SourceNotes = "", Group = "", Large = FALSE) {
+    data.frame(Database, MDBDir, Path, TableName, FileType, PartitionKey,
+      PartitionValue, SourceURI, DownloadPolicy, ExpectedSHA256, ArchiveType,
+      ArchiveMember, Delimiter, ReaderOptions, SourceProvider, SourceRelease,
+      SourceLicense, CitationURL, SourceNotes, Group, Large,
+      stringsAsFactors = FALSE)
+  }
+
+  mimic_files <- c(
+    "ADMISSIONS.csv", "CALLOUT.csv", "CAREGIVERS.csv", "CHARTEVENTS.csv",
+    "CPTEVENTS.csv", "DATETIMEEVENTS.csv", "DIAGNOSES_ICD.csv", "DRGCODES.csv",
+    "D_CPT.csv", "D_ICD_DIAGNOSES.csv", "D_ICD_PROCEDURES.csv", "D_ITEMS.csv",
+    "D_LABITEMS.csv", "ICUSTAYS.csv", "INPUTEVENTS_CV.csv", "INPUTEVENTS_MV.csv",
+    "LABEVENTS.csv", "MICROBIOLOGYEVENTS.csv", "NOTEEVENTS.csv", "OUTPUTEVENTS.csv",
+    "PATIENTS.csv", "PRESCRIPTIONS.csv", "PROCEDUREEVENTS_MV.csv",
+    "PROCEDURES_ICD.csv", "SERVICES.csv", "TRANSFERS.csv")
+  mimic_hashes <- c(
+    "ADMISSIONS.csv" = "487e0b87cc81472cc2eb9ee911b3493c39e15d32e8230cec559907060c009b1c",
+    "CALLOUT.csv" = "c3fe3f21b674c78cdefa320f99a329d02ddc502b25b7f20b460d299938924bd5",
+    "CAREGIVERS.csv" = "977e6d468e1fe472831af38e635f5a221c72c890b50a3d4313fc870c0b2b1d82",
+    "CHARTEVENTS.csv" = "734387d583daa9c339f9744ce6e58ed7387b99672898139c910f9aa3e40c31ec",
+    "CPTEVENTS.csv" = "f532365eaa9bd98942072a654779b529906dda67b726364e06d582c3b26158fd",
+    "DATETIMEEVENTS.csv" = "87621c602bf091d2adeb49fda706de1e554b4c9200938057ecaf3a044b0a73ef",
+    "DIAGNOSES_ICD.csv" = "74dc979906bc2172f0cf025271dcd44c7cd52506b297e4b36e63dd40dce923da",
+    "DRGCODES.csv" = "74a2f9176a0f5e4dd0b45a6e763a6c81324aeeb9c06d2942f9767b220b432b76",
+    "D_CPT.csv" = "6c2778e32349c5d250163099367cdfc86f624421b9bab45aaca99ece75aa9ecc",
+    "D_ICD_DIAGNOSES.csv" = "12c0b0b4b814557c018a630fff42521ed65c8b7491268e70f85cc246f0f27c9e",
+    "D_ICD_PROCEDURES.csv" = "7e05e07aeeb05105fce8732105baf9d767e66ec6b1f70bda29728ad456562021",
+    "D_ITEMS.csv" = "b4642d6d278987b5fb96c790bca02058c5f070accfa58c249100bda38a608089",
+    "D_LABITEMS.csv" = "c573653bd06915e48a5fb5f3db01d75554350ec1a628aa91d01ef36daa4eae7f",
+    "ICUSTAYS.csv" = "455cd8fd014bd75d9d26ddf8cb116c77ecccee2fe35fea342801a631d94b387b",
+    "INPUTEVENTS_CV.csv" = "471558d62d85f6841032840c753311bed3dc8a554bf1e36003cfeceabee1928c",
+    "INPUTEVENTS_MV.csv" = "5d66734bef2d8511009d43dd63a76948ac2490936ec86dfe64b966b37b2f1dab",
+    "LABEVENTS.csv" = "bca32a7242e739c0cbf1690270db83c10e38a27dbfa915eeb14f5a31a1e898fa",
+    "MICROBIOLOGYEVENTS.csv" = "8cf3d20d1baae2df690273d04ab4ee346b5854eb8382a7b4711a07be300af6fd",
+    "NOTEEVENTS.csv" = "b696fe64cdf1026c1b4c996130c0631e6bc76f0811819887703ffdc2f8909cbb",
+    "OUTPUTEVENTS.csv" = "f8819ce33479da16b72c4e785ada17341e22ec9217d07bd5de94f1d09429f389",
+    "PATIENTS.csv" = "f65803a46bcb88127574bfd0b70d78d4123783d05bb411e70d4c9629edd7b703",
+    "PRESCRIPTIONS.csv" = "053a015f55044550e4536def11df04432490c4a5ca3e1f380c30ac7e17f33fd3",
+    "PROCEDUREEVENTS_MV.csv" = "db0b77de1734fc36e91106edebd0d20c17b29a3cebda238d7a16687146d61b68",
+    "PROCEDURES_ICD.csv" = "0a1474dcb7e1bc083cc7b329257e5e85305f3e54ee5b0bedd325b3772806d655",
+    "SERVICES.csv" = "b2763945b6c33327b8cf93d31038dba39da2cf9b0c66d7d5535ed697fecd51cd",
+    "TRANSFERS.csv" = "18a1d1bb282b94a082b2315e16b161536966de6f9b1a9dba1e415235336a5bdd")
+  mimic <- row_frame("MIMICIII_DEMO", "remote/mimiciii-demo-1.4", mimic_files,
+    sub("\\.csv$", "", mimic_files, ignore.case = TRUE), "csv", "release", "1.4",
+    paste0("https://physionet.org/files/mimiciii-demo/1.4/", mimic_files, "?download="),
+    ExpectedSHA256 = unname(mimic_hashes[mimic_files]), Delimiter = ",",
+    SourceProvider = "PhysioNet", SourceRelease = "MIMIC-III Clinical Database Demo 1.4",
+    SourceLicense = "ODbL 1.0", CitationURL = "https://doi.org/10.13026/C2HM2Q",
+    SourceNotes = "Complete open-access demo table; NOTEEVENTS intentionally contains no note rows.",
+    Group = "mimic", Large = mimic_files == "CHARTEVENTS.csv")
+
+  cycles <- data.frame(
+    YearPath = c("1999", "2001", "2003", "2005", "2007", "2009", "2011", "2013", "2015", "2017", "2017", "2021"),
+    File = c("DEMO.XPT", "DEMO_B.XPT", "DEMO_C.XPT", "DEMO_D.XPT", "DEMO_E.XPT", "DEMO_F.XPT",
+             "DEMO_G.XPT", "DEMO_H.XPT", "DEMO_I.XPT", "DEMO_J.XPT", "P_DEMO.XPT", "DEMO_L.XPT"),
+    Cycle = c("1999-2000", "2001-2002", "2003-2004", "2005-2006", "2007-2008", "2009-2010",
+              "2011-2012", "2013-2014", "2015-2016", "2017-2018", "2017-March 2020", "2021-2023"),
+    stringsAsFactors = FALSE)
+  nhanes <- row_frame("NHANES", "remote/nhanes/demographics", cycles$File,
+    "Demographics", "xpt", "survey_cycle", cycles$Cycle,
+    sprintf("https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/%s/DataFiles/%s", cycles$YearPath, cycles$File),
+    SourceProvider = "CDC/NCHS", SourceRelease = cycles$Cycle,
+    SourceLicense = "United States government public data",
+    CitationURL = "https://wwwn.cdc.gov/nchs/nhanes/Search/DataPage.aspx?Component=Demographics",
+    SourceNotes = "Public demographic transport file. Use NHANES survey weights and design variables for inference.",
+    Group = "nhanes")
+
+  wdbc_names <- c("ID", "DIAGNOSIS",
+    paste0(c("RADIUS", "TEXTURE", "PERIMETER", "AREA", "SMOOTHNESS", "COMPACTNESS",
+             "CONCAVITY", "CONCAVE_POINTS", "SYMMETRY", "FRACTAL_DIMENSION"), "_MEAN"),
+    paste0(c("RADIUS", "TEXTURE", "PERIMETER", "AREA", "SMOOTHNESS", "COMPACTNESS",
+             "CONCAVITY", "CONCAVE_POINTS", "SYMMETRY", "FRACTAL_DIMENSION"), "_SE"),
+    paste0(c("RADIUS", "TEXTURE", "PERIMETER", "AREA", "SMOOTHNESS", "COMPACTNESS",
+             "CONCAVITY", "CONCAVE_POINTS", "SYMMETRY", "FRACTAL_DIMENSION"), "_WORST"))
+  wdbc_options <- sprintf('{"Header":false,"ColumnNames":[%s]}',
+    paste(sprintf('"%s"', wdbc_names), collapse = ","))
+  uci17_uri <- "https://archive.ics.uci.edu/static/public/17/breast%2Bcancer%2Bwisconsin%2Bdiagnostic.zip"
+  uci296_uri <- "https://archive.ics.uci.edu/static/public/296/diabetes%2B130-us%2Bhospitals%2Bfor%2Byears%2B1999-2008.zip"
+  uci_rows <- list(
+    row_frame("UCI_BREAST_CANCER", "remote/uci/breast_cancer_diagnostic", "wdbc.data", "Diagnostic",
+      "csv", "release", "1995", uci17_uri,
+      ExpectedSHA256 = "bc154869ef13f753f9e2b5a17e248cfe1ba4b6721db7c4da9f4880e40b05d3af",
+      ArchiveType = "zip", ArchiveMember = "wdbc.data", Delimiter = ",",
+      ReaderOptions = wdbc_options, SourceProvider = "UCI Machine Learning Repository",
+      SourceRelease = "1995", SourceLicense = "CC BY 4.0",
+      CitationURL = "https://doi.org/10.24432/C5DW2B",
+      SourceNotes = "Headerless data; canonical variable names are declared in ReaderOptions.", Group = "uci"),
+    row_frame("UCI_DIABETES", "remote/uci/diabetes_130_hospitals", "diabetic_data.csv", "Encounters",
+      "csv", "release", "2014", uci296_uri,
+      ExpectedSHA256 = "f82ac129da2ddd2299391ff6fbae3a6a58b3edcf59ac9d7bd480c00fe453112a",
+      ArchiveType = "zip", ArchiveMember = "diabetic_data.csv", Delimiter = ",",
+      SourceProvider = "UCI Machine Learning Repository", SourceRelease = "2014",
+      SourceLicense = "CC BY 4.0", CitationURL = "https://doi.org/10.24432/C5230J",
+      SourceNotes = "101,766 deidentified diabetes encounters from 130 US hospitals, 1999-2008.", Group = "uci"))
+  lookup_names <- c(admission_type_id = "AdmissionType",
+                    discharge_disposition_id = "DischargeDisposition",
+                    admission_source_id = "AdmissionSource")
+  uci_rows <- c(uci_rows, lapply(names(lookup_names), function(section) {
+    row_frame("UCI_DIABETES", "remote/uci/diabetes_130_hospitals", paste0(section, ".csv"),
+      unname(lookup_names[[section]]), "csv", "release", "2014", uci296_uri,
+      ExpectedSHA256 = "f82ac129da2ddd2299391ff6fbae3a6a58b3edcf59ac9d7bd480c00fe453112a",
+      ArchiveType = "zip", ArchiveMember = "IDS_mapping.csv", Delimiter = ",",
+      ReaderOptions = sprintf('{"SectionHeader":"%s"}', section),
+      SourceProvider = "UCI Machine Learning Repository", SourceRelease = "2014",
+      SourceLicense = "CC BY 4.0", CitationURL = "https://doi.org/10.24432/C5230J",
+      SourceNotes = "One lookup section extracted in memory from IDS_mapping.csv; the archive remains read-only.",
+      Group = "uci")
+  }))
+  uci <- data.table::rbindlist(uci_rows, fill = TRUE)
+
+  clinvar <- data.table::rbindlist(list(
+    row_frame("CLINVAR", "remote/clinvar", "gene_specific_summary.txt", "GeneSpecificSummary", "txt",
+      "release", "current", "https://ftp.ncbi.nlm.nih.gov/pub/clinvar/tab_delimited/gene_specific_summary.txt",
+      DownloadPolicy = "if_changed", Delimiter = "\\t", SourceProvider = "NCBI ClinVar",
+      SourceRelease = "weekly current", SourceLicense = "NCBI data usage policies",
+      CitationURL = "https://www.ncbi.nlm.nih.gov/clinvar/docs/downloads/",
+      SourceNotes = "Small gene-level summary useful for discovering atherosclerosis and CCM genes.", Group = "clinvar"),
+    row_frame("CLINVAR", "remote/clinvar", "variant_summary.txt.gz", "VariantSummary", "gz",
+      "release", "current", "https://ftp.ncbi.nlm.nih.gov/pub/clinvar/tab_delimited/variant_summary.txt.gz",
+      DownloadPolicy = "if_changed", Delimiter = "\\t", SourceProvider = "NCBI ClinVar",
+      SourceRelease = "weekly current", SourceLicense = "NCBI data usage policies",
+      CitationURL = "https://www.ncbi.nlm.nih.gov/clinvar/docs/downloads/",
+      SourceNotes = paste("Large weekly variant table. Filter PhenotypeList for atherosclerosis or cerebral",
+                          "cavernous malformation; relevant CCM genes include KRIT1, CCM2, and PDCD10."),
+      Group = "clinvar", Large = TRUE)
+  ), fill = TRUE)
+
+  all_rows <- data.table::rbindlist(list(mimic, nhanes, uci, clinvar), fill = TRUE)
+  keep <- switch(profile,
+    quick = (all_rows$Group == "mimic" & all_rows$TableName %in%
+               c("ADMISSIONS", "DIAGNOSES_ICD", "ICUSTAYS", "PATIENTS", "PROCEDURES_ICD")) |
+      (all_rows$Group == "nhanes" & all_rows$PartitionValue == "2021-2023") |
+      all_rows$Group == "uci" |
+      (all_rows$Group == "clinvar" & all_rows$TableName == "GeneSpecificSummary"),
+    relational = all_rows$Group == "mimic",
+    schema_drift = all_rows$Group == "nhanes",
+    stress = all_rows$Large,
+    all = rep(TRUE, nrow(all_rows)))
+  if (!isTRUE(IncludeLarge)) keep <- keep & !all_rows$Large
+  out <- all_rows[keep]
+  out[, c("Group", "Large") := NULL]
+  as.data.frame(out)
+}
+
+#' Generate a project backed by curated public real-world datasets
+#' @param dir Project directory.
+#' @param profile Source profile passed to \code{real_world_source_catalog()}.
+#' @param IncludeLarge Include large stress-test sources.
+#' @param Download Download selected sources immediately. FALSE only writes the inventory.
+#' @param overwrite Replace scaffold files when TRUE.
+#' @return Invisibly, scaffold paths plus the generated MDT in \code{Sources}.
+#' @export
+generate_real_world_repository <- function(
+    dir, profile = c("quick", "relational", "schema_drift", "stress", "all"),
+    IncludeLarge = NULL, Download = FALSE, overwrite = FALSE) {
+  profile <- match.arg(profile)
+  paths <- create_repository_project(dir, profile = "generic", overwrite = overwrite)
+  mdt <- real_world_source_catalog(profile, IncludeLarge)
+  wb <- openxlsx::createWorkbook(); openxlsx::addWorksheet(wb, "Sheet1")
+  openxlsx::writeDataTable(wb, "Sheet1", mdt, tableStyle = "TableStyleMedium2")
+  openxlsx::freezePane(wb, "Sheet1", firstRow = TRUE)
+  openxlsx::saveWorkbook(wb, paths$MDTPath, overwrite = TRUE)
+  if (isTRUE(Download)) {
+    mdt <- MaterializeRemoteSources(mdt, paths$DownloadCachePath)
+  }
+  invisible(c(paths, list(Sources = mdt, Profile = profile)))
+}
+
 RepositoryInitialize <- function(FormattedDBPath, ParquetBasePath = file.path(FormattedDBPath, "parquet"),
                                  CheckpointPath = file.path(FormattedDBPath, "Checkpoints", "load_checkpoint.rds"),
                                  LogPath = file.path(FormattedDBPath, "Logs", "load_log.txt"),
+                                 DownloadCachePath = file.path(FormattedDBPath, "SourceCache"),
                                  SchemaRegistryPath = file.path(FormattedDBPath, "Schema", "SchemaRegistry.xlsx"),
                                  TableSchemaPath = file.path(FormattedDBPath, "Schema", "TableSchemas.xlsx"),
                                  SchemaObservationPath = file.path(FormattedDBPath, "Schema", "SchemaObservations.parquet"),
                                  SchemaReviewPath = file.path(FormattedDBPath, "Schema", "SchemaReview.xlsx"),
                                  ManifestPath = NULL,
                                  DataContractPath = file.path(FormattedDBPath, "Schema", "DataContracts.xlsx"),
+                                 ManifestWorkbookPath = NULL,
                                   create = TRUE, profile = c("generic", "hcup")) {
   profile <- match.arg(profile)
   if (is.null(ManifestPath)) {
@@ -6049,11 +6990,15 @@ RepositoryInitialize <- function(FormattedDBPath, ParquetBasePath = file.path(Fo
     ManifestPath <- if (file.exists(legacy_manifest)) legacy_manifest else
       file.path(FormattedDBPath, "Manifest", "RepositoryMetadata.duckdb")
   }
+  if (is.null(ManifestWorkbookPath)) {
+    ManifestWorkbookPath <- metadata_workbook_path_default(ManifestPath)
+  }
   paths <- list(
     FormattedDBPath = FormattedDBPath,
     ParquetBasePath = ParquetBasePath,
     CheckpointPath = CheckpointPath,
     LogPath = LogPath,
+    DownloadCachePath = DownloadCachePath,
     SchemaDir = dirname(SchemaRegistryPath),
     SchemaRegistryPath = SchemaRegistryPath,
     TableSchemaPath = TableSchemaPath,
@@ -6062,11 +7007,12 @@ RepositoryInitialize <- function(FormattedDBPath, ParquetBasePath = file.path(Fo
     DataContractPath = DataContractPath,
     ManifestDir = dirname(ManifestPath),
     ManifestPath = ManifestPath,
+    ManifestWorkbookPath = ManifestWorkbookPath,
     CheckpointDir = dirname(CheckpointPath),
     LogDir = dirname(LogPath)
   )
   if (isTRUE(create)) {
-    dirs <- unique(unname(c(paths[c("FormattedDBPath", "ParquetBasePath", "SchemaDir", "ManifestDir", "CheckpointDir", "LogDir")])) )
+    dirs <- unique(unname(c(paths[c("FormattedDBPath", "ParquetBasePath", "DownloadCachePath", "SchemaDir", "ManifestDir", "CheckpointDir", "LogDir")])) )
     for (d in dirs) dir.create(d, recursive = TRUE, showWarnings = FALSE)
     if (!file.exists(SchemaRegistryPath)) {
       load_schema_registry(SchemaRegistryPath = SchemaRegistryPath, create_if_missing = TRUE, profile = profile)
@@ -6091,7 +7037,7 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
                                  LogPath = NULL, RunId = NULL) {
   previous_run <- if (!is.null(LogPath) || !is.null(RunId)) begin_repository_run(LogPath, RunId) else NULL
   if (!is.null(previous_run)) on.exit(restore_repository_run(previous_run), add = TRUE)
-  required <- c("Database", "MDBDir", "Path", "TableName", "FileType")
+  required <- c("Database", "MDBDir", "Path", "TableName", "FileType", "PartitionKey", "PartitionValue")
   missing_required <- setdiff(required, names(MDT))
   issues <- data.table::data.table(Check = character(), Severity = character(), Message = character(), N = integer())
   add_issue <- function(check, severity, message, n = 1L) {
@@ -6147,6 +7093,69 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
     if (any(bad_filetype)) add_issue("bad_filetype", "error",
                                      sprintf("One or more MDT FileType values have no registered reader. Supported: %s.",
                                              paste(supported_file_types(), collapse = ", ")), sum(bad_filetype))
+    if ("SourceURI" %in% names(MDTdt)) {
+      uri <- trimws(as.character(MDTdt$SourceURI))
+      remote <- !is.na(uri) & nzchar(uri)
+      bad_uri <- remote & !grepl("^https?://[^[:space:]]+$", uri, ignore.case = TRUE)
+      if (any(bad_uri)) add_issue(
+        "bad_source_uri", "error",
+        sprintf("SourceURI must be blank or a direct HTTP/HTTPS file URL. First invalid value at row %d.", which(bad_uri)[1]),
+        sum(bad_uri))
+      embedded_credentials <- remote & grepl("^https?://[^/@:]+:[^/@]*@", uri, ignore.case = TRUE)
+      if (any(embedded_credentials)) add_issue(
+        "embedded_source_credentials", "error",
+        "SourceURI must not contain embedded credentials. Supply authentication through MaterializeRemoteSources(DownloadFunction=...).",
+        sum(embedded_credentials))
+      policy <- if ("DownloadPolicy" %in% names(MDTdt)) {
+        tolower(trimws(as.character(MDTdt$DownloadPolicy)))
+      } else rep("", nrow(MDTdt))
+      policy[is.na(policy)] <- ""
+      bad_policy <- remote & nzchar(policy) & !policy %in% c("if_missing", "if_changed", "always", "manual")
+      if (any(bad_policy)) add_issue(
+        "bad_download_policy", "error",
+        "DownloadPolicy must be blank, if_missing, if_changed, always, or manual.",
+        sum(bad_policy))
+      expected_hash <- if ("ExpectedSHA256" %in% names(MDTdt)) {
+        tolower(trimws(as.character(MDTdt$ExpectedSHA256)))
+      } else rep("", nrow(MDTdt))
+      expected_hash[is.na(expected_hash)] <- ""
+      bad_hash <- remote & nzchar(expected_hash) & !grepl("^[0-9a-f]{64}$", expected_hash)
+      if (any(bad_hash)) add_issue(
+        "bad_expected_sha256", "error",
+        "ExpectedSHA256 must be blank or a 64-character hexadecimal SHA-256 value.",
+        sum(bad_hash))
+      archive_type <- if ("ArchiveType" %in% names(MDTdt)) {
+        tolower(trimws(as.character(MDTdt$ArchiveType)))
+      } else rep("", nrow(MDTdt))
+      archive_type[is.na(archive_type) | archive_type == "none"] <- ""
+      archive_member <- if ("ArchiveMember" %in% names(MDTdt)) {
+        trimws(as.character(MDTdt$ArchiveMember))
+      } else rep("", nrow(MDTdt))
+      archive_member[is.na(archive_member)] <- ""
+      bad_archive_type <- nzchar(archive_type) & !archive_type %in% "zip"
+      if (any(bad_archive_type)) add_issue(
+        "bad_archive_type", "error", "ArchiveType must be blank, none, or zip.",
+        sum(bad_archive_type))
+      archive_without_uri <- nzchar(archive_type) & !remote
+      if (any(archive_without_uri)) add_issue(
+        "archive_without_source_uri", "error", "ArchiveType requires SourceURI.",
+        sum(archive_without_uri))
+      missing_member <- archive_type == "zip" & !nzchar(archive_member)
+      if (any(missing_member)) add_issue(
+        "missing_archive_member", "error", "ArchiveType=zip requires ArchiveMember.",
+        sum(missing_member))
+      safe_member <- vapply(archive_member, function(x) {
+        if (!nzchar(x)) TRUE else .archive_member_is_safe(x)
+      }, logical(1))
+      unsafe_member <- archive_type == "zip" & nzchar(archive_member) & !safe_member
+      if (any(unsafe_member)) add_issue(
+        "unsafe_archive_member", "error", "ArchiveMember must be one safe relative path without '..'.",
+        sum(unsafe_member))
+      orphan_member <- !nzchar(archive_type) & nzchar(archive_member)
+      if (any(orphan_member)) add_issue(
+        "archive_member_without_type", "error", "ArchiveMember requires ArchiveType=zip.",
+        sum(orphan_member))
+    }
     if ("AcceptPartial" %in% names(MDTdt)) {
       ap_raw <- MDTdt$AcceptPartial
       ap_set <- !is.na(ap_raw) & nzchar(trimws(as.character(ap_raw)))
@@ -6311,6 +7320,9 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
     IntegerLike = NA, FractionalCount = NA_real_, LeadingZeroCount = NA_real_,
     NumericParseFailureCount = NA_real_, Minimum = NA_character_, Maximum = NA_character_,
     MaximumTextLength = NA_real_, PrecisionRisk = NA,
+    DistinctValueCount = NA_real_, BlankCount = NA_real_,
+    ValueProfileStatus = "unavailable", Value = NA_character_,
+    ValueCount = NA_real_, ValuePercent = NA_real_,
     InferenceConfidence = "unavailable", ReaderWarning = NA_character_,
     ReaderWarningClass = NA_character_, ReaderWarningSeverity = NA_character_,
     ReaderRepairCount = NA_real_, ReaderRepairLines = NA_character_,
@@ -6327,7 +7339,51 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
   )
 }
 
-.schema_observation_stats <- function(x) {
+.schema_profile_value_counts <- function(x, type, max_distinct = 15L,
+                                         allowed_types = c("character", "integer", "int64", "logical")) {
+  out <- list(DistinctValueCount = NA_real_, BlankCount = 0,
+              ValueProfileStatus = "not_applicable", ValueCounts = numeric(0))
+  if (!type %in% allowed_types) return(out)
+  present <- !is.na(x)
+  if (!any(present)) {
+    out$DistinctValueCount <- 0
+    out$ValueProfileStatus <- "complete"
+    return(out)
+  }
+  values <- if (type %in% c("integer", "int64")) {
+    format(x[present], scientific = FALSE, trim = TRUE)
+  } else {
+    as.character(x[present])
+  }
+  if (type == "character") {
+    blank <- !nzchar(trimws(values))
+    out$BlankCount <- sum(blank)
+    values <- values[!blank]
+  }
+  counts <- sort(table(values, useNA = "no"), decreasing = TRUE)
+  out$DistinctValueCount <- as.numeric(length(counts))
+  if (length(counts) > max_distinct) {
+    out$ValueProfileStatus <- "exceeds_limit"
+    return(out)
+  }
+  out$ValueProfileStatus <- "complete"
+  out$ValueCounts <- stats::setNames(as.numeric(counts), names(counts))
+  out
+}
+
+.merge_schema_value_counts <- function(left, right, max_distinct) {
+  if (length(left) == 0L) combined <- right else if (length(right) == 0L) combined <- left else {
+    values <- unique(c(names(left), names(right)))
+    combined <- stats::setNames(vapply(values, function(value) {
+      sum(left[names(left) == value], right[names(right) == value])
+    }, numeric(1)), values)
+  }
+  if (length(combined) > max_distinct) return(NULL)
+  sort(combined, decreasing = TRUE)
+}
+
+.schema_observation_stats <- function(x, ValuePreviewMaxDistinct = 15L,
+                                      ValuePreviewTypes = c("character", "integer", "int64", "logical")) {
   type <- if (inherits(x, "integer64")) "int64" else normalize_type_name(class(x)[1])
   present <- !is.na(x)
   n_present <- sum(present)
@@ -6363,7 +7419,10 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
     }
   }
 
-  list(
+  value_profile <- .schema_profile_value_counts(
+    x, type, max_distinct = ValuePreviewMaxDistinct,
+    allowed_types = ValuePreviewTypes)
+  c(list(
     ObservedType = type,
     RowsSampled = as.numeric(n_total),
     NonMissingCount = as.numeric(n_present),
@@ -6376,10 +7435,125 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
     Maximum = maximum,
     MaximumTextLength = max_text,
     PrecisionRisk = precision_risk
-  )
+  ), value_profile)
 }
 
-.survey_schema_source <- function(row_meta, MasterDBPath, SourceFingerprintMode = "metadata") {
+.profile_delimited_schema <- function(path, reader, reader_options = list(), chunk_size = 100000L,
+                                      ValuePreviewMaxDistinct = 15L,
+                                      ValuePreviewTypes = c("character", "integer", "int64", "logical")) {
+  header <- call_reader(reader, "read_header", path, reader_options = reader_options)
+  columns <- canonical_colnames(header)
+  accumulators <- stats::setNames(vector("list", length(columns)), columns)
+  update_profile <- function(df) {
+    if (!is.data.frame(df)) stop("Delimited schema profiler received a non-tabular chunk.")
+    df <- canonicalize_dataframe_names(normalize_character_encoding(df, "UTF-8"))
+    for (column in names(df)) {
+      current <- .schema_observation_stats(
+        df[[column]], ValuePreviewMaxDistinct = ValuePreviewMaxDistinct,
+        ValuePreviewTypes = ValuePreviewTypes)
+      acc <- accumulators[[column]]
+      if (is.null(acc)) {
+        acc <- list(Types = character(), RowsSampled = 0, NonMissingCount = 0,
+                    FractionalCount = 0, LeadingZeroCount = 0,
+                    NumericParseFailureCount = 0, Minima = character(), Maxima = character(),
+                    MaximumTextLength = numeric(), PrecisionRisk = FALSE,
+                    BlankCount = 0, ValueCounts = numeric(0),
+                    ValueProfileStatus = "not_applicable")
+      }
+      acc$Types <- unique(c(acc$Types, current$ObservedType))
+      acc$RowsSampled <- acc$RowsSampled + current$RowsSampled
+      acc$NonMissingCount <- acc$NonMissingCount + current$NonMissingCount
+      if (!is.na(current$FractionalCount)) acc$FractionalCount <- acc$FractionalCount + current$FractionalCount
+      acc$LeadingZeroCount <- acc$LeadingZeroCount + current$LeadingZeroCount
+      acc$NumericParseFailureCount <- acc$NumericParseFailureCount + current$NumericParseFailureCount
+      acc$BlankCount <- acc$BlankCount + current$BlankCount
+      if (current$ValueProfileStatus == "exceeds_limit") {
+        acc$ValueProfileStatus <- "exceeds_limit"
+        acc$ValueCounts <- numeric(0)
+      } else if (current$ValueProfileStatus == "complete" &&
+                 acc$ValueProfileStatus != "exceeds_limit") {
+        merged_counts <- .merge_schema_value_counts(
+          acc$ValueCounts, current$ValueCounts, ValuePreviewMaxDistinct)
+        if (is.null(merged_counts)) {
+          acc$ValueProfileStatus <- "exceeds_limit"
+          acc$ValueCounts <- numeric(0)
+        } else {
+          acc$ValueProfileStatus <- "complete"
+          acc$ValueCounts <- merged_counts
+        }
+      }
+      if (!is.na(current$Minimum)) acc$Minima <- c(acc$Minima, current$Minimum)
+      if (!is.na(current$Maximum)) acc$Maxima <- c(acc$Maxima, current$Maximum)
+      if (!is.na(current$MaximumTextLength)) acc$MaximumTextLength <- c(acc$MaximumTextLength, current$MaximumTextLength)
+      acc$PrecisionRisk <- isTRUE(acc$PrecisionRisk) || isTRUE(current$PrecisionRisk)
+      accumulators[[column]] <<- acc
+    }
+    invisible(NULL)
+  }
+
+  total_rows <- 0
+  # Use one sequential logical-record pass for every delimited format. This
+  # remains memory bounded and avoids offset-based O(n^2) decompression for
+  # gzip sources while applying the same malformed-row policy as loading.
+  diagnostics <- .stream_delimited_logical_records(
+    path, reader_options = reader_options, chunk_size = chunk_size,
+    callback = function(df) {
+      total_rows <<- total_rows + nrow(df)
+      update_profile(df)
+    })
+
+  finalize <- function(acc) {
+    if (is.null(acc)) {
+      acc <- list(Types = "unknown", RowsSampled = total_rows, NonMissingCount = 0,
+                  FractionalCount = 0, LeadingZeroCount = 0,
+                  NumericParseFailureCount = 0, Minima = character(), Maxima = character(),
+                  MaximumTextLength = numeric(), PrecisionRisk = FALSE,
+                  BlankCount = 0, ValueCounts = numeric(0),
+                  ValueProfileStatus = "not_applicable")
+    }
+    final_type <- promote_types(acc$Types)
+    extrema_numeric <- final_type %in% c("logical", "integer", "int64", "numeric")
+    minima <- if (extrema_numeric) suppressWarnings(as.numeric(acc$Minima)) else acc$Minima
+    maxima <- if (extrema_numeric) suppressWarnings(as.numeric(acc$Maxima)) else acc$Maxima
+    minima <- minima[!is.na(minima)]; maxima <- maxima[!is.na(maxima)]
+    format_extreme <- function(x, fun) {
+      if (length(x) == 0L) return(NA_character_)
+      value <- fun(x)
+      if (is.numeric(value)) format(value, scientific = FALSE, trim = TRUE, digits = 22) else as.character(value)
+    }
+    supported_profile <- final_type %in% ValuePreviewTypes
+    profile_status <- if (!supported_profile) "not_applicable" else acc$ValueProfileStatus
+    profile_counts <- if (profile_status == "complete") acc$ValueCounts else numeric(0)
+    c(list(
+      ObservedType = final_type,
+      RowsSampled = as.numeric(acc$RowsSampled),
+      NonMissingCount = as.numeric(acc$NonMissingCount),
+      MissingPercent = if (acc$RowsSampled == 0L) NA_real_ else
+        100 * (acc$RowsSampled - acc$NonMissingCount) / acc$RowsSampled,
+      IntegerLike = if (acc$NonMissingCount == 0L || !final_type %in% c("logical", "integer", "int64", "numeric")) NA else
+        isTRUE(acc$FractionalCount == 0),
+      FractionalCount = if (final_type %in% c("logical", "integer", "int64", "numeric"))
+        as.numeric(acc$FractionalCount) else NA_real_,
+      LeadingZeroCount = as.numeric(acc$LeadingZeroCount),
+      NumericParseFailureCount = as.numeric(acc$NumericParseFailureCount),
+      Minimum = format_extreme(minima, min), Maximum = format_extreme(maxima, max),
+      MaximumTextLength = if (length(acc$MaximumTextLength) == 0L) NA_real_ else max(acc$MaximumTextLength),
+      PrecisionRisk = isTRUE(acc$PrecisionRisk),
+      DistinctValueCount = if (!supported_profile) NA_real_ else
+        if (profile_status == "exceeds_limit") as.numeric(ValuePreviewMaxDistinct + 1L) else
+          as.numeric(length(profile_counts)),
+      BlankCount = as.numeric(acc$BlankCount),
+      ValueProfileStatus = profile_status
+    ), list(ValueCounts = profile_counts))
+  }
+  list(Header = header, Stats = lapply(accumulators, finalize), Rows = as.numeric(total_rows),
+       Diagnostics = diagnostics)
+}
+
+.survey_schema_source <- function(row_meta, MasterDBPath, SourceFingerprintMode = "metadata",
+                                  ValuePreviewMaxDistinct = 15L,
+                                  ValuePreviewTypes = c("character", "integer", "int64", "logical"),
+                                  ValuePreviewIdentifiers = FALSE) {
   full_path <- source_path_for_row(row_meta, MasterDBPath)
   encoding_info <- NULL
   warnings_seen <- character(0)
@@ -6397,15 +7571,43 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
       options <- .resolve_delimited_reader_options(full_path, options)
       encoding_info <- options$.EncodingInfo
     }
-    original_header <- capture_warnings(call_reader(rd, "read_header", full_path,
-                                                     reader_options = options))
+    labeled_header <- NULL
+    if (isTRUE(rd$has_labels) && !is.null(rd$read_labels_header)) {
+      labeled_header <- capture_warnings(call_reader(
+        rd, "read_labels_header", full_path, reader_options = options))
+      original_header <- names(labeled_header)
+    } else {
+      original_header <- capture_warnings(call_reader(
+        rd, "read_header", full_path, reader_options = options))
+    }
     header_encoding_info <- attr(original_header, "repoquet_encoding_info")
     if (!is.null(header_encoding_info)) encoding_info <- header_encoding_info
-    sample <- capture_warnings(call_reader(rd, "read_sample", full_path,
-                                           reader_options = options))
-    sample_encoding_info <- attr(sample, "repoquet_encoding_info")
-    if (!is.null(sample_encoding_info)) encoding_info <- sample_encoding_info
-    repair_info <- attr(sample, "repoquet_delimited_diagnostics")
+    delimited <- reader_type %in% c("csv", "tsv", "txt", "gz")
+    profile <- NULL
+    sample <- NULL
+    if (delimited) {
+      profile <- capture_warnings(.profile_delimited_schema(
+        full_path, rd, options,
+        ValuePreviewMaxDistinct = ValuePreviewMaxDistinct,
+        ValuePreviewTypes = ValuePreviewTypes))
+      sample_rows <- profile$Rows
+      sample_columns <- names(profile$Stats)
+      stats_for <- function(column) profile$Stats[[column]]
+      repair_info <- profile$Diagnostics
+    } else {
+      sample <- capture_warnings(call_reader(rd, "read_sample", full_path,
+                                             reader_options = options))
+      sample_encoding_info <- attr(sample, "repoquet_encoding_info")
+      if (!is.null(sample_encoding_info)) encoding_info <- sample_encoding_info
+      repair_info <- attr(sample, "repoquet_delimited_diagnostics")
+      sample <- strip_haven(sample)
+      data.table::setDT(sample)
+      sample_rows <- nrow(sample)
+      sample_columns <- names(sample)
+      stats_for <- function(column) .schema_observation_stats(
+        sample[[column]], ValuePreviewMaxDistinct = ValuePreviewMaxDistinct,
+        ValuePreviewTypes = ValuePreviewTypes)
+    }
     if (!is.null(repair_info) && isTRUE(repair_info$RepairCount > 0L)) {
       warnings_seen <- unique(c(
         warnings_seen,
@@ -6414,15 +7616,13 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
                 paste(repair_info$RepairLines, collapse = ","))
       ))
     }
-    sample <- strip_haven(sample)
-    data.table::setDT(sample)
-    warning_info <- .classify_schema_reader_warnings(warnings_seen, nrow(sample))
+    warning_info <- .classify_schema_reader_warnings(warnings_seen, sample_rows)
     pspec <- partition_spec_for_row(row_meta)
     ptypes <- partition_types_for_row(row_meta)
     fingerprint <- source_fingerprint(full_path, mode = SourceFingerprintMode)
     original_header <- as.character(original_header)
     header_map <- split(original_header, canonical_colnames(original_header))
-    confidence <- if (reader_type %in% c("csv", "tsv", "txt", "gz")) "sampled" else "declared_or_stored"
+    confidence <- if (delimited) "full_profiled" else "declared_or_stored"
     warning_text <- warning_info$Text
     base <- list(
       Database = as.character(row_meta$Database[1]),
@@ -6440,16 +7640,28 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
       EncodingConfidence = encoding_info$EncodingConfidence %||% NA_real_,
       EncodingUsed = encoding_info$EncodingUsed %||% NA_character_,
       EncodingDetectionMethod = encoding_info$DetectionMethod %||% NA_character_,
-      EncodingValidationStatus = if (is.null(encoding_info)) NA_character_ else "sample_valid_utf8",
+      EncodingValidationStatus = if (is.null(encoding_info)) NA_character_ else
+        if (delimited) "full_stream_valid_utf8" else "sample_valid_utf8",
       ReaderRepairCount = repair_info$RepairCount %||% 0,
       ReaderRepairLines = if (is.null(repair_info) || length(repair_info$RepairLines) == 0L) NA_character_ else
         paste(repair_info$RepairLines, collapse = ","),
       ReaderRepairPolicy = repair_info$RepairPolicy %||% "error"
     )
-    rows <- lapply(names(sample), function(column) {
-      stats <- .schema_observation_stats(sample[[column]])
+    rows <- lapply(sample_columns, function(column) {
+      stats <- stats_for(column)
+      value_counts <- stats$ValueCounts
+      stats$ValueCounts <- NULL
+      if (!delimited && stats$ValueProfileStatus == "complete") {
+        stats$ValueProfileStatus <- "sampled"
+      } else if (!delimited && stats$ValueProfileStatus == "exceeds_limit") {
+        stats$ValueProfileStatus <- "sampled_exceeds_limit"
+      }
+      if (!isTRUE(ValuePreviewIdentifiers) && isTRUE(merge_key_name_candidate(column))) {
+        value_counts <- numeric(0)
+        stats$ValueProfileStatus <- "suppressed_identifier"
+      }
       original <- header_map[[column]]
-      data.table::as.data.table(c(base, list(
+      source_row <- data.table::as.data.table(c(base, list(
         ObservationKind = "source_column",
         Column = column,
         OriginalColumn = if (is.null(original)) column else paste(unique(original), collapse = " | "),
@@ -6459,19 +7671,64 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
         ReaderWarningClass = warning_info$Class,
         ReaderWarningSeverity = warning_info$Severity,
         SurveyStatus = "ok",
-        SurveyMessage = NA_character_
+        SurveyMessage = NA_character_, Value = NA_character_,
+        ValueCount = NA_real_, ValuePercent = NA_real_
       ), stats))
+      if (length(value_counts) == 0L) return(source_row)
+      detail <- source_row[rep(1L, length(value_counts))]
+      detail[, `:=`(
+        ObservationKind = "value_profile",
+        Value = as.character(names(value_counts)),
+        ValueCount = as.numeric(value_counts),
+        ValuePercent = 100 * as.numeric(value_counts) / max(1, sum(value_counts))
+      )]
+      data.table::rbindlist(list(source_row, detail), fill = TRUE)
     })
+    if (!is.null(labeled_header)) {
+      for (source_column in names(labeled_header)) {
+        column <- canonical_colnames(source_column)
+        variable_label <- attr(labeled_header[[source_column]], "label", exact = TRUE)
+        variable_label <- if (is.null(variable_label) ||
+                              !nzchar(trimws(as.character(variable_label)[1]))) {
+          NA_character_
+        } else trimws(as.character(variable_label)[1])
+        value_labels <- attr(labeled_header[[source_column]], "labels", exact = TRUE)
+        if (!is.na(variable_label)) {
+          rows[[length(rows) + 1L]] <- data.table::as.data.table(c(base, list(
+            ObservationKind = "variable_label", Column = column,
+            OriginalColumn = source_column, VariableLabel = variable_label,
+            ValueLabel = NA_character_, LabelSource = "embedded_source_metadata",
+            Value = NA_character_, SurveyStatus = "ok", SurveyMessage = NA_character_
+          )))
+        }
+        if (!is.null(value_labels) && length(value_labels) > 0L) {
+          label_rows <- lapply(seq_along(value_labels), function(label_index) {
+            code <- as.character(unname(value_labels)[label_index])
+            label <- as.character(names(value_labels)[label_index])
+            data.table::as.data.table(c(base, list(
+              ObservationKind = "value_label", Column = column,
+              OriginalColumn = source_column, VariableLabel = variable_label,
+              ValueLabel = label, LabelSource = "embedded_source_metadata",
+              Value = code, SurveyStatus = "ok", SurveyMessage = NA_character_
+            )))
+          })
+          rows[[length(rows) + 1L]] <- data.table::rbindlist(label_rows, fill = TRUE)
+        }
+      }
+    }
     for (j in seq_along(pspec$keys)) {
       rows[[length(rows) + 1L]] <- data.table::as.data.table(c(base, list(
         ObservationKind = "hive_partition",
         Column = canonical_colnames(pspec$keys[j]), OriginalColumn = NA_character_,
         ObservedType = normalize_type_name(ptypes[j]), IsPartitionColumn = TRUE,
-        RowsSampled = as.numeric(nrow(sample)), NonMissingCount = as.numeric(nrow(sample)),
+        RowsSampled = as.numeric(sample_rows), NonMissingCount = as.numeric(sample_rows),
         MissingPercent = 0, IntegerLike = normalize_type_name(ptypes[j]) %in% c("integer", "int64"),
         FractionalCount = 0, LeadingZeroCount = 0, NumericParseFailureCount = 0,
         Minimum = NA_character_, Maximum = NA_character_, MaximumTextLength = NA_real_,
-        PrecisionRisk = FALSE, InferenceConfidence = "configured_partition",
+        PrecisionRisk = FALSE, DistinctValueCount = NA_real_, BlankCount = 0,
+        ValueProfileStatus = "configured_partition", Value = NA_character_,
+        ValueCount = NA_real_, ValuePercent = NA_real_,
+        InferenceConfidence = "configured_partition",
         ReaderWarning = warning_text, ReaderWarningClass = warning_info$Class,
         ReaderWarningSeverity = warning_info$Severity,
         SurveyStatus = "ok", SurveyMessage = NA_character_
@@ -6497,8 +7754,22 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
 SurveyRepositorySchema <- function(MDT, MasterDBPath, ObservationPath,
                                    DBLoad = NULL, n_workers = 1,
                                    SourceFingerprintMode = c("metadata", "sha256", "none"),
-                                   StrictReaders = FALSE, LogPath = NULL, RunId = NULL) {
+                                   StrictReaders = FALSE,
+                                   ValuePreviewMaxDistinct = 15L,
+                                   ValuePreviewTypes = c("character", "integer", "int64", "logical"),
+                                   ValuePreviewIdentifiers = FALSE,
+                                   LogPath = NULL, RunId = NULL) {
   SourceFingerprintMode <- match.arg(SourceFingerprintMode)
+  ValuePreviewMaxDistinct <- suppressWarnings(as.integer(ValuePreviewMaxDistinct[1]))
+  if (is.na(ValuePreviewMaxDistinct) || ValuePreviewMaxDistinct < 1L ||
+      ValuePreviewMaxDistinct > 100L) {
+    stop("ValuePreviewMaxDistinct must be an integer from 1 through 100.")
+  }
+  ValuePreviewTypes <- unique(vapply(ValuePreviewTypes, normalize_type_name, character(1)))
+  supported_preview_types <- c("character", "integer", "int64", "logical")
+  if (length(ValuePreviewTypes) == 0L || any(!ValuePreviewTypes %in% supported_preview_types)) {
+    stop("ValuePreviewTypes must contain one or more of: character, integer, int64, logical.")
+  }
   if (length(ObservationPath) != 1L || is.na(ObservationPath) || !nzchar(trimws(ObservationPath))) {
     stop("ObservationPath must be one non-empty Parquet file path.")
   }
@@ -6507,7 +7778,7 @@ SurveyRepositorySchema <- function(MDT, MasterDBPath, ObservationPath,
   }
   previous_run <- if (!is.null(LogPath) || !is.null(RunId)) begin_repository_run(LogPath, RunId) else NULL
   if (!is.null(previous_run)) on.exit(restore_repository_run(previous_run), add = TRUE)
-  required <- c("Database", "MDBDir", "Path", "TableName", "FileType")
+  required <- c("Database", "MDBDir", "Path", "TableName", "FileType", "PartitionKey", "PartitionValue")
   missing <- setdiff(required, names(MDT))
   if (length(missing) > 0L) stop("Schema survey requires MDT columns: ", paste(missing, collapse = ", "))
   MDTdt <- data.table::as.data.table(MDT)
@@ -6515,7 +7786,11 @@ SurveyRepositorySchema <- function(MDT, MasterDBPath, ObservationPath,
   if (nrow(MDTdt) == 0L) stop("Schema survey has no MDT rows to inspect.")
   scan_one <- function(i) {
     register_builtin_file_readers()
-    .survey_schema_source(MDTdt[i, ], MasterDBPath, SourceFingerprintMode)
+    .survey_schema_source(
+      MDTdt[i, ], MasterDBPath, SourceFingerprintMode,
+      ValuePreviewMaxDistinct = ValuePreviewMaxDistinct,
+      ValuePreviewTypes = ValuePreviewTypes,
+      ValuePreviewIdentifiers = ValuePreviewIdentifiers)
   }
   results <- .parallel_scan_with_serial_retry(
     seq_len(nrow(MDTdt)), scan_one, n_workers = n_workers,
@@ -6537,7 +7812,11 @@ SurveyRepositorySchema <- function(MDT, MasterDBPath, ObservationPath,
   log_msg(sprintf("[SCHEMA SURVEY] %d source(s), %d observation row(s), %d failed source(s); wrote %s",
                   summary$Sources, summary$ObservationRows, summary$FailedSources, ObservationPath))
   out <- structure(list(observations = observations, summary = summary,
-                        ObservationPath = ObservationPath), class = "RepositorySchemaSurvey")
+                        ObservationPath = ObservationPath,
+                        ValuePreviewMaxDistinct = ValuePreviewMaxDistinct,
+                        ValuePreviewTypes = ValuePreviewTypes,
+                        ValuePreviewIdentifiers = isTRUE(ValuePreviewIdentifiers)),
+                   class = "RepositorySchemaSurvey")
   if (isTRUE(StrictReaders) && any(failed)) {
     stop(sprintf("Schema survey failed for %d source file(s). Detailed error rows were written to %s.",
                  sum(failed), ObservationPath))
@@ -6724,12 +8003,279 @@ GetSchemaObservations <- function(ObservationPath, Database = NULL, TableName = 
   out
 }
 
+.schema_value_preview_summary <- function(observations, max_distinct = 15L) {
+  summary_empty <- data.table::data.table(
+    Database = character(), TableName = character(), DuckDBTable = character(),
+    Column = character(), DistinctValueCount = numeric(), ObservedValues = character(),
+    ValueProfileStatus = character(), ValuesChangeAcrossPartitions = logical())
+  detail_empty <- data.table::data.table(
+    Database = character(), TableName = character(), DuckDBTable = character(),
+    Column = character(), ProfileStatus = character(), Value = character(),
+    ValueCount = numeric(), ValuePercent = numeric(), PartitionCount = integer(),
+    PartitionsPresent = character(), FirstPartition = character(),
+    LastPartition = character(), SourcesProfiled = integer())
+  profiles <- observations[SurveyStatus == "ok" & ObservationKind == "source_column"]
+  if (nrow(profiles) == 0L) return(list(summary = summary_empty, details = detail_empty))
+  details <- observations[SurveyStatus == "ok" & ObservationKind == "value_profile" &
+                            !is.na(Value)]
+  key_columns <- c("Database", "TableName", "DuckDBTable", "Column")
+  key <- function(x) do.call(paste, c(x[, ..key_columns], sep = "\r"))
+  profile_groups <- split(profiles, key(profiles))
+  detail_groups <- if (nrow(details) > 0L) split(details, key(details)) else list()
+  summaries <- list(); retained_details <- list()
+  truncate_value <- function(value, limit = 80L) {
+    value <- gsub("[\r\n\t]+", " ", as.character(value))
+    ifelse(nchar(value, type = "chars") > limit,
+           paste0(substr(value, 1L, limit - 4L), " ..."), value)
+  }
+  for (group_name in names(profile_groups)) {
+    rows <- profile_groups[[group_name]]
+    value_rows <- detail_groups[[group_name]] %||% data.table::data.table()
+    statuses <- unique(tolower(as.character(rows$ValueProfileStatus)))
+    statuses <- statuses[!is.na(statuses) & nzchar(statuses)]
+    status <- if (any(statuses == "suppressed_identifier")) {
+      "suppressed_identifier"
+    } else if (any(statuses %in% c("exceeds_limit", "sampled_exceeds_limit"))) {
+      "exceeds_limit"
+    } else if (any(statuses %in% c("not_applicable", "unavailable")) || length(statuses) == 0L) {
+      "not_applicable"
+    } else if (any(startsWith(statuses, "sampled"))) {
+      "sampled"
+    } else {
+      "complete"
+    }
+    values <- if (nrow(value_rows) > 0L) unique(as.character(value_rows$Value)) else character(0)
+    if (length(values) > max_distinct) status <- "exceeds_limit"
+    eligible <- status %in% c("complete", "sampled") && length(values) <= max_distinct
+    partition_change <- FALSE
+    if (eligible && nrow(value_rows) > 0L) {
+      sets <- value_rows[, .(ValueSet = paste(sort(unique(as.character(Value))), collapse = "\034")),
+                         by = .(PartitionKey, PartitionValue)]
+      partition_change <- data.table::uniqueN(sets$ValueSet) > 1L
+    }
+    summaries[[length(summaries) + 1L]] <- data.table::data.table(
+      Database = as.character(rows$Database[1]), TableName = as.character(rows$TableName[1]),
+      DuckDBTable = as.character(rows$DuckDBTable[1]), Column = as.character(rows$Column[1]),
+      DistinctValueCount = if (status == "not_applicable") NA_real_ else
+        if (status == "exceeds_limit") NA_real_ else as.numeric(length(values)),
+      ObservedValues = if (eligible && length(values) > 0L)
+        paste(sort(truncate_value(values)), collapse = " | ") else NA_character_,
+      ValueProfileStatus = status,
+      ValuesChangeAcrossPartitions = partition_change)
+    if (eligible && nrow(value_rows) > 0L) {
+      value_rows[, PartitionLabel := paste0(PartitionKey, "=", PartitionValue)]
+      detail <- value_rows[, .(
+        ValueCount = sum(as.numeric(ValueCount), na.rm = TRUE),
+        SourcesProfiled = data.table::uniqueN(SourcePath),
+        ProfileStatus = if (any(startsWith(tolower(ValueProfileStatus), "sampled"))) "sampled" else "complete",
+        PartitionCount = data.table::uniqueN(PartitionLabel),
+        PartitionsPresent = {
+          labels <- sort(unique(PartitionLabel))
+          text <- paste(labels, collapse = "; ")
+          if (nchar(text) > 500L) paste0(substr(text, 1L, 496L), " ...") else text
+        },
+        FirstPartition = sort(unique(PartitionLabel))[1],
+        LastPartition = utils::tail(sort(unique(PartitionLabel)), 1L)
+      ), by = .(Database, TableName, DuckDBTable, Column, Value)]
+      detail[, ValuePercent := 100 * ValueCount / max(1, sum(ValueCount)),
+             by = .(Database, TableName, DuckDBTable, Column)]
+      detail[, Value := truncate_value(Value, 200L)]
+      data.table::setcolorder(detail, names(detail_empty))
+      retained_details[[length(retained_details) + 1L]] <- detail
+    }
+  }
+  list(
+    summary = if (length(summaries) > 0L) data.table::rbindlist(summaries, fill = TRUE) else summary_empty,
+    details = if (length(retained_details) > 0L) data.table::rbindlist(retained_details, fill = TRUE) else detail_empty)
+}
+
+.schema_dictionary_review <- function(observations) {
+  empty <- data.table::data.table(
+    Database = character(), TableName = character(), DuckDBTable = character(),
+    Column = character(), PartitionKey = character(), PartitionValue = character(),
+    Value = character(), VariableLabel = character(), ProposedLabel = character(),
+    ApprovedLabel = character(), EvidenceLabels = character(), EvidenceSources = character(),
+    PartitionsObserved = character(), LabelCoverage = character(), Status = character(),
+    RequiresReview = logical(), Decision = character(), Source = character(),
+    UserNotes = character(), DictionarySignature = character())
+  observations <- data.table::as.data.table(observations)
+  for (field in c("VariableLabel", "ValueLabel", "LabelSource")) {
+    if (!field %in% names(observations)) observations[, (field) := NA_character_]
+  }
+  required <- c("Database", "TableName", "DuckDBTable", "Column", "PartitionKey",
+                "PartitionValue", "ObservationKind", "Value", "SourcePath")
+  if (!all(required %in% names(observations))) return(empty)
+  observed <- unique(observations[
+    SurveyStatus == "ok" & ObservationKind == "value_profile" &
+      !is.na(Value),
+    .(Database, TableName, DuckDBTable, Column, PartitionKey, PartitionValue,
+      Value = as.character(Value), SourcePath)])
+  labels <- observations[
+    SurveyStatus == "ok" & ObservationKind == "value_label" &
+      !is.na(Value) & !is.na(ValueLabel) & nzchar(trimws(as.character(ValueLabel))),
+    .(Database, TableName, DuckDBTable, Column, PartitionKey, PartitionValue,
+      Value = as.character(Value), ValueLabel = trimws(as.character(ValueLabel)),
+      VariableLabel = as.character(VariableLabel), SourcePath)]
+  if (nrow(observed) == 0L && nrow(labels) == 0L) return(empty)
+  key_fields <- c("Database", "TableName", "DuckDBTable", "Column", "Value")
+  candidates <- unique(data.table::rbindlist(list(
+    observed[, ..key_fields], labels[, ..key_fields]), fill = TRUE))
+  group_key <- function(x) do.call(paste, c(x[, ..key_fields], sep = "\r"))
+  groups <- split(candidates, group_key(candidates))
+  compact <- function(x, limit = 1000L) {
+    x <- sort(unique(trimws(as.character(x))))
+    x <- x[!is.na(x) & nzchar(x)]
+    text <- paste(x, collapse = " | ")
+    if (nchar(text) > limit) paste0(substr(text, 1L, limit - 4L), " ...") else text
+  }
+  partition_text <- function(rows) {
+    if (nrow(rows) == 0L) return(NA_character_)
+    compact(paste0(rows$PartitionKey, "=", rows$PartitionValue), 1000L)
+  }
+  make_row <- function(key_row, partition_key, partition_value, observed_rows,
+                       label_rows, all_label_rows, status, requires_review) {
+    proposed <- unique(label_rows$ValueLabel)
+    proposed <- proposed[!is.na(proposed) & nzchar(proposed)]
+    proposed <- if (length(proposed) == 1L) proposed else ""
+    variable_labels <- all_label_rows$VariableLabel
+    variable_labels <- variable_labels[!is.na(variable_labels) & nzchar(variable_labels)]
+    source <- if (length(proposed) == 1L) "embedded_source_metadata" else
+      if (nrow(all_label_rows) > 0L) "embedded_source_conflict" else "user_optional"
+    decision <- if (!requires_review && nzchar(proposed)) "Auto-approved" else ""
+    signature <- paste(
+      "column_dictionary_v1", paste(unlist(key_row), collapse = "|"),
+      partition_key, partition_value,
+      paste(sort(unique(paste(all_label_rows$PartitionKey,
+                              all_label_rows$PartitionValue,
+                              all_label_rows$ValueLabel, sep = "="))), collapse = "||"),
+      partition_text(observed_rows), sep = "||")
+    data.table::data.table(
+      Database = as.character(key_row$Database), TableName = as.character(key_row$TableName),
+      DuckDBTable = as.character(key_row$DuckDBTable), Column = as.character(key_row$Column),
+      PartitionKey = partition_key, PartitionValue = partition_value,
+      Value = as.character(key_row$Value), VariableLabel = compact(variable_labels),
+      ProposedLabel = proposed, ApprovedLabel = proposed,
+      EvidenceLabels = compact(all_label_rows$ValueLabel),
+      EvidenceSources = compact(basename(all_label_rows$SourcePath)),
+      PartitionsObserved = partition_text(observed_rows),
+      LabelCoverage = if (nrow(all_label_rows) == 0L) "none" else
+        if (nrow(observed_rows) == 0L) "defined_not_observed" else
+          if (data.table::uniqueN(all_label_rows[, .(PartitionKey, PartitionValue)]) >=
+              data.table::uniqueN(observed_rows[, .(PartitionKey, PartitionValue)])) "complete" else "partial",
+      Status = status, RequiresReview = requires_review, Decision = decision,
+      Source = source, UserNotes = "",
+      DictionarySignature = digest::digest(signature, algo = "sha256", serialize = FALSE))
+  }
+  output <- list()
+  for (rows in groups) {
+    key_row <- rows[1]
+    hit_observed <- observed[rows, on = key_fields, nomatch = 0L]
+    hit_labels <- labels[rows, on = key_fields, nomatch = 0L]
+    distinct_labels <- unique(hit_labels$ValueLabel)
+    distinct_labels <- distinct_labels[!is.na(distinct_labels) & nzchar(distinct_labels)]
+    if (length(distinct_labels) == 0L) {
+      output[[length(output) + 1L]] <- make_row(
+        key_row, "*", "*", hit_observed, hit_labels, hit_labels,
+        "optional_label_missing", FALSE)
+    } else if (length(distinct_labels) == 1L) {
+      observed_parts <- unique(hit_observed[, .(PartitionKey, PartitionValue)])
+      label_parts <- unique(hit_labels[, .(PartitionKey, PartitionValue)])
+      complete_coverage <- nrow(observed_parts) == 0L ||
+        nrow(observed_parts[!label_parts, on = .(PartitionKey, PartitionValue)]) == 0L
+      if (complete_coverage) {
+        output[[length(output) + 1L]] <- make_row(
+          key_row, "*", "*", hit_observed, hit_labels, hit_labels,
+          if (nrow(hit_observed) == 0L) "source_defined_not_observed" else "source_label_stable",
+          FALSE)
+      } else {
+        partitions <- unique(data.table::rbindlist(list(observed_parts, label_parts), fill = TRUE))
+        for (partition_index in seq_len(nrow(partitions))) {
+          part <- partitions[partition_index]
+          observed_part <- hit_observed[PartitionKey == part$PartitionKey &
+                                          PartitionValue == part$PartitionValue]
+          labels_part <- hit_labels[PartitionKey == part$PartitionKey &
+                                      PartitionValue == part$PartitionValue]
+          output[[length(output) + 1L]] <- make_row(
+            key_row, as.character(part$PartitionKey), as.character(part$PartitionValue),
+            observed_part, labels_part, hit_labels,
+            if (nrow(labels_part) > 0L) "source_label_partial_scope" else
+              "optional_label_missing", FALSE)
+        }
+      }
+    } else {
+      partitions <- unique(data.table::rbindlist(list(
+        hit_observed[, .(PartitionKey, PartitionValue)],
+        hit_labels[, .(PartitionKey, PartitionValue)]), fill = TRUE))
+      for (partition_index in seq_len(nrow(partitions))) {
+        part <- partitions[partition_index]
+        observed_part <- hit_observed[PartitionKey == part$PartitionKey &
+                                        PartitionValue == part$PartitionValue]
+        labels_part <- hit_labels[PartitionKey == part$PartitionKey &
+                                    PartitionValue == part$PartitionValue]
+        within_conflict <- data.table::uniqueN(labels_part$ValueLabel) > 1L
+        output[[length(output) + 1L]] <- make_row(
+          key_row, as.character(part$PartitionKey), as.character(part$PartitionValue),
+          observed_part, labels_part, hit_labels,
+          if (within_conflict) "conflicting_labels_within_partition" else
+            "label_changed_across_partitions", TRUE)
+      }
+    }
+  }
+  out <- data.table::rbindlist(output, fill = TRUE)
+  data.table::setorder(out, Database, TableName, Column, Value,
+                       PartitionKey, PartitionValue)
+  out[]
+}
+
+.schema_variable_label_summary <- function(observations) {
+  empty <- data.table::data.table(
+    Database = character(), TableName = character(), DuckDBTable = character(),
+    Column = character(), VariableLabel = character(),
+    VariableLabelStatus = character(), VariableLabelHistory = character())
+  observations <- data.table::as.data.table(observations)
+  if (!"VariableLabel" %in% names(observations)) return(empty)
+  rows <- unique(observations[
+    SurveyStatus == "ok" & ObservationKind %in% c("variable_label", "value_label") &
+      !is.na(VariableLabel) & nzchar(trimws(as.character(VariableLabel))),
+    .(Database, TableName, DuckDBTable, Column, PartitionKey, PartitionValue,
+      VariableLabel = trimws(as.character(VariableLabel)))])
+  if (nrow(rows) == 0L) return(empty)
+  rows[, PartitionLabel := paste0(PartitionKey, "=", PartitionValue)]
+  out <- rows[, {
+    labels <- sort(unique(VariableLabel))
+    history <- unique(paste0(PartitionLabel, ": ", VariableLabel))
+    list(
+      VariableLabel = paste(labels, collapse = " | "),
+      VariableLabelStatus = if (length(labels) == 1L) "stable" else "changed_across_partitions",
+      VariableLabelHistory = paste(sort(history), collapse = "; "))
+  }, by = .(Database, TableName, DuckDBTable, Column)]
+  data.table::setorder(out, Database, TableName, Column)
+  out[]
+}
+
 #' Recommend canonical table schemas from observed evidence
 #' @export
 RecommendRepositorySchema <- function(survey = NULL, ObservationPath = NULL,
                                       SchemaRegistryPath = NULL, schema_registry = NULL,
-                                      SchemaProfile = c("none", "generic", "hcup")) {
+                                      SchemaProfile = c("none", "generic", "hcup"),
+                                      ValuePreviewMaxDistinct = NULL,
+                                      ValuePreviewTypes = NULL,
+                                      ValuePreviewIdentifiers = NULL) {
   SchemaProfile <- match.arg(SchemaProfile)
+  if (is.null(ValuePreviewMaxDistinct)) {
+    ValuePreviewMaxDistinct <- if (inherits(survey, "RepositorySchemaSurvey"))
+      survey$ValuePreviewMaxDistinct %||% 15L else 15L
+  }
+  ValuePreviewMaxDistinct <- as.integer(ValuePreviewMaxDistinct[1])
+  if (is.null(ValuePreviewTypes)) {
+    ValuePreviewTypes <- if (inherits(survey, "RepositorySchemaSurvey"))
+      survey$ValuePreviewTypes %||% c("character", "integer", "int64", "logical") else
+        c("character", "integer", "int64", "logical")
+  }
+  if (is.null(ValuePreviewIdentifiers)) {
+    ValuePreviewIdentifiers <- if (inherits(survey, "RepositorySchemaSurvey"))
+      isTRUE(survey$ValuePreviewIdentifiers) else FALSE
+  }
   if (is.null(schema_registry) && !is.null(SchemaRegistryPath) && nzchar(SchemaRegistryPath)) {
     if (!file.exists(SchemaRegistryPath)) stop("Schema policy workbook not found: ", SchemaRegistryPath)
     schema_registry <- load_schema_registry(SchemaRegistryPath, create_if_missing = FALSE,
@@ -6761,6 +8307,12 @@ RecommendRepositorySchema <- function(survey = NULL, ObservationPath = NULL,
   for (field in names(repair_defaults)) {
     if (!field %in% names(observations)) observations[, (field) := repair_defaults[[field]]]
   }
+  value_defaults <- list(DistinctValueCount = NA_real_, BlankCount = NA_real_,
+                         ValueProfileStatus = "unavailable", Value = NA_character_,
+                         ValueCount = NA_real_, ValuePercent = NA_real_)
+  for (field in names(value_defaults)) {
+    if (!field %in% names(observations)) observations[, (field) := value_defaults[[field]]]
+  }
   source_issues <- unique(observations[
     SurveyStatus != "ok" | (!is.na(ReaderWarning) & nzchar(ReaderWarning)),
     .(Database, TableName, SourcePath, FileType, PartitionKey, PartitionValue,
@@ -6770,7 +8322,9 @@ RecommendRepositorySchema <- function(survey = NULL, ObservationPath = NULL,
       DetectedEncoding, EncodingConfidence, EncodingUsed,
       EncodingDetectionMethod, EncodingValidationStatus)
   ])
+  value_profiles <- .schema_value_preview_summary(observations, ValuePreviewMaxDistinct)
   usable <- observations[SurveyStatus == "ok" &
+    ObservationKind %in% c("source_column", "hive_partition") &
     (ObservationKind == "hive_partition" | !IsPartitionColumn)]
   if (nrow(usable) == 0L) stop("Schema survey contains no usable column observations.")
   split_key <- paste(usable$Database, usable$TableName, usable$DuckDBTable,
@@ -6792,7 +8346,8 @@ RecommendRepositorySchema <- function(survey = NULL, ObservationPath = NULL,
                                rows$ReaderRepairCount, rows$ReaderRepairLines,
                                rows$ReaderRepairPolicy,
                                rows$LeadingZeroCount, rows$NumericParseFailureCount,
-                              rows$PrecisionRisk, sep = "|"))), collapse = "||"),
+                              rows$PrecisionRisk, rows$DistinctValueCount,
+                              rows$ValueProfileStatus, sep = "|"))), collapse = "||"),
       resolved$PolicyPattern, resolved$PolicyType, resolved$PolicyStatus, sep = "||")
     data.table::data.table(
       Database = rows$Database[1], TableName = rows$TableName[1],
@@ -6812,6 +8367,37 @@ RecommendRepositorySchema <- function(survey = NULL, ObservationPath = NULL,
       UserNotes = "", ObservationSignature = digest::digest(signature_text, algo = "sha256", serialize = FALSE)
     )
   }), fill = TRUE)
+  variable_labels <- .schema_variable_label_summary(observations)
+  registry <- merge(registry, variable_labels,
+                    by = c("Database", "TableName", "DuckDBTable", "Column"),
+                    all.x = TRUE, sort = FALSE)
+  registry[is.na(VariableLabelStatus), VariableLabelStatus := "not_available"]
+  registry <- merge(registry, value_profiles$summary,
+                    by = c("Database", "TableName", "DuckDBTable", "Column"),
+                    all.x = TRUE, sort = FALSE)
+  registry[is.na(ValueProfileStatus), ValueProfileStatus := "not_available"]
+  registry[is.na(ValuesChangeAcrossPartitions), ValuesChangeAcrossPartitions := FALSE]
+  if (!isTRUE(ValuePreviewIdentifiers)) {
+    sensitive <- tolower(as.character(registry$Role)) %in% c("join_key", "identifier")
+    if (any(sensitive)) {
+      sensitive_keys <- registry[sensitive, .(Database, TableName, DuckDBTable, Column)]
+      registry[sensitive, `:=`(ObservedValues = NA_character_,
+                               ValueProfileStatus = "suppressed_identifier")]
+      value_profiles$details <- value_profiles$details[!sensitive_keys,
+        on = .(Database, TableName, DuckDBTable, Column)]
+    }
+  }
+  dictionary_review <- .schema_dictionary_review(observations)
+  if (!isTRUE(ValuePreviewIdentifiers) && nrow(dictionary_review) > 0L) {
+    sensitive_keys <- registry[
+      tolower(as.character(Role)) %in% c("join_key", "identifier") |
+        vapply(Column, merge_key_name_candidate, logical(1)),
+      .(Database, TableName, DuckDBTable, Column)]
+    if (nrow(sensitive_keys) > 0L) {
+      dictionary_review <- dictionary_review[!sensitive_keys,
+        on = .(Database, TableName, DuckDBTable, Column)]
+    }
+  }
   data.table::setorder(registry, Database, TableName, Column)
   compatibility <- .schema_compatibility_review(registry)
   history <- unique(usable[, .(Database, TableName, DuckDBTable, Column,
@@ -6830,8 +8416,13 @@ RecommendRepositorySchema <- function(survey = NULL, ObservationPath = NULL,
   )
   structure(list(registry = registry, compatibility = compatibility,
                  history = history, source_issues = source_issues,
+                 value_preview = value_profiles$details,
+                 dictionary_review = dictionary_review,
                  summary = summary,
-                 ObservationPath = ObservationPath %||% survey$ObservationPath),
+                 ObservationPath = ObservationPath %||% survey$ObservationPath,
+                 ValuePreviewMaxDistinct = ValuePreviewMaxDistinct,
+                 ValuePreviewTypes = ValuePreviewTypes,
+                 ValuePreviewIdentifiers = isTRUE(ValuePreviewIdentifiers)),
             class = "RepositorySchemaProposal")
 }
 
@@ -6887,6 +8478,29 @@ RecommendRepositorySchema <- function(survey = NULL, ObservationPath = NULL,
   compatibility
 }
 
+.preserve_dictionary_decisions <- function(dictionary, SchemaReviewPath) {
+  if (nrow(dictionary) == 0L || !file.exists(SchemaReviewPath) ||
+      !is_excel_workbook_path(SchemaReviewPath)) return(dictionary)
+  sheets <- tryCatch(openxlsx::getSheetNames(SchemaReviewPath),
+                     error = function(e) character(0))
+  if (!"DictionaryReview" %in% sheets) return(dictionary)
+  old <- tryCatch(data.table::as.data.table(openxlsx::read.xlsx(
+    SchemaReviewPath, sheet = "DictionaryReview")), error = function(e) NULL)
+  key_fields <- c("Database", "TableName", "DuckDBTable", "Column",
+                  "PartitionKey", "PartitionValue", "Value", "DictionarySignature")
+  if (is.null(old) || nrow(old) == 0L || !all(key_fields %in% names(old)) ||
+      !"Decision" %in% names(old)) return(dictionary)
+  decision <- tolower(trimws(as.character(old$Decision)))
+  old <- old[decision %in% c("add", "override", "ignore", "accept")]
+  if (nrow(old) == 0L) return(dictionary)
+  key <- function(x) do.call(paste, c(x[, ..key_fields], sep = "\r"))
+  old <- old[!duplicated(key(old))]
+  idx <- match(key(dictionary), key(old))
+  same <- !is.na(idx)
+  fields <- intersect(c("ApprovedLabel", "Decision", "UserNotes"), names(old))
+  .copy_review_character_fields(dictionary, old, which(same), idx[same], fields)
+}
+
 .copy_review_character_fields <- function(target, source, target_rows,
                                            source_rows, fields) {
   target <- data.table::as.data.table(target)
@@ -6930,6 +8544,22 @@ WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = 
       Decision = character(), CompatibilitySignature = character(),
       UserNotes = character())
   }
+  value_preview <- data.table::copy(data.table::as.data.table(
+    proposal$value_preview %||% data.table::data.table()))
+  if (ncol(value_preview) == 0L) {
+    value_preview <- data.table::data.table(
+      Database = character(), TableName = character(), DuckDBTable = character(),
+      Column = character(), ProfileStatus = character(), Value = character(),
+      ValueCount = numeric(), ValuePercent = numeric(), PartitionCount = integer(),
+      PartitionsPresent = character(), FirstPartition = character(),
+      LastPartition = character(), SourcesProfiled = integer())
+  }
+  dictionary <- data.table::copy(data.table::as.data.table(
+    proposal$dictionary_review %||% data.table::data.table()))
+  if (ncol(dictionary) == 0L) dictionary <- .schema_dictionary_review(data.table::data.table())
+  if (isTRUE(PreserveDecisions)) {
+    dictionary <- .preserve_dictionary_decisions(dictionary, SchemaReviewPath)
+  }
   normalize_decision <- function(x) {
     out <- tolower(trimws(as.character(x)))
     out[is.na(out)] <- ""
@@ -6943,7 +8573,9 @@ WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = 
       "Select Accept, or choose ApprovedType and select Override."]
     first <- c("Decision", "ApprovedType", "UserNotes", "RequiredAction",
                "Database", "TableName", "Column", "RecommendedType", "Risk",
-               "RecommendationReason", "ObservedTypes", "TypeHistory")
+               "RecommendationReason", "ObservedTypes", "TypeHistory",
+               "DistinctValueCount", "ObservedValues", "ValueProfileStatus",
+               "ValuesChangeAcrossPartitions")
     data.table::setcolorder(column_decisions,
       c(intersect(first, names(column_decisions)), setdiff(names(column_decisions), first)))
   }
@@ -6961,6 +8593,25 @@ WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = 
     data.table::setcolorder(compatibility_decisions,
       c(intersect(first, names(compatibility_decisions)),
         setdiff(names(compatibility_decisions), first)))
+  }
+  dictionary_unresolved <- if (nrow(dictionary) > 0L) {
+    dictionary$RequiresReview %in% TRUE &
+      !normalize_decision(dictionary$Decision) %in% c("accept", "override", "ignore")
+  } else logical(0)
+  n_dictionary_decisions <- sum(dictionary_unresolved)
+  if (nrow(dictionary) > 0L) {
+    dictionary[, RequiredAction := ifelse(
+      RequiresReview %in% TRUE,
+      "Resolve the conflict: enter ApprovedLabel and select Override, or select Ignore.",
+      ifelse(Status == "optional_label_missing",
+             "Optional: enter ApprovedLabel and select Add, or leave blank.",
+             "No action required; select Override only to replace the source label."))]
+    first <- c("Decision", "ApprovedLabel", "UserNotes", "RequiredAction",
+               "Database", "TableName", "Column", "PartitionKey", "PartitionValue",
+               "Value", "ProposedLabel", "VariableLabel", "Status", "EvidenceLabels",
+               "EvidenceSources", "PartitionsObserved", "LabelCoverage")
+    data.table::setcolorder(dictionary,
+      c(intersect(first, names(dictionary)), setdiff(names(dictionary), first)))
   }
   policy_report <- registry[PolicyConflict %in% TRUE, .(
     ActionRequired = "No - informational only",
@@ -6994,12 +8645,15 @@ WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = 
   n_column_decisions <- nrow(column_decisions)
   n_compatibility_decisions <- nrow(compatibility_decisions)
   ready <- n_source_errors == 0L && n_column_decisions == 0L &&
-    n_compatibility_decisions == 0L
+    n_compatibility_decisions == 0L && n_dictionary_decisions == 0L
   column_overview_fields <- c(
     "Database", "TableName", "DuckDBTable", "Column", "ObservedTypes",
     "TypeHistory", "DataRecommendedType", "PolicyType", "RecommendedType",
     "ApprovedType", "Risk", "RecommendationReason", "RequiresReview",
-    "Decision", "Role", "MergeGroup", "Confidence", "UserNotes")
+    "VariableLabel", "VariableLabelStatus", "VariableLabelHistory",
+    "DistinctValueCount", "ObservedValues", "ValueProfileStatus",
+    "ValuesChangeAcrossPartitions", "Decision", "Role", "MergeGroup",
+    "Confidence", "UserNotes")
   column_overview <- registry[, intersect(column_overview_fields, names(registry)),
                               with = FALSE]
   compatibility_overview_fields <- c(
@@ -7012,77 +8666,95 @@ WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = 
     proposal$history %||% data.table::data.table()))
   start_here <- data.table::data.table(
     Step = c("Source validation", "Column schema decisions",
-             "Cross-table compatibility", "Policy report", "Finalization"),
+             "Cross-table compatibility", "Semantic dictionary", "Policy report", "Finalization"),
     Status = c(
       if (n_source_errors > 0L) "BLOCKED" else if (nrow(source_issues) > 0L) "COMPLETE - WARNINGS LOGGED" else "COMPLETE",
       if (n_column_decisions > 0L) "ACTION REQUIRED" else "COMPLETE",
       if (n_compatibility_decisions > 0L) "ACTION REQUIRED" else "COMPLETE",
+      if (n_dictionary_decisions > 0L) "ACTION REQUIRED" else "COMPLETE",
       "INFORMATIONAL",
       if (ready) "READY" else "BLOCKED"),
-    Remaining = c(n_source_errors, n_column_decisions, n_compatibility_decisions,
-                  nrow(policy_report), n_source_errors + n_column_decisions + n_compatibility_decisions),
+    Remaining = as.numeric(c(n_source_errors, n_column_decisions, n_compatibility_decisions,
+                             n_dictionary_decisions,
+                             nrow(policy_report),
+                             n_source_errors + n_column_decisions + n_compatibility_decisions +
+                               n_dictionary_decisions)),
     RequiredAction = c(
       if (n_source_errors > 0L) "Resolve blocking rows and rerun PrepareSchemaRegistry()." else "None.",
       if (n_column_decisions > 0L) "Complete every visible row." else "None.",
       if (n_compatibility_decisions > 0L) "Complete every visible row." else "None.",
+      if (n_dictionary_decisions > 0L) "Resolve rows marked ACTION REQUIRED; missing labels are optional." else "Optional labels may be added when useful.",
       "No decision required; review only when useful.",
       if (ready) "Run FinalizeSchemaRegistry()." else "Complete the blocking steps above."),
     Worksheet = c("SourceIssues", "ColumnDecisions", "CompatibilityDecisions",
-                  "PolicyReport", "StartHere")
+                  "DictionaryReview", "PolicyReport", "StartHere")
   )
   settings <- data.table::data.table(
     Setting = c("ObservationPath", "Columns", "AutoApproved", "ColumnDecisions",
-                "CompatibilityDecisions", "CompatibilityGroups", "PolicyItems",
-                "SourceIssues", "BlockingSourceErrors", "GeneratedUTC"),
+                "CompatibilityDecisions", "DictionaryDecisions", "DictionaryRows",
+                "CompatibilityGroups", "PolicyItems",
+                "SourceIssues", "BlockingSourceErrors", "ValuePreviewMaxDistinct",
+                "ValuePreviewTypes", "ValuePreviewIdentifiers", "ValuePreviewRows", "GeneratedUTC"),
     Value = c(proposal$ObservationPath %||% "", proposal$summary$Columns,
               proposal$summary$AutoApproved, n_column_decisions,
-              n_compatibility_decisions,
+              n_compatibility_decisions, n_dictionary_decisions, nrow(dictionary),
               proposal$summary$CompatibilityConflicts %||% nrow(compatibility),
               nrow(policy_report), nrow(source_issues), n_source_errors,
+              proposal$ValuePreviewMaxDistinct %||% 15L,
+              paste(proposal$ValuePreviewTypes %||%
+                      c("character", "integer", "int64", "logical"), collapse = ","),
+              isTRUE(proposal$ValuePreviewIdentifiers), nrow(value_preview),
               format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"))
   )
   workbook_guide <- data.table::data.table(
     Worksheet = c(
-      "StartHere", "ColumnDecisions", "CompatibilityDecisions", "SourceIssues",
-      "ColumnOverview", "CompatibilityOverview", "TypeHistory", "PolicyReport",
-      "Registry", "CompatibilityRegistry", "Settings"),
+      "StartHere", "ColumnDecisions", "CompatibilityDecisions", "DictionaryReview", "SourceIssues",
+      "ColumnOverview", "CompatibilityOverview", "TypeHistory", "ValuePreview", "PolicyReport",
+      "Registry", "CompatibilityRegistry", "DictionaryRegistry", "Settings"),
     Category = c(
-      "Guide", "Action", "Action", "Validation", "Reference", "Reference",
-      "Reference", "Reference", "System", "System", "System"),
+      "Guide", "Action", "Action", "Action", "Validation", "Reference", "Reference",
+      "Reference", "Reference", "Reference", "System", "System", "System", "System"),
     Contains = c(
       "Current workflow status, required actions, and this workbook guide.",
       "Only columns whose recommended type needs an explicit decision.",
       "Only cross-table or cross-database compatibility groups needing a decision.",
+      "Observed codes, source-provided meanings, conflicts, and optional blank labels.",
       "Source read errors and warnings found during schema survey.",
       "Every column, its observed type history, recommendation, and approved output type.",
       "Every compatibility candidate and its proposed common type and role.",
       "Detailed evidence for columns whose types changed or whose readers raised warnings.",
+      "Low-cardinality character, integer, int64, and logical values with counts and partition coverage.",
       "Informational differences between data-derived recommendations and optional policies.",
       "Complete machine-readable column registry used during finalization.",
       "Complete machine-readable compatibility registry used during finalization.",
+      "Unedited semantic dictionary evidence used during finalization.",
       "Generation paths, counts, and timestamp."),
     UserAction = c(
       "Begin here and follow rows marked ACTION REQUIRED or BLOCKED.",
       if (n_column_decisions > 0L) "Complete every row." else "None.",
       if (n_compatibility_decisions > 0L) "Complete every row." else "None.",
+      if (n_dictionary_decisions > 0L) "Resolve conflicts; adding missing labels is optional." else
+        "Optionally add labels where they improve usability.",
       if (n_source_errors > 0L) "Resolve blocking errors and rerun schema preparation." else
         if (nrow(source_issues) > 0L) "Review warnings when useful." else "None.",
       "Review how source types will be normalized; make decisions only in ColumnDecisions.",
       "Review proposed shared types; make decisions only in CompatibilityDecisions.",
       "Use for investigation; no edits are required.",
+      "Use to understand codes and how values change across partitions; no edits are required.",
       "Review when useful; no decisions are required here.",
-      "Do not edit.", "Do not edit.", "Do not edit."),
+      "Do not edit.", "Do not edit.", "Do not edit.", "Do not edit."),
     Status = c(
       if (ready) "READY" else "ACTION REQUIRED",
       if (n_column_decisions > 0L) "ACTION REQUIRED" else "COMPLETE",
       if (n_compatibility_decisions > 0L) "ACTION REQUIRED" else "COMPLETE",
+      if (n_dictionary_decisions > 0L) "ACTION REQUIRED" else "COMPLETE",
       if (n_source_errors > 0L) "BLOCKED" else if (nrow(source_issues) > 0L) "WARNINGS" else "COMPLETE",
-      rep("REFERENCE", 4L), rep("HIDDEN", 3L)),
+      rep("REFERENCE", 5L), rep("HIDDEN", 4L)),
     Rows = c(
-      nrow(start_here), n_column_decisions, n_compatibility_decisions,
+      nrow(start_here), n_column_decisions, n_compatibility_decisions, nrow(dictionary),
       nrow(source_issues), nrow(column_overview), nrow(compatibility_overview),
-      nrow(type_history), nrow(policy_report), nrow(registry),
-      nrow(compatibility), nrow(settings))
+      nrow(type_history), nrow(value_preview), nrow(policy_report), nrow(registry),
+      nrow(compatibility), nrow(dictionary), nrow(settings))
   )
   dir.create(dirname(SchemaReviewPath), recursive = TRUE, showWarnings = FALSE)
   tmp <- tempfile(pattern = paste0(basename(SchemaReviewPath), ".tmp_"),
@@ -7169,24 +8841,31 @@ WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = 
     empty_display("COMPLETE", "No compatibility candidates were identified.")
   type_history_display <- if (nrow(type_history) > 0L) type_history else
     empty_display("COMPLETE", "No changing types or reader warnings were identified.")
+  value_preview_display <- if (nrow(value_preview) > 0L) value_preview else
+    empty_display("INFORMATIONAL", "No eligible low-cardinality value previews were identified.")
+  dictionary_display <- if (nrow(dictionary) > 0L) dictionary else
+    empty_display("INFORMATIONAL", "No low-cardinality values or source labels were available for a semantic dictionary.")
   policy_report_display <- if (nrow(policy_report) > 0L) policy_report else
     empty_display("INFORMATIONAL", "No policy conflicts were identified.")
   sheets <- list(ColumnDecisions = column_decisions_display,
                  CompatibilityDecisions = compatibility_decisions_display,
+                 DictionaryReview = dictionary_display,
                  SourceIssues = source_issues_display,
                  ColumnOverview = column_overview,
                  CompatibilityOverview = compatibility_overview_display,
                  TypeHistory = type_history_display,
+                 ValuePreview = value_preview_display,
                  PolicyReport = policy_report_display,
                  Registry = registry,
                  CompatibilityRegistry = compatibility,
+                 DictionaryRegistry = dictionary,
                  Settings = settings)
   header_style <- openxlsx::createStyle(fgFill = "#1F4E78", fontColour = "#FFFFFF",
                                         textDecoration = "bold", border = "bottom")
   for (sheet in names(sheets)) {
-    tab_colour <- if (sheet %in% c("ColumnDecisions", "CompatibilityDecisions")) "#FFC000" else
+    tab_colour <- if (sheet %in% c("ColumnDecisions", "CompatibilityDecisions", "DictionaryReview")) "#FFC000" else
       if (sheet == "SourceIssues" && n_source_errors > 0L) "#C00000" else
-      if (sheet %in% c("ColumnOverview", "CompatibilityOverview", "TypeHistory")) "#5B9BD5" else
+      if (sheet %in% c("ColumnOverview", "CompatibilityOverview", "TypeHistory", "ValuePreview")) "#5B9BD5" else
       if (sheet == "PolicyReport") "#A5A5A5" else "#D9E1F2"
     openxlsx::addWorksheet(wb, sheet, gridLines = FALSE, tabColour = tab_colour)
     value <- data.table::as.data.table(sheets[[sheet]])
@@ -7201,7 +8880,9 @@ WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = 
     if (ncol(value) > 0L) openxlsx::setColWidths(wb, sheet, cols = seq_len(ncol(value)), widths = widths)
     wide_cols <- which(names(value) %in% c(
       "RequiredAction", "RecommendationReason", "TypeHistory", "Tables",
-      "SourcePath", "SurveyMessage", "ReaderWarning", "Outcome"))
+      "SourcePath", "SurveyMessage", "ReaderWarning", "Outcome",
+       "ObservedValues", "Value", "ApprovedLabel", "ProposedLabel", "VariableLabel",
+       "EvidenceLabels", "EvidenceSources", "PartitionsObserved"))
     if (length(wide_cols) > 0L) {
       openxlsx::setColWidths(wb, sheet, cols = wide_cols, widths = 45)
       if (nrow(value) > 0L) {
@@ -7210,6 +8891,18 @@ WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = 
                            gridExpand = TRUE, stack = TRUE)
       }
     }
+  }
+  if (nrow(value_preview) > 0L && "Value" %in% names(value_preview)) {
+    value_col <- match("Value", names(value_preview))
+    openxlsx::addStyle(wb, "ValuePreview", openxlsx::createStyle(numFmt = "@"),
+                       rows = 2:(nrow(value_preview) + 1L), cols = value_col,
+                       gridExpand = TRUE, stack = TRUE)
+  }
+  if (nrow(dictionary) > 0L && "Value" %in% names(dictionary)) {
+    value_col <- match("Value", names(dictionary))
+    openxlsx::addStyle(wb, "DictionaryReview", openxlsx::createStyle(numFmt = "@"),
+                       rows = 2:(nrow(dictionary) + 1L), cols = value_col,
+                       gridExpand = TRUE, stack = TRUE)
   }
   edit_style <- openxlsx::createStyle(fgFill = "#FFF2CC", fontColour = "#000000")
   if (nrow(column_decisions) > 0L) {
@@ -7245,20 +8938,42 @@ WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = 
                        cols = c(decision_col, type_col, notes_col),
                        gridExpand = TRUE, stack = TRUE)
   }
+  if (nrow(dictionary) > 0L) {
+    rows <- 2:(nrow(dictionary) + 1L)
+    decision_col <- match("Decision", names(dictionary))
+    label_col <- match("ApprovedLabel", names(dictionary))
+    notes_col <- match("UserNotes", names(dictionary))
+    openxlsx::dataValidation(wb, "DictionaryReview", cols = decision_col, rows = rows,
+                             type = "list", value = '"Auto-approved,Accept,Add,Override,Ignore"')
+    openxlsx::addStyle(wb, "DictionaryReview", edit_style, rows = rows,
+                       cols = c(decision_col, label_col, notes_col),
+                       gridExpand = TRUE, stack = TRUE)
+    status_col <- match("Status", names(dictionary))
+    openxlsx::conditionalFormatting(
+      wb, "DictionaryReview", cols = status_col, rows = rows,
+      rule = '=="label_changed_across_partitions"',
+      style = openxlsx::createStyle(fgFill = "#FFF2CC"))
+    openxlsx::conditionalFormatting(
+      wb, "DictionaryReview", cols = status_col, rows = rows,
+      rule = '=="conflicting_labels_within_partition"',
+      style = openxlsx::createStyle(fgFill = "#F4CCCC"))
+  }
   sheet_order <- c("StartHere", names(sheets))
-  advanced <- c("Registry", "CompatibilityRegistry", "Settings")
+  advanced <- c("Registry", "CompatibilityRegistry", "DictionaryRegistry", "Settings")
   visibility <- ifelse(sheet_order %in% advanced, "hidden", "visible")
   openxlsx::sheetVisibility(wb) <- visibility
   openxlsx::saveWorkbook(wb, tmp, overwrite = TRUE)
   replace_file_safely(tmp, SchemaReviewPath)
   log_msg(sprintf(paste0("[SCHEMA PROPOSAL] Wrote %s (%d columns; %d column decision(s), ",
-                         "%d compatibility decision(s), %d blocking source error(s))."),
+                         "%d compatibility decision(s), %d dictionary decision(s), ",
+                         "%d blocking source error(s))."),
                   SchemaReviewPath, nrow(registry), n_column_decisions,
-                  n_compatibility_decisions, n_source_errors))
+                  n_compatibility_decisions, n_dictionary_decisions, n_source_errors))
   result <- SchemaReviewPath
   attr(result, "ReviewStatus") <- list(
     ColumnDecisions = n_column_decisions,
     CompatibilityDecisions = n_compatibility_decisions,
+    DictionaryDecisions = n_dictionary_decisions,
     BlockingSourceErrors = n_source_errors,
     ReadyToFinalize = ready)
   invisible(result)
@@ -7287,6 +9002,21 @@ WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = 
   fields <- intersect(c("ApprovedCommonType", "Decision", "SuggestedRole", "UserNotes"),
                       names(decisions))
   .copy_review_character_fields(compatibility, decisions, hit, idx[hit], fields)
+}
+
+.overlay_dictionary_review <- function(dictionary, review) {
+  if (is.null(dictionary) || nrow(dictionary) == 0L ||
+      is.null(review) || nrow(review) == 0L) return(dictionary)
+  key_fields <- c("Database", "TableName", "DuckDBTable", "Column",
+                  "PartitionKey", "PartitionValue", "Value", "DictionarySignature")
+  if (!all(key_fields %in% names(dictionary)) || !all(key_fields %in% names(review))) {
+    return(dictionary)
+  }
+  key <- function(x) do.call(paste, c(x[, ..key_fields], sep = "\r"))
+  idx <- match(key(dictionary), key(review))
+  hit <- which(!is.na(idx))
+  fields <- intersect(c("ApprovedLabel", "Decision", "UserNotes"), names(review))
+  .copy_review_character_fields(dictionary, review, hit, idx[hit], fields)
 }
 
 .apply_compatibility_review <- function(registry, compatibility, strict = TRUE) {
@@ -7418,6 +9148,15 @@ FinalizeRepositorySchema <- function(SchemaReviewPath, TableSchemaPath, strict =
       SchemaReviewPath, sheet = "CompatibilityDecisions"))
     compatibility <- .overlay_compatibility_decisions(compatibility, compatibility_decisions)
   }
+  dictionary <- if ("DictionaryRegistry" %in% sheets) {
+    data.table::as.data.table(openxlsx::read.xlsx(
+      SchemaReviewPath, sheet = "DictionaryRegistry"))
+  } else NULL
+  if (!is.null(dictionary) && "DictionaryReview" %in% sheets) {
+    dictionary_review <- data.table::as.data.table(openxlsx::read.xlsx(
+      SchemaReviewPath, sheet = "DictionaryReview"))
+    dictionary <- .overlay_dictionary_review(dictionary, dictionary_review)
+  }
   parse_review_flag <- function(x) {
     text <- tolower(trimws(as.character(x)))
     out <- rep(NA, length(text))
@@ -7452,6 +9191,80 @@ FinalizeRepositorySchema <- function(SchemaReviewPath, TableSchemaPath, strict =
   registry[, ApprovedType := approved]
   registry[, Decision := decision]
   registry <- .apply_compatibility_review(registry, compatibility, strict = strict)
+  column_dictionary <- NULL
+  if (!is.null(dictionary) && nrow(dictionary) > 0L) {
+    dictionary_required <- c(
+      "Database", "TableName", "DuckDBTable", "Column", "PartitionKey",
+      "PartitionValue", "Value", "ProposedLabel", "ApprovedLabel",
+      "RequiresReview", "Decision", "Source")
+    missing_dictionary <- setdiff(dictionary_required, names(dictionary))
+    if (length(missing_dictionary) > 0L) {
+      stop("DictionaryRegistry is missing required columns: ",
+           paste(missing_dictionary, collapse = ", "))
+    }
+    dictionary_review_flag <- parse_review_flag(dictionary$RequiresReview)
+    if (anyNA(dictionary_review_flag)) {
+      stop("DictionaryRegistry RequiresReview contains blank or invalid logical values.")
+    }
+    dictionary_decision <- tolower(trimws(as.character(dictionary$Decision)))
+    dictionary_decision[is.na(dictionary_decision)] <- ""
+    dictionary_label <- trimws(as.character(dictionary$ApprovedLabel))
+    dictionary_label[is.na(dictionary_label)] <- ""
+    proposed_label <- trimws(as.character(dictionary$ProposedLabel))
+    proposed_label[is.na(proposed_label)] <- ""
+    unresolved_dictionary <- dictionary_review_flag &
+      !dictionary_decision %in% c("accept", "override", "ignore")
+    if (any(unresolved_dictionary)) {
+      examples <- utils::head(sprintf(
+        "%s/%s/%s=%s", dictionary$Database[unresolved_dictionary],
+        dictionary$TableName[unresolved_dictionary],
+        dictionary$Column[unresolved_dictionary], dictionary$Value[unresolved_dictionary]), 5L)
+      message <- sprintf(paste0(
+        "%d semantic dictionary conflict(s) remain unresolved in DictionaryReview. ",
+        "Enter ApprovedLabel and select Override, or select Ignore. First unresolved: %s"),
+        sum(unresolved_dictionary), paste(examples, collapse = ", "))
+      if (isTRUE(strict)) stop(message) else log_msg(paste("[DICTIONARY WARNING]", message))
+    }
+    needs_label <- dictionary_decision %in% c("accept", "add", "override")
+    if (any(needs_label & !nzchar(dictionary_label))) {
+      stop("DictionaryReview rows using Accept, Add, or Override require a non-blank ApprovedLabel.")
+    }
+    changed_label <- nzchar(dictionary_label) & dictionary_label != proposed_label
+    changed_without_override <- changed_label &
+      !dictionary_decision %in% c("add", "override")
+    if (any(changed_without_override)) {
+      stop("Changed semantic labels must use Decision='Add' or Decision='Override'.")
+    }
+    include_dictionary <- nzchar(dictionary_label) &
+      !dictionary_decision %in% c("ignore", "")
+    if (any(include_dictionary)) {
+      dictionary[, Decision := dictionary_decision]
+      dictionary[, ApprovedLabel := dictionary_label]
+      column_dictionary <- dictionary[include_dictionary, .(
+        Database, TableName, DuckDBTable, Column,
+        PartitionKey = as.character(PartitionKey),
+        PartitionValue = as.character(PartitionValue),
+        Value = as.character(Value),
+        Label = as.character(ApprovedLabel),
+        VariableLabel = as.character(VariableLabel),
+        Source = ifelse(Decision %in% c("add", "override"),
+                        "user_approved", as.character(Source)),
+        Status = ifelse(Decision %in% c("add", "override"),
+                        "user_approved", as.character(Status)),
+        Decision = as.character(Decision),
+        EvidenceLabels = as.character(EvidenceLabels),
+        EvidenceSources = as.character(EvidenceSources),
+        UserNotes = as.character(UserNotes),
+        DictionarySignature = as.character(DictionarySignature))]
+      duplicate_dictionary <- column_dictionary[, .(
+        NLabels = data.table::uniqueN(Label),
+        Labels = paste(sort(unique(Label)), collapse = " | ")),
+        by = .(Database, TableName, Column, PartitionKey, PartitionValue, Value)][NLabels > 1L]
+      if (nrow(duplicate_dictionary) > 0L) {
+        stop("Final semantic dictionary contains conflicting labels for the same scope and value.")
+      }
+    }
+  }
   merge_group <- toupper(trimws(as.character(registry$MergeGroup)))
   registry[, MergeGroup := merge_group]
   declared <- registry[!is.na(MergeGroup) & nzchar(MergeGroup)]
@@ -7466,6 +9279,21 @@ FinalizeRepositorySchema <- function(SchemaReviewPath, TableSchemaPath, strict =
   if (!"PolicyStatus" %in% names(registry)) registry[, PolicyStatus := "not_configured"]
   if (!"MergeReviewed" %in% names(registry)) registry[, MergeReviewed := FALSE]
   if (!"CompatibilityApplied" %in% names(registry)) registry[, CompatibilityApplied := FALSE]
+  value_defaults <- list(DistinctValueCount = NA_real_, ObservedValues = NA_character_,
+                         ValueProfileStatus = "not_available",
+                         ValuesChangeAcrossPartitions = FALSE,
+                         VariableLabel = NA_character_,
+                         VariableLabelStatus = "not_available",
+                         VariableLabelHistory = NA_character_)
+  for (field in names(value_defaults)) {
+    if (!field %in% names(registry)) registry[, (field) := value_defaults[[field]]]
+  }
+  value_dictionary <- if ("ValuePreview" %in% sheets) {
+    candidate <- data.table::as.data.table(openxlsx::read.xlsx(
+      SchemaReviewPath, sheet = "ValuePreview"))
+    required_value_fields <- c("Database", "TableName", "DuckDBTable", "Column", "Value")
+    if (all(required_value_fields %in% names(candidate))) candidate else NULL
+  } else NULL
   table_schema <- registry[, .(
     Database, TableName, DuckDBTable, Column,
     CanonicalType = ApprovedType,
@@ -7474,13 +9302,22 @@ FinalizeRepositorySchema <- function(SchemaReviewPath, TableSchemaPath, strict =
     Role = ifelse(is.na(Role) | !nzchar(Role), "data", Role),
     RegistryPattern = PolicyPattern,
     MergeGroup, MergeReviewed,
+    VariableLabel = as.character(VariableLabel),
+    VariableLabelStatus = as.character(VariableLabelStatus),
+    VariableLabelHistory = as.character(VariableLabelHistory),
+    DistinctValueCount = suppressWarnings(as.numeric(DistinctValueCount)),
+    ObservedValues = as.character(ObservedValues),
+    ValueProfileStatus = as.character(ValueProfileStatus),
+    ValuesChangeAcrossPartitions = as.logical(ValuesChangeAcrossPartitions),
     Source = ifelse(CompatibilityApplied, "user_approved",
              ifelse(tolower(Decision) == "auto-approved" & ApprovedType == DataRecommendedType,
                     "auto_approved",
                     ifelse(tolower(Decision) == "auto-approved", "policy_approved", "user_approved")))
   )]
   ValidateSchemaMergeKeys(table_schema, strict = strict)
-  write_table_schema_catalog(table_schema, TableSchemaPath)
+  write_table_schema_catalog(table_schema, TableSchemaPath,
+                             value_dictionary = value_dictionary,
+                             column_dictionary = column_dictionary)
   log_msg(sprintf("[SCHEMA FINALIZED] Wrote %d approved column definitions to %s.",
                   nrow(table_schema), TableSchemaPath))
   invisible(load_table_schema_catalog(TableSchemaPath, strict = TRUE))
@@ -7494,22 +9331,34 @@ PrepareSchemaRegistry <- function(MDT, MasterDBPath, ObservationPath, SchemaRevi
                                   StrictReaders = FALSE, SchemaRegistryPath = NULL,
                                   schema_registry = NULL,
                                   SchemaProfile = c("none", "generic", "hcup"),
+                                  ValuePreviewMaxDistinct = 15L,
+                                  ValuePreviewTypes = c("character", "integer", "int64", "logical"),
+                                  ValuePreviewIdentifiers = FALSE,
                                   LogPath = NULL, RunId = NULL) {
   survey <- SurveyRepositorySchema(MDT = MDT, MasterDBPath = MasterDBPath,
                                    ObservationPath = ObservationPath, DBLoad = DBLoad,
                                    n_workers = n_workers,
                                    SourceFingerprintMode = match.arg(SourceFingerprintMode),
-                                   StrictReaders = StrictReaders, LogPath = LogPath, RunId = RunId)
+                                   StrictReaders = StrictReaders,
+                                   ValuePreviewMaxDistinct = ValuePreviewMaxDistinct,
+                                   ValuePreviewTypes = ValuePreviewTypes,
+                                   ValuePreviewIdentifiers = ValuePreviewIdentifiers,
+                                   LogPath = LogPath, RunId = RunId)
   proposal <- RecommendRepositorySchema(
     survey = survey, SchemaRegistryPath = SchemaRegistryPath,
-    schema_registry = schema_registry, SchemaProfile = match.arg(SchemaProfile))
+    schema_registry = schema_registry, SchemaProfile = match.arg(SchemaProfile),
+    ValuePreviewMaxDistinct = ValuePreviewMaxDistinct,
+    ValuePreviewTypes = ValuePreviewTypes,
+    ValuePreviewIdentifiers = ValuePreviewIdentifiers)
   written <- WriteSchemaProposal(proposal, SchemaReviewPath)
   review_status <- attr(written, "ReviewStatus")
   log_msg(sprintf(paste0("[SCHEMA READY] Open StartHere in %s: %d column decision(s), ",
-                         "%d compatibility decision(s), %d blocking source error(s)."),
+                         "%d compatibility decision(s), %d dictionary decision(s), ",
+                         "%d blocking source error(s)."),
                   SchemaReviewPath,
                   review_status$ColumnDecisions %||% proposal$summary$NeedsReview,
                   review_status$CompatibilityDecisions %||% proposal$summary$CompatibilityConflicts,
+                  review_status$DictionaryDecisions %||% 0L,
                   review_status$BlockingSourceErrors %||% proposal$summary$SourceIssues))
   invisible(list(survey = survey, proposal = proposal,
                  ObservationPath = ObservationPath, SchemaReviewPath = SchemaReviewPath))
@@ -7534,13 +9383,16 @@ schema_map_to_long <- function(class_map, database, table_name, duckdb_table, so
 
 #' Write the table schema catalog as Excel or CSV
 #' @export
-write_table_schema_catalog <- function(table_schema, TableSchemaPath, label_catalog = NULL) {
+write_table_schema_catalog <- function(table_schema, TableSchemaPath, label_catalog = NULL,
+                                       value_dictionary = NULL,
+                                       column_dictionary = NULL) {
   if (is.null(TableSchemaPath) || !nzchar(TableSchemaPath)) return(invisible(NULL))
   dir.create(dirname(TableSchemaPath), recursive = TRUE, showWarnings = FALSE)
   table_schema <- data.table::as.data.table(table_schema)
   if (is.null(label_catalog)) label_catalog <- load_label_catalog(TableSchemaPath)
+  if (is.null(value_dictionary)) value_dictionary <- load_value_dictionary(TableSchemaPath)
+  if (is.null(column_dictionary)) column_dictionary <- load_column_dictionary(TableSchemaPath)
   if (is_excel_workbook_path(TableSchemaPath)) {
-    sheets <- list(TableSchemas = table_schema)
     if (nrow(table_schema) > 0L) {
       if (!"MergeGroup" %in% names(table_schema)) table_schema[, MergeGroup := NA_character_]
       if (!"MergeReviewed" %in% names(table_schema)) table_schema[, MergeReviewed := FALSE]
@@ -7550,8 +9402,17 @@ write_table_schema_catalog <- function(table_schema, TableSchemaPath, label_cata
                                    CanonicalType, Role, MergeGroup, MergeReviewed,
                                    RegistryOverride)]
       column_inventory <- table_schema[, .(Tables = paste(sort(unique(DuckDBTable)), collapse = "; "), Databases = paste(sort(unique(Database)), collapse = "; "), Types = paste(sort(unique(CanonicalType)), collapse = "; "), Roles = paste(sort(unique(Role)), collapse = "; ")), by = Column]
+    }
+    sheets <- list(TableSchemas = table_schema)
+    if (nrow(table_schema) > 0L) {
       sheets$MergeKeys <- merge_keys
       sheets$ColumnInventory <- column_inventory
+    }
+    if (!is.null(value_dictionary) && nrow(data.table::as.data.table(value_dictionary)) > 0L) {
+      sheets$ValueDictionary <- data.table::as.data.table(value_dictionary)
+    }
+    if (!is.null(column_dictionary) && nrow(data.table::as.data.table(column_dictionary)) > 0L) {
+      sheets$ColumnDictionary <- data.table::as.data.table(column_dictionary)
     }
     if (!is.null(label_catalog) && nrow(data.table::as.data.table(label_catalog)) > 0L) {
       sheets$Labels <- data.table::as.data.table(label_catalog)
@@ -7561,6 +9422,12 @@ write_table_schema_catalog <- function(table_schema, TableSchemaPath, label_cata
     write_csv_safely(table_schema, TableSchemaPath)
     if (!is.null(label_catalog) && nrow(data.table::as.data.table(label_catalog)) > 0L) {
       write_csv_safely(data.table::as.data.table(label_catalog), label_catalog_path(TableSchemaPath))
+    }
+    if (!is.null(value_dictionary) && nrow(data.table::as.data.table(value_dictionary)) > 0L) {
+      write_csv_safely(data.table::as.data.table(value_dictionary), value_dictionary_path(TableSchemaPath))
+    }
+    if (!is.null(column_dictionary) && nrow(data.table::as.data.table(column_dictionary)) > 0L) {
+      write_csv_safely(data.table::as.data.table(column_dictionary), column_dictionary_path(TableSchemaPath))
     }
   }
   invisible(TableSchemaPath)
@@ -7596,6 +9463,179 @@ load_label_catalog <- function(TableSchemaPath) {
   lab
 }
 
+value_dictionary_path <- function(TableSchemaPath) {
+  paste0(tools::file_path_sans_ext(TableSchemaPath), "_ValueDictionary.csv")
+}
+
+column_dictionary_path <- function(TableSchemaPath) {
+  paste0(tools::file_path_sans_ext(TableSchemaPath), "_ColumnDictionary.csv")
+}
+
+#' Read low-cardinality value evidence from the schema catalog
+#'
+#' Reads the \code{ValueDictionary} sheet of \code{TableSchemas.xlsx}, or the
+#' sibling CSV written for a CSV schema catalog. Values are descriptive survey
+#' evidence and never control physical Parquet coercion.
+#' @export
+load_value_dictionary <- function(TableSchemaPath) {
+  if (is.null(TableSchemaPath) || !nzchar(TableSchemaPath) || !file.exists(TableSchemaPath)) return(NULL)
+  values <- tryCatch({
+    if (is_excel_workbook_path(TableSchemaPath)) {
+      if (!"ValueDictionary" %in% openxlsx::getSheetNames(TableSchemaPath)) return(NULL)
+      data.table::as.data.table(openxlsx::read.xlsx(
+        TableSchemaPath, sheet = "ValueDictionary"))
+    } else {
+      path <- value_dictionary_path(TableSchemaPath)
+      if (!file.exists(path)) return(NULL)
+      data.table::fread(path, colClasses = "character")
+    }
+  }, error = function(e) {
+    log_msg(sprintf("[VALUE DICTIONARY WARNING] Could not read value evidence for %s: %s",
+                    TableSchemaPath, conditionMessage(e)))
+    NULL
+  })
+  if (is.null(values) || nrow(values) == 0L) return(NULL)
+  values
+}
+
+#' Read approved semantic value labels from the schema catalog
+#'
+#' Reads the partition-aware \code{ColumnDictionary} sheet written by
+#' \code{FinalizeSchemaRegistry()}. Unlike \code{ValueDictionary}, these rows
+#' are semantic mappings approved from source metadata or by a user.
+#' @export
+load_column_dictionary <- function(TableSchemaPath) {
+  if (is.null(TableSchemaPath) || !nzchar(TableSchemaPath) ||
+      !file.exists(TableSchemaPath)) return(NULL)
+  dictionary <- tryCatch({
+    if (is_excel_workbook_path(TableSchemaPath)) {
+      if (!"ColumnDictionary" %in% openxlsx::getSheetNames(TableSchemaPath)) return(NULL)
+      data.table::as.data.table(openxlsx::read.xlsx(
+        TableSchemaPath, sheet = "ColumnDictionary"))
+    } else {
+      path <- column_dictionary_path(TableSchemaPath)
+      if (!file.exists(path)) return(NULL)
+      data.table::fread(path, colClasses = "character")
+    }
+  }, error = function(e) {
+    log_msg(sprintf("[COLUMN DICTIONARY WARNING] Could not read semantic labels for %s: %s",
+                    TableSchemaPath, conditionMessage(e)))
+    NULL
+  })
+  if (is.null(dictionary) || nrow(dictionary) == 0L) return(NULL)
+  dictionary
+}
+
+#' Describe a repository column and its observed and semantic values
+#' @export
+describe_column <- function(TableSchemaPath, Database, TableName, Column) {
+  catalog <- load_table_schema_catalog(TableSchemaPath, strict = TRUE)
+  column <- canonical_colnames(Column[1])
+  database_value <- as.character(Database[1])
+  table_value <- as.character(TableName[1])
+  schema <- data.table::as.data.table(catalog$table_schema)[
+    as.character(Database) == database_value &
+      as.character(TableName) == table_value & Column == column]
+  if (nrow(schema) == 0L) {
+    stop(sprintf("Column %s/%s/%s was not found in the schema catalog.",
+                 Database[1], TableName[1], column))
+  }
+  values <- load_value_dictionary(TableSchemaPath)
+  if (!is.null(values)) {
+    values <- data.table::as.data.table(values)[
+      as.character(Database) == database_value &
+        as.character(TableName) == table_value & Column == column]
+  }
+  dictionary <- load_column_dictionary(TableSchemaPath)
+  if (!is.null(dictionary)) {
+    dictionary <- data.table::as.data.table(dictionary)[
+      as.character(Database) == database_value &
+        as.character(TableName) == table_value & Column == column]
+  }
+  structure(list(schema = schema[], observed_values = values,
+                 dictionary = dictionary), class = "repoquet_column_description")
+}
+
+#' Query a DuckDB table with one coded column decoded
+#'
+#' Adds a label column using the approved semantic dictionary. Partition-
+#' specific mappings take precedence over mappings whose partition scope is
+#' \code{"*"}. A conservative 1,000-row default prevents accidental retrieval
+#' of an entire large table; pass \code{limit = NULL} explicitly to remove it.
+#' @export
+decode_column <- function(con, table, column, TableSchemaPath,
+                          Database = NULL, TableName = NULL,
+                          label_column = paste0(canonical_colnames(column), "_LABEL"),
+                          where = NULL, limit = 1000L) {
+  dictionary <- load_column_dictionary(TableSchemaPath)
+  if (is.null(dictionary)) stop("No ColumnDictionary is present in the schema catalog.")
+  dictionary <- data.table::as.data.table(dictionary)
+  column_canonical <- canonical_colnames(column[1])
+  candidates <- dictionary[
+    DuckDBTable == table & canonical_colnames(Column) == column_canonical]
+  if (!is.null(Database)) {
+    database_value <- as.character(Database[1])
+    candidates <- candidates[Database == database_value]
+  }
+  if (!is.null(TableName)) {
+    table_value <- as.character(TableName[1])
+    candidates <- candidates[TableName == table_value]
+  }
+  if (nrow(candidates) == 0L) {
+    stop(sprintf("No semantic labels were found for %s.%s.", table, column_canonical))
+  }
+  description <- DBI::dbGetQuery(con, paste("DESCRIBE", quote_duckdb_ident(table)))
+  actual_column <- description$column_name[
+    match(column_canonical, canonical_colnames(description$column_name))]
+  if (is.na(actual_column)) stop(sprintf("Column %s is not present in DuckDB table %s.", column, table))
+  column_type <- description$column_type[description$column_name == actual_column][1]
+  numeric_column <- grepl("INT|DOUBLE|FLOAT|REAL|DECIMAL|NUMERIC|HUGEINT",
+                          column_type, ignore.case = TRUE)
+  value_condition <- function(value) {
+    if (numeric_column && !is.na(suppressWarnings(as.numeric(value)))) {
+      sprintf("t.%s = CAST(%s AS DOUBLE)", quote_duckdb_ident(actual_column),
+              quote_duckdb_string(value))
+    } else {
+      sprintf("CAST(t.%s AS VARCHAR) = %s", quote_duckdb_ident(actual_column),
+              quote_duckdb_string(value))
+    }
+  }
+  partition_condition <- function(keys, values) {
+    if (is.na(keys) || keys == "*" || is.na(values) || values == "*") return(character(0))
+    key_parts <- strsplit(as.character(keys), ";", fixed = TRUE)[[1]]
+    value_parts <- strsplit(as.character(values), ";", fixed = TRUE)[[1]]
+    if (length(key_parts) != length(value_parts)) {
+      stop("ColumnDictionary contains mismatched PartitionKey and PartitionValue components.")
+    }
+    actual <- description$column_name[
+      match(canonical_colnames(key_parts), canonical_colnames(description$column_name))]
+    if (anyNA(actual)) {
+      stop("ColumnDictionary references partition columns absent from DuckDB table ", table, ".")
+    }
+    sprintf("CAST(t.%s AS VARCHAR) = %s", vapply(actual, quote_duckdb_ident, character(1)),
+            vapply(value_parts, quote_duckdb_string, character(1)))
+  }
+  candidates[, Specific := !(PartitionKey == "*" | PartitionValue == "*")]
+  data.table::setorder(candidates, -Specific, PartitionKey, PartitionValue, Value)
+  clauses <- vapply(seq_len(nrow(candidates)), function(i) {
+    conditions <- c(value_condition(as.character(candidates$Value[i])),
+                    partition_condition(as.character(candidates$PartitionKey[i]),
+                                        as.character(candidates$PartitionValue[i])))
+    sprintf("WHEN %s THEN %s", paste(conditions, collapse = " AND "),
+            quote_duckdb_string(as.character(candidates$Label[i])))
+  }, character(1))
+  label_sql <- paste("CASE", paste(clauses, collapse = " "), "ELSE NULL END")
+  sql <- sprintf("SELECT t.*, %s AS %s FROM %s AS t", label_sql,
+                 quote_duckdb_ident(label_column[1]), quote_duckdb_ident(table))
+  if (!is.null(where) && nzchar(trimws(where[1]))) sql <- paste(sql, "WHERE", where[1])
+  if (!is.null(limit)) {
+    limit <- as.integer(limit[1])
+    if (is.na(limit) || limit < 1L) stop("limit must be NULL or a positive integer.")
+    sql <- paste(sql, "LIMIT", limit)
+  }
+  DBI::dbGetQuery(con, sql)
+}
+
 #' Search the data dictionary for variables by label, name, or value text
 #'
 #' Makes the harvested \code{Labels} sheet queryable: find every column across
@@ -7616,8 +9656,38 @@ load_label_catalog <- function(TableSchemaPath) {
 search_labels <- function(pattern, TableSchemaPath, search_in = c("label", "column", "values"),
                           ignore_case = TRUE, ParquetBasePath = NULL) {
   lab <- load_label_catalog(TableSchemaPath)
-  if (is.null(lab)) {
-    stop("No Labels dictionary found for this catalog. Run BuildRepositoryCatalog(HarvestLabels = TRUE) first.")
+  semantic <- load_column_dictionary(TableSchemaPath)
+  schema_catalog <- load_table_schema_catalog(TableSchemaPath)
+  semantic_labels <- NULL
+  if (!is.null(semantic)) {
+    semantic <- data.table::as.data.table(semantic)
+    semantic_labels <- semantic[, .(
+      VariableLabel = paste(sort(unique(VariableLabel[!is.na(VariableLabel) &
+                                                       nzchar(VariableLabel)])), collapse = " | "),
+      ValueLabels = paste(sprintf("%s = %s", Value, Label), collapse = "; "),
+      SourceFile = paste(sort(unique(EvidenceSources[!is.na(EvidenceSources) &
+                                                     nzchar(EvidenceSources)])), collapse = " | ")),
+      by = .(Database, TableName, DuckDBTable, Column)]
+  }
+  schema_labels <- NULL
+  if (!is.null(schema_catalog) &&
+      "VariableLabel" %in% names(schema_catalog$table_schema)) {
+    schema_labels <- data.table::as.data.table(schema_catalog$table_schema)[
+      !is.na(VariableLabel) & nzchar(VariableLabel),
+      .(Database, TableName, DuckDBTable, Column, VariableLabel,
+        ValueLabels = NA_character_, SourceFile = NA_character_)]
+  }
+  lab <- data.table::rbindlist(Filter(Negate(is.null),
+    list(lab, semantic_labels, schema_labels)), fill = TRUE)
+  if (nrow(lab) > 0L) {
+    lab <- lab[!duplicated(paste(Database, TableName, Column, VariableLabel,
+                                 ValueLabels, sep = "\r"))]
+  }
+  if (is.null(lab) || nrow(lab) == 0L) {
+    stop("No variable or value labels were found in this schema catalog.")
+  }
+  for (field in c("VariableLabel", "Column", "ValueLabels")) {
+    lab[is.na(get(field)), (field) := ""]
   }
   search_in <- match.arg(search_in, several.ok = TRUE)
   hit <- rep(FALSE, nrow(lab))
@@ -7685,9 +9755,14 @@ parse_value_label_codes <- function(x) {
 #' @export
 validate_against_dictionary <- function(con, TableSchemaPath, tables = NULL,
                                         min_domain = 2L, verbose = TRUE) {
-  lab <- load_label_catalog(TableSchemaPath)
+  semantic <- load_column_dictionary(TableSchemaPath)
+  lab <- if (!is.null(semantic)) {
+    data.table::as.data.table(semantic)[, .(
+      ValueLabels = paste(sprintf("%s = %s", Value, Label), collapse = "; ")),
+      by = .(Database, TableName, DuckDBTable, Column)]
+  } else load_label_catalog(TableSchemaPath)
   if (is.null(lab)) {
-    stop("No Labels dictionary found for this catalog. Run BuildRepositoryCatalog(HarvestLabels = TRUE) first.")
+    stop("No semantic or source value-label dictionary found for this catalog.")
   }
   lab <- lab[!is.na(lab$ValueLabels) & nzchar(lab$ValueLabels), ]
   if (!is.null(tables)) lab <- lab[lab$DuckDBTable %in% tables, ]
@@ -7936,7 +10011,10 @@ merge_table_schema_catalog <- function(new_schema, existing_schema = NULL) {
   existing <- data.table::as.data.table(existing_schema)
   if (nrow(existing) == 0L) return(new_schema)
   if (nrow(new_schema) == 0L) return(existing)
-  for (nm in setdiff(names(existing), names(new_schema))) new_schema[, (nm) := NA]
+  for (nm in setdiff(names(existing), names(new_schema))) {
+    typed_na <- existing[[nm]][NA_integer_]
+    new_schema[, (nm) := rep(typed_na, .N)]
+  }
   if (!"Source" %in% names(existing)) existing[, Source := NA_character_]
   key_of <- function(x) paste(x$Database, x$TableName, x$Column, sep = "||")
   curated <- existing[tolower(as.character(Source)) %in% c("manual", "user_approved")]
@@ -7947,6 +10025,22 @@ merge_table_schema_catalog <- function(new_schema, existing_schema = NULL) {
       preserve <- setdiff(intersect(names(new_schema), names(curated)),
                           c("Database", "TableName", "DuckDBTable", "Column", "InferredType"))
       for (nm in preserve) data.table::set(new_schema, i = hit, j = nm, value = curated[[nm]][idx[hit]])
+    }
+  }
+  descriptive_fields <- intersect(
+    c("DistinctValueCount", "ObservedValues", "ValueProfileStatus",
+      "ValuesChangeAcrossPartitions"), names(existing))
+  if (length(descriptive_fields) > 0L) {
+    idx <- match(key_of(new_schema), key_of(existing))
+    hit <- which(!is.na(idx))
+    for (field in descriptive_fields) {
+      empty <- is.na(new_schema[[field]]) |
+        (is.character(new_schema[[field]]) & !nzchar(trimws(new_schema[[field]])))
+      fill <- intersect(hit, which(empty))
+      if (length(fill) > 0L) {
+        data.table::set(new_schema, i = fill, j = field,
+                        value = existing[[field]][idx[fill]])
+      }
     }
   }
   refreshed_tables <- unique(paste(new_schema$Database, new_schema$TableName, sep = "||"))
@@ -8004,7 +10098,9 @@ BuildRepositorySchema <- function(MDTSelect, MasterDBPath, Database = NULL, n_wo
     physical_table <- physical_tables[1]
     reader_tbl <- as.character(rows_tbl$FileTypeLower)
     reader_opts <- lapply(seq_len(nrow(rows_tbl)), function(i) reader_options_for_row(rows_tbl[i, ]))
-    full_paths <- file.path(MasterDBPath, rows_tbl$MDBDir, rows_tbl$Path)
+    full_paths <- vapply(seq_len(nrow(rows_tbl)), function(i) {
+      source_path_for_row(rows_tbl[i, , drop = FALSE], MasterDBPath)
+    }, character(1))
     missing_mask <- !file.exists(full_paths)
     if (any(missing_mask)) {
       log_msg(sprintf("[SCHEMA WARNING] %s/%s: %d source file(s) missing on disk (first: %s) -- excluded from schema inference; they will fail individually at load time.",
@@ -8305,33 +10401,14 @@ generic_db_loader <- function(files, base_path, db_prefix, completed_checkpoint,
     row_meta <- pending_meta[a,]
     source_path <- row_meta$Path[1]
     repository_key <- row_meta$RepositoryKey[1]
-    table_name <- NULL; year_val <- NULL; year_dir <- NULL; pspec <- NULL
+    table_name <- NULL; table_dir <- NULL; year_val <- NULL; year_dir <- NULL; pspec <- NULL
     suffix <- NULL; table_col_classes <- NULL; completion_status <- NULL
+    loaded_partitions <- NULL
     full_source_path <- source_path_for_row(row_meta, base_path)
     source_meta <- source_fingerprint(full_source_path, mode = SourceFingerprintMode)
     if(PrintStatus){ print(paste("Working on", source_path)) }
     Comp <- FALSE
     empty_ok <- FALSE
-     
-    # Pre-process: Check for and split CSV files by partition spec
-    if (tolower(tools::file_ext(source_path)) == "csv" && file.exists(full_source_path)) {
-      tryCatch({
-        # Get partition spec from MDT row
-        pspec <- partition_spec_for_row(row_meta)
-        split_result <- split_csv_by_partition(full_source_path, 
-                                               partition_keys = pspec$keys,
-                                               partition_values = pspec$values,
-                                               LogPath = LogPath)
-        if (!is.null(split_result) && nrow(split_result) > 0L) {
-          log_msg(sprintf("[SPLIT RESULT] %s was split into %d partition-specific file(s)", 
-                         basename(source_path), nrow(split_result)),
-                  log_path = LogPath)
-        }
-      }, error = function(e) {
-        log_msg(sprintf("[SPLIT WARNING] Could not pre-process %s: %s", source_path, conditionMessage(e)),
-                log_path = LogPath)
-      })
-    }
      
     tryCatch({
       suffix <- row_meta$TableName[1]
@@ -8339,18 +10416,16 @@ generic_db_loader <- function(files, base_path, db_prefix, completed_checkpoint,
       pspec <- partition_spec_for_row(row_meta)
       year_val <- if ("YEAR" %in% pspec$keys) {
         pspec$values[match("YEAR", pspec$keys)]
-      } else if ("Year" %in% names(row_meta)) {
-        row_meta$Year[1]
       } else { NA }
       table_name <- repository_table_name_for_row(row_meta)
+      table_dir <- file.path(ParquetBasePath, table_name)
       reader_file <- tolower(row_meta$FileType[1])
       table_col_classes <- if (is.list(col_classes) && !is.null(col_classes[[suffix]])) col_classes[[suffix]] else col_classes
       if (!isTRUE(registry_resolved)) {
         if (is.null(schema_registry)) schema_registry <- load_schema_registry(SchemaRegistryPath, create_if_missing = FALSE)
         table_col_classes <- apply_schema_registry(table_col_classes, schema_registry, database = db_prefix, table_name = suffix)
       }
-      year_dir <- file.path(ParquetBasePath, table_name, pspec$dir)
-      dir.create(year_dir, recursive = TRUE, showWarnings = FALSE)
+      year_dir <- file.path(table_dir, pspec$dir)
       safe_stem <- parquet_output_stem(source_path, partition_dir = year_dir,
                                        MaxFileStemTruncate = MaxFileStemTruncate)
       out_path <- file.path(year_dir, paste0(safe_stem, ".parquet"))
@@ -8359,7 +10434,8 @@ generic_db_loader <- function(files, base_path, db_prefix, completed_checkpoint,
       touch_repository_lock(RepositoryLock)
       accept_partial <- "AcceptPartial" %in% names(row_meta) &&
         isTRUE(suppressWarnings(as.logical(row_meta$AcceptPartial[1])))
-      df <- read_fn(path = source_path, year_dir = year_dir, out_path = out_path, PrintStatus = PrintStatus,
+      df <- read_fn(path = source_path, year_dir = year_dir, table_dir = table_dir,
+                    out_path = out_path, PrintStatus = PrintStatus,
                     all_cols = all_cols_v, col_classes = table_col_classes, year_val = year_val, TerminalHivePartition = TerminalHivePartition,
                     MDTSelect = row_meta, MasterDBPath = base_path, reader = reader_file, PartitionBy = PartitionBy,
                     SAV_ROW_THRESHOLD = SAV_ROW_THRESHOLD, RAMThreshold = RAMThreshold, SAV_CHUNK_SIZE = SAV_CHUNK_SIZE,
@@ -8375,8 +10451,15 @@ generic_db_loader <- function(files, base_path, db_prefix, completed_checkpoint,
       gc(verbose = FALSE)
       if (is.list(df) && isTRUE(df$written)) {
         if (identical(df$n_rows, 0L)) empty_ok <- TRUE
+        if (!is.null(df$partitions) && nrow(df$partitions) > 0L) loaded_partitions <- df$partitions
         completion_status <- as.character(df$status %||% if (empty_ok) "empty" else "completed")
-        log_msg(sprintf("[OK] %d/%d  %s -> %s (%s, %d rows)", a, nrow(pending_meta), source_path, table_name, pspec$dir, df$n_rows))
+        partition_label <- if (!is.null(loaded_partitions) && nrow(loaded_partitions) > 1L) {
+          sprintf("%d source-defined partitions: %s", nrow(loaded_partitions),
+                  paste(loaded_partitions$PartitionValue, collapse = ", "))
+        } else if (!is.null(loaded_partitions) && nrow(loaded_partitions) == 1L) {
+          loaded_partitions$PartitionValue[1]
+        } else pspec$dir
+        log_msg(sprintf("[OK] %d/%d  %s -> %s (%s, %d rows)", a, nrow(pending_meta), source_path, table_name, partition_label, df$n_rows))
       } else {
         if (is.list(df) && !is.null(df$data) && isFALSE(df$written)) {
           pre_aligned <- isTRUE(df$pre_aligned)
@@ -8385,7 +10468,7 @@ generic_db_loader <- function(files, base_path, db_prefix, completed_checkpoint,
           pre_aligned <- FALSE
         }
         if (!is.data.frame(df) || nrow(df) == 0) {
-          full_source_path <- file.path(base_path, row_meta$MDBDir[1], source_path)
+          full_source_path <- source_path_for_row(row_meta, base_path)
           if (is.data.frame(df) && verify_source_empty(
               full_source_path, reader_file, reader_options_for_row(row_meta))) {
             log_msg(sprintf("[WARN] %d/%d  %s: source file verified empty (0 rows) -- recording as complete", a, nrow(pending_meta), source_path))
@@ -8397,7 +10480,6 @@ generic_db_loader <- function(files, base_path, db_prefix, completed_checkpoint,
         }
         if(PrintStatus){ print("Performing Column type alignment") }
         if (!pre_aligned) {
-          if ("YEAR" %in% pspec$keys) df <- add_year_if_missing(df, year_val)
           df <- align_columns(df, all_cols_v, table_col_classes, max_coerce_na_pct = MaxCoerceNAPct)
         }
         if(PrintStatus){ print("Writing complete parquet file") }
@@ -8417,7 +10499,7 @@ generic_db_loader <- function(files, base_path, db_prefix, completed_checkpoint,
                                 SourceSize = source_meta$size, SourceMTimeUTC = source_meta$mtime_utc,
                                 SourceSHA256 = source_meta$sha256, SourceFingerprint = source_meta$fingerprint)
         rm(df); gc(verbose = FALSE)
-        log_msg(sprintf("[OK] %d/%d  %s -> %s (year=%s)", a, nrow(pending_meta), source_path, table_name, year_val))
+        log_msg(sprintf("[OK] %d/%d  %s -> %s (%s)", a, nrow(pending_meta), source_path, table_name, pspec$dir))
         completion_status <- "completed"
       }
       Comp <- TRUE
@@ -8434,6 +10516,11 @@ generic_db_loader <- function(files, base_path, db_prefix, completed_checkpoint,
         DuckDBTable = as.character(table_name %||% repository_table_name_for_row(row_meta)),
         SourcePath = as.character(source_path), RepositoryKey = as.character(repository_key),
         Message = if (identical(conditionMessage(e), "__SKIP__")) "Reader returned zero rows or failed." else conditionMessage(e))
+      removed_dirs <- .prune_empty_output_directories(table_dir)
+      if (removed_dirs > 0L) {
+        log_msg(sprintf("[CLEANUP] Removed %d empty output director%s after failure of %s.",
+                        removed_dirs, ifelse(removed_dirs == 1L, "y", "ies"), basename(source_path)))
+      }
       Comp <<- FALSE
     })
     print(paste("Comp is:", Comp))
@@ -8444,17 +10531,31 @@ generic_db_loader <- function(files, base_path, db_prefix, completed_checkpoint,
                               empty = "verified_empty_source",
                               partial_accepted = "checkpoint_complete_partial_accepted",
                               "checkpoint_complete")
-        update_parquet_manifest(ManifestPath = ManifestPath, Database = db_prefix, TableName = suffix,
-                                DuckDBTable = table_name, Year = year_val, SourcePath = source_path,
-                                ParquetPath = year_dir,
-                                NRows = if (isTRUE(empty_ok)) 0 else NA_real_,
-                                SchemaHash = schema_hash_from_classes(table_col_classes),
-                                Status = final_status, Notes = final_notes,
-                                PartitionKey = if (!is.null(pspec)) pspec$keys else NA_character_,
-                                PartitionValue = if (!is.null(pspec)) pspec$values else NA_character_,
-                                RunId = RunId, RepositoryKey = repository_key,
-                                SourceSize = source_meta$size, SourceMTimeUTC = source_meta$mtime_utc,
-                                SourceSHA256 = source_meta$sha256, SourceFingerprint = source_meta$fingerprint)
+        final_partitions <- if (!is.null(loaded_partitions) && nrow(loaded_partitions) > 0L) {
+          loaded_partitions
+        } else {
+          data.table::data.table(
+            PartitionKey = paste(if (!is.null(pspec)) pspec$keys else NA_character_, collapse = ";"),
+            PartitionValue = paste(if (!is.null(pspec)) pspec$values else NA_character_, collapse = ";"),
+            Year = as.character(year_val), Directory = year_dir)
+        }
+        for (manifest_i in seq_len(nrow(final_partitions))) {
+          update_parquet_manifest(ManifestPath = ManifestPath, Database = db_prefix, TableName = suffix,
+                                  DuckDBTable = table_name, Year = final_partitions$Year[manifest_i],
+                                  SourcePath = source_path,
+                                  ParquetPath = final_partitions$Directory[manifest_i],
+                                  NRows = if (isTRUE(empty_ok)) 0 else NA_real_,
+                                  SchemaHash = schema_hash_from_classes(table_col_classes),
+                                  Status = final_status, Notes = final_notes,
+                                  PartitionKey = final_partitions$PartitionKey[manifest_i],
+                                  PartitionValue = final_partitions$PartitionValue[manifest_i],
+                                  RunId = RunId, RepositoryKey = repository_key,
+                                  SourceSize = source_meta$size, SourceMTimeUTC = source_meta$mtime_utc,
+                                  SourceSHA256 = source_meta$sha256, SourceFingerprint = source_meta$fingerprint)
+        }
+        update_manifest_source_provenance(
+          ManifestPath = ManifestPath, Database = db_prefix, TableName = suffix,
+          SourcePath = source_path, row_meta = row_meta)
       }
       repository_base <- sub("\\|\\|SOURCE=.*$", "", repository_key)
       completed_base <- sub("\\|\\|SOURCE=.*$", "", completed_checkpoint)
@@ -8517,6 +10618,20 @@ print.RepositoryRunResult <- function(x, ...) {
 #' @param MaxTempAgeHours Integer. Minimum age (in hours) before a temporary
 #'   file is considered safe to remove. Default 1 (files < 1 hour old are
 #'   preserved to avoid interfering with active writes).
+#' @param ExportMetadataWorkbook Logical or NULL. When NULL (default), creates
+#'   an accessible Excel snapshot for DuckDB manifests and skips legacy CSV
+#'   manifests. Set TRUE or FALSE explicitly to override this behavior.
+#' @param MetadataWorkbookPath Destination for the generated metadata workbook.
+#'   Defaults to \code{RepositoryMetadata.xlsx} beside the manifest.
+#' @param MetadataWorkbookMaxRowsPerSheet Maximum raw manifest rows written to
+#'   each numbered detail sheet.
+#' @param DownloadCachePath Managed local cache for rows with \code{SourceURI}.
+#' @param MaterializeRemote Materialize unresolved remote rows before loading.
+#' @param RemoteOffline Disable network access and require cached remote files.
+#' @param RemoteDefaultDownloadPolicy Default policy for blank MDT policy cells.
+#' @param RemoteDownloadMethod Method passed to \code{utils::download.file()}.
+#' @param RemoteDownloadTimeout Minimum remote download timeout in seconds.
+#' @param RemoteDownloadFunction Optional caller-managed download function.
 #'
 #' @export
 ParquetBackEndCreate <- function(MDT, DBLoad, MasterDBPath, completed_checkpoint, CheckpointPath, ParquetBasePath, SAV_ROW_THRESHOLD = 1000000L,
@@ -8534,10 +10649,18 @@ ParquetBackEndCreate <- function(MDT, DBLoad, MasterDBPath, completed_checkpoint
                                  SourceFingerprintMode = c("metadata", "sha256", "none"),
                                  AutoCleanup = TRUE, CleanupAfterPhase = c("all", "database", "none"),
                                  MaxTempAgeHours = 1L,
-                                 ReturnRunResult = FALSE, RunId = NULL, RunSummaryPath = NULL) {
+                                 ReturnRunResult = FALSE, RunId = NULL, RunSummaryPath = NULL,
+                                 ExportMetadataWorkbook = NULL, MetadataWorkbookPath = NULL,
+                                 MetadataWorkbookMaxRowsPerSheet = 200000L,
+                                 DownloadCachePath = NULL, MaterializeRemote = TRUE,
+                                 RemoteOffline = FALSE,
+                                 RemoteDefaultDownloadPolicy = c("if_missing", "if_changed", "always", "manual"),
+                                 RemoteDownloadMethod = "auto", RemoteDownloadTimeout = 600,
+                                 RemoteDownloadFunction = NULL) {
   PartitionBy <- match.arg(PartitionBy, c("NRows", "RAMEstimate", "FAIL"))
   SourceFingerprintMode <- match.arg(SourceFingerprintMode)
   CleanupAfterPhase <- match.arg(CleanupAfterPhase, c("all", "database", "none"))
+  RemoteDefaultDownloadPolicy <- match.arg(RemoteDefaultDownloadPolicy)
   previous_run <- begin_repository_run(LogPath = LogPath, RunId = RunId)
   on.exit(restore_repository_run(previous_run), add = TRUE)
   RunId <- resolve_run_id()
@@ -8545,9 +10668,48 @@ ParquetBackEndCreate <- function(MDT, DBLoad, MasterDBPath, completed_checkpoint
   coercion_report_reset()
   log_msg(sprintf("Parallel workers available: %d (scoped per scan)", n_workers), log_path = LogPath)
   if (is.null(ManifestPath)) ManifestPath <- manifest_path_default(ParquetBasePath)
+  if (is.null(ExportMetadataWorkbook)) ExportMetadataWorkbook <- manifest_is_duckdb(ManifestPath)
+  if (is.null(MetadataWorkbookPath)) MetadataWorkbookPath <- metadata_workbook_path_default(ManifestPath)
   if (is.null(TableSchemaPath)) TableSchemaPath <- file.path(dirname(ParquetBasePath), "Schema", "TableSchemas.xlsx")
   if (is.null(RunSummaryPath)) {
     RunSummaryPath <- file.path(dirname(ManifestPath), "RunSummaries", paste0("run_", RunId, ".json"))
+  }
+  if (isTRUE(RunPreflight)) {
+    ValidateMDTPreflight(MDT, strict = StrictPreflight, logStatus = TRUE,
+                         ParquetBasePath = ParquetBasePath,
+                         MaxFileStemTruncate = MaxFileStemTruncate,
+                         TerminalHivePartition = TerminalHivePartition,
+                         MasterDBPath = MasterDBPath)
+  } else {
+    log_msg("[PREFLIGHT] Skipped inside loader (RunPreflight = FALSE) -- caller is responsible for having run ValidateMDTPreflight.", log_path = LogPath)
+  }
+  remote_rows <- "SourceURI" %in% names(MDT) &
+    !is.na(MDT$SourceURI) & nzchar(trimws(as.character(MDT$SourceURI)))
+  if (any(remote_rows)) {
+    if (is.null(DownloadCachePath)) {
+      DownloadCachePath <- file.path(dirname(ParquetBasePath), "SourceCache")
+    }
+    if (isTRUE(MaterializeRemote)) {
+      MDT <- MaterializeRemoteSources(
+        MDT = MDT, DownloadCachePath = DownloadCachePath,
+        Offline = RemoteOffline,
+        DefaultDownloadPolicy = RemoteDefaultDownloadPolicy,
+        DownloadMethod = RemoteDownloadMethod,
+        TimeoutSeconds = RemoteDownloadTimeout,
+        Strict = TRUE, DownloadFunction = RemoteDownloadFunction,
+        LogPath = LogPath, RunId = RunId)
+    } else {
+      unresolved <- if (!"ResolvedSourcePath" %in% names(MDT)) {
+        rep(TRUE, nrow(MDT))
+      } else {
+        resolved <- as.character(MDT$ResolvedSourcePath)
+        is.na(resolved) | !nzchar(trimws(resolved)) | !file.exists(resolved)
+      }
+      unresolved <- remote_rows & unresolved
+      if (any(unresolved)) {
+        stop("MaterializeRemote=FALSE but one or more SourceURI rows have no readable ResolvedSourcePath. Run MaterializeRemoteSources() first.")
+      }
+    }
   }
   coercion_path <- file.path(dirname(ManifestPath), "CoercionReport.csv")
   coercion_written <- FALSE
@@ -8576,15 +10738,6 @@ ParquetBackEndCreate <- function(MDT, DBLoad, MasterDBPath, completed_checkpoint
     snapshot_repository_state(CheckpointPath = CheckpointPath, ManifestPath = ManifestPath,
                               TableSchemaPath = TableSchemaPath, SchemaRegistryPath = SchemaRegistryPath,
                               BackupDir = StateBackupDir, keep_last = SnapshotKeep)
-  }
-  if (isTRUE(RunPreflight)) {
-    ValidateMDTPreflight(MDT, strict = StrictPreflight, logStatus = TRUE,
-                         ParquetBasePath = ParquetBasePath,
-                         MaxFileStemTruncate = MaxFileStemTruncate,
-                         TerminalHivePartition = TerminalHivePartition,
-                         MasterDBPath = MasterDBPath)
-  } else {
-    log_msg("[PREFLIGHT] Skipped inside loader (RunPreflight = FALSE) -- caller is responsible for having run ValidateMDTPreflight.", log_path = LogPath)
   }
   schema_registry <- load_schema_registry(SchemaRegistryPath, create_if_missing = TRUE)
   catalog <- if (isTRUE(UseSchemaCatalog)) load_table_schema_catalog(TableSchemaPath, strict = TRUE) else NULL
@@ -8688,8 +10841,28 @@ ParquetBackEndCreate <- function(MDT, DBLoad, MasterDBPath, completed_checkpoint
     checkpoint = unique(completed_checkpoint), completed = completed_dt,
     file_failures = source_failures, database_failures = db_failures,
     ManifestPath = ManifestPath, TableSchemaPath = TableSchemaPath,
-    CheckpointPath = CheckpointPath, LogPath = LogPath
+    CheckpointPath = CheckpointPath, LogPath = LogPath,
+    MetadataWorkbookPath = if (isTRUE(ExportMetadataWorkbook)) MetadataWorkbookPath else NA_character_,
+    MetadataWorkbookExportError = NA_character_
   ), class = "RepositoryRunResult")
+  if (isTRUE(ExportMetadataWorkbook)) {
+    export_error <- tryCatch({
+      ExportRepositoryMetadata(
+        ManifestPath = ManifestPath,
+        OutputPath = MetadataWorkbookPath,
+        MaxRowsPerSheet = MetadataWorkbookMaxRowsPerSheet,
+        IncludeDetails = TRUE,
+        LogPath = LogPath,
+        RunId = RunId)
+      NULL
+    }, error = function(e) e)
+    if (!is.null(export_error)) {
+      run_result$MetadataWorkbookPath <- NA_character_
+      run_result$MetadataWorkbookExportError <- conditionMessage(export_error)
+      log_msg(sprintf("[METADATA EXPORT WARNING] Repository load is intact, but the Excel snapshot could not be refreshed: %s",
+                      conditionMessage(export_error)), log_path = LogPath)
+    }
+  }
   write_repository_run_summary(run_result, RunSummaryPath)
   if (nrow(db_failures) > 0L) {
     summary <- paste(sprintf("%s: %s", db_failures$Database, db_failures$Message), collapse = " | ")

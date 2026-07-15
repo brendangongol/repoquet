@@ -130,6 +130,45 @@ test_that("DuckDB manifests are transactional and retain large row counts", {
   expect_true(all(c("RunId", "SourceFingerprint", "ManifestSchemaVersion") %in% names(manifest)))
 })
 
+test_that("repository metadata exports a complete paginated Excel snapshot", {
+  skip_if_not_installed("duckdb")
+  root <- tempfile("metadata_export_"); dir.create(root)
+  on.exit(unlink(root, recursive = TRUE), add = TRUE)
+  manifest_path <- file.path(root, "RepositoryMetadata.duckdb")
+  workbook_path <- file.path(root, "RepositoryMetadata.xlsx")
+  update_parquet_manifest(
+    manifest_path, "D", "T", "D_T", 2024, "001.csv", "year=2024/a.parquet",
+    NRows = 3000000000, Status = "written", PartitionKey = "YEAR",
+    PartitionValue = "2024", RunId = "run_1")
+  update_parquet_manifest(
+    manifest_path, "D", "T", "D_T", 2025, "002.csv", "year=2025/b.parquet",
+    NRows = 10, Status = "written", PartitionKey = "YEAR",
+    PartitionValue = "2025", RunId = "run_2")
+  update_parquet_manifest(
+    manifest_path, "D", "T", "D_T", 2026, "003.csv", "year=2026",
+    NRows = 5, Status = "partial_accepted", PartitionKey = "YEAR",
+    PartitionValue = "2026", RunId = "run_2")
+
+  exported <- ExportRepositoryMetadata(
+    manifest_path, workbook_path, MaxRowsPerSheet = 2L)
+  expect_true(file.exists(workbook_path))
+  expect_identical(exported$manifest_rows, 3L)
+  expect_identical(exported$detail_sheets, 2L)
+  sheets <- openxlsx::getSheetNames(workbook_path)
+  expect_true(all(c("StartHere", "Tables", "Runs", "Issues", "ColumnGuide",
+                    "Manifest_001", "Manifest_002") %in% sheets))
+  detail <- data.table::rbindlist(list(
+    openxlsx::read.xlsx(workbook_path, sheet = "Manifest_001"),
+    openxlsx::read.xlsx(workbook_path, sheet = "Manifest_002")), fill = TRUE)
+  expect_identical(nrow(detail), 3L)
+  expect_equal(max(detail$NRows, na.rm = TRUE), 3000000000)
+  expect_true("001.csv" %in% detail$SourcePath)
+  issues <- openxlsx::read.xlsx(workbook_path, sheet = "Issues")
+  expect_identical(issues$Status, "partial_accepted")
+  start <- openxlsx::read.xlsx(workbook_path, sheet = "StartHere", startRow = 4)
+  expect_true(any(grepl("authoritative", start$Value, ignore.case = TRUE)))
+})
+
 test_that("data contracts report and stop on content violations", {
   skip_if_not_installed("duckdb")
   con <- DBI::dbConnect(duckdb::duckdb()); on.exit(DBI::dbDisconnect(con, shutdown = TRUE))

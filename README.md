@@ -10,28 +10,28 @@ workflow rather than separate scripts. The loader supports SPSS, Stata, SAS,
 transport, delimited, Parquet, and RDS sources and exposes validated tables
 through DuckDB.
 
-`repoquet` provides a schema-aware, memory-bounded workflow for building large
-analytic databases from heterogeneous source files (including SPSS/SAV and CSV)
-into hive-partitioned Parquet with DuckDB-ready access. It is designed for
-out-of-memory operation on local machines, with chunked ingestion,
-deterministic column normalization, cross-release schema/class alignment,
-resumable checkpointed loading, and fast consolidation for downstream querying.
-In practice, this reduces RAM pressure and storage footprint, improves query
-performance, and enables reliable multi-year table unification without
-requiring the full dataset to be loaded into memory at once.
+repoquet's distinctive capability is the end-to-end creation of analysis-ready
+Parquet repositories from heterogeneous source files that may exceed available
+RAM. It processes supported SAV and delimited files in memory-bounded chunks,
+preserves source dictionary metadata, reconciles type drift across chunks and
+table releases, and writes consistent Hive-partitioned schemas with resumable
+checkpoints and validation. The resulting DuckDB-ready backend reduces storage
+and memory pressure, accelerates filtering, aggregation, joins, and
+cross-release analysis, and remains accessible from both R and Python without
+loading the complete repository into memory.
 
 
 ## Why R for database generation?
 
 repoquet uses R because its vectorized data model and explicit coercion behavior
-make schema enforcement easier to apply consistently during ingestion. In this
-pipeline, column classes are validated and aligned before write, so type drift
-is surfaced early instead of silently propagating into Parquet files. While
-Python ecosystems can also enforce strict schemas, many common ingestion
-patterns are permissive by default, which can allow mixed or inconsistent types
-to slip through unless additional validation is added. By producing a strongly
-typed Parquet backend at build time, repoquet creates datasets that are
-reliable for both R and Python downstream users.
+make schema enforcement easier to apply consistently during ingestion. The
+pipeline validates and aligns column types before writing, so type drift is
+surfaced early instead of propagating across Parquet files and partitions.
+Although Python ecosystems can also enforce strict schemas, many common
+ingestion patterns are permissive by default and require additional validation
+to prevent mixed or inconsistent types. By enforcing a strongly typed Parquet
+schema at build time, repoquet produces language-neutral datasets that can be
+used reliably from R, Python, DuckDB, Arrow, and other compatible tools.
 
 
 ## Install
@@ -70,8 +70,28 @@ The scaffold creates:
 - `DBSetup.xlsx`: one source file per row
 - `formatted/Schema/SchemaRegistry.xlsx`: canonical type policies
 - `formatted/Schema/DataContracts.xlsx`: content validation rules
+- `formatted/SourceCache`: managed local copies of optional remote sources
 - `formatted/Manifest/RepositoryMetadata.duckdb`: transactional manifest
+- `formatted/Manifest/RepositoryMetadata.xlsx`: accessible, read-only metadata snapshot
 - `run_repository.R`: validation, catalog, loading, DuckDB, and audit workflow
+
+Configuration files provide durable machine defaults, but every setting can be
+changed for one run without editing the file. Explicit arguments have the
+highest precedence; a named `overrides` list is useful when settings are built
+programmatically:
+
+```r
+cfg <- load_repository_config(
+  "repository_config.R",
+  n_workers = 1L,
+  PartitionBy = "RAMEstimate",
+  overrides = list(RAMThreshold = 16, DuckDB_GB = "6GB")
+)
+```
+
+Precedence is: package defaults, configuration file, `overrides`, then explicit
+arguments. Runtime overrides change only the returned list and never modify
+`repository_config.R`.
 
 The command-line equivalent is:
 
@@ -85,11 +105,12 @@ Rscript inst/scripts/repoquet.R audit ~/my_repository
 
 ## DBSetup Workbook
 
-Required columns are `Database`, `MDBDir`, `Path`, `TableName`, and `FileType`.
-Use `PartitionKey` and `PartitionValue` to define Hive partitions. A physical
-`Year` column is not required: `PartitionKey = "year"` and
-`PartitionValue = "2024"` creates `year=2024` and DuckDB exposes `YEAR` from
-the directory.
+Required columns are `Database`, `MDBDir`, `Path`, `TableName`, `FileType`,
+`PartitionKey`, and `PartitionValue`. The two partition fields are the sole
+partition metadata and must be populated on every row. For example,
+`PartitionKey = "year"` and `PartitionValue = "2024"` creates `year=2024`,
+and DuckDB exposes `YEAR` from the directory. A legacy workbook `Year` column
+is neither required nor used as a fallback.
 
 Optional general-purpose columns include:
 
@@ -101,14 +122,36 @@ Optional general-purpose columns include:
   explicitly verified unquoted continuation line
 - `ReaderOptions`: a JSON object passed to the selected reader
 - `AcceptPartial`: explicit acceptance of a verified truncated SAV source
+- `SourceURI`: optional direct HTTP/HTTPS file or API download URL
+- `DownloadPolicy`: `if_missing` (default), `if_changed`, `always`, or `manual`
+- `ExpectedSHA256`: optional 64-character hash used to verify downloaded bytes
+- `ArchiveType` and `ArchiveMember`: an explicit ZIP member to extract into the
+  managed cache without changing the downloaded archive
 
 Nested partitions use matching semicolon-separated values, for example
 `PartitionKey = "SITE;YEAR"`, `PartitionValue = "MGH;2024"`, and
 `PartitionType = "character;integer"`.
 
-`ValidateMDTPreflight()` checks paths, partition definitions, physical table
-identity, output filename collisions, reader options, and custom file types
-before any Parquet is written.
+`ValidateMDTPreflight()` checks partition definitions, physical table identity,
+output filename collisions, reader options, custom file types, and remote-source
+metadata before any Parquet is written.
+
+`SourceURI` is for a direct downloadable object or supported ZIP archive, not a
+page that must be scraped. `Path` remains required and supplies the stable logical filename and
+extension used by the reader. Before schema discovery,
+`MaterializeRemoteSources()` atomically copies remote bytes into
+`formatted/SourceCache`; the rest of the pipeline reads that local managed copy
+with the same direct or chunked readers used for local data. Original sources
+and `DBSetup.xlsx` are never changed. `if_changed` downloads to a temporary
+`.part` file, compares SHA-256, and replaces the cache only when content differs.
+`manual` and `Offline = TRUE` require an existing cache entry. Do not place
+passwords or tokens in the workbook; pass a caller-managed `DownloadFunction`
+when authentication is required.
+
+ZIP extraction is opt-in and deterministic: `ArchiveMember` must name one safe
+relative member, and both the archive download and extracted file are replaced
+atomically. Headerless delimited data can declare `Header` and `ColumnNames` in
+`ReaderOptions`; a small multi-section lookup file can declare `SectionHeader`.
 
 Delimited sources are strict by default. If a vendor file contains a verified
 one-field line that continues the preceding record, configure that source row
@@ -125,35 +168,168 @@ Parquet chunks; repoquet does not create a cleaned CSV or overwrite the source.
 
 It is an example inventory rather than a required package configuration.
 
-## Canonical Workflow (Minimal + Production)
+## Minimal Runnable Example
 
-repoquet follows one canonical 7-step sequence in both the minimal example
-below and the expanded production reference script at
-`inst/examples/healthcare/CECORC_loader_reference.R`.
+`generate_example_repository()` creates a complete synthetic project containing
+year-partitioned CSV data, site-partitioned CSV data, a labeled Stata source,
+`DBSetup.xlsx`, `repository_config.R`, and the normal repository directory
+structure. It does not read or modify any user source files.
 
-## Minimal Workflow
-
-For a zero-setup dry run, first generate the built-in dummy repository:
+Run this from the root of the cloned repository during development:
 
 ```r
-## 1) Initialize paths and a run identifier for audit-traceable logging
+source("R/repoquet.R")
+
+example <- generate_example_repository("~/repoquet_example")
+cfg <- load_repository_config(example$ConfigPath)
+paths <- RepositoryInitialize(cfg$FormattedDBPath, profile = "generic")
+
+example
+```
+
+The returned `example` list identifies the generated configuration, inventory,
+runner, schema, manifest, log, checkpoint, and Parquet paths. Continue with the
+seven stages below to survey the synthetic sources, review the recommended
+schema, load Parquet, register DuckDB views, and audit the finished repository.
+Schema decisions remain an intentional human review step.
+
+### Public Real-World Examples
+
+`generate_real_world_repository()` writes a runnable `DBSetup.xlsx` containing
+curated official sources without downloading them by default. Profiles include
+the complete 26-table MIMIC-III demo, all public NHANES demographic cycles from
+1999-2000 through 2021-2023, two UCI healthcare datasets (including the diabetes
+lookup sections), and current ClinVar summaries useful for atherosclerosis and
+cerebral cavernous malformation discovery.
+
+```r
+public_example <- generate_real_world_repository(
+  "~/repoquet_public_example",
+  profile = "quick",
+  Download = FALSE
+)
+
+# Review DBSetup.xlsx, then materialize its declared sources:
+MDT <- openxlsx::read.xlsx(public_example$MDTPath, sheet = "Sheet1")
+MDT <- MaterializeRemoteSources(MDT, public_example$DownloadCachePath)
+```
+
+Use `profile = "all"` to inventory every curated source. This opts into the
+large MIMIC CHARTEVENTS table and weekly ClinVar variant summary; users should
+review source licenses, citations, download size, and NHANES survey-design
+requirements before analysis. The synthetic generator remains the recommended
+offline smoke test.
+
+`inst/extdata/DBSetupV2WithInternetDownload.xlsx` is the expanded healthcare
+example: its operational `Sheet1` preserves all 483 rows from the current HCUP
+inventory and appends all 45 curated internet rows. `SourceCatalog` summarizes
+scope, licensing, and citations; `ClinVarTopics` provides broad, reviewable
+atherosclerosis and CCM discovery filters without duplicating the weekly
+ClinVar source table.
+
+## Canonical Workflow
+
+repoquet follows one seven-step sequence in both the complete generic example
+below and the domain-specific production reference script at
+`inst/examples/healthcare/CECORC_loader_reference.R`.
+
+The two workflows share the same operational contract:
+
+| Stage | Capability | What makes it useful |
+|---|---|---|
+| 1. Initialize | Configuration, repository paths, and one `RunId` | Every log, validation, manifest, and audit event is traceable to one execution |
+| 2. Validate | Inventory, source, reader, partition, naming, and collision checks | Invalid work is rejected before any repository data is written |
+| 3. Survey | Reader-consistent schema and label evidence in Parquet | Recommendations come from the actual sources without rewriting them or loading the entire repository into Excel |
+| 4. Finalize | Human review of ambiguous types, compatibility, and dictionaries | Safe coercions are automated while potentially lossy decisions remain under user control |
+| 5. Load | Reviewed schemas, generalized Hive partitions, chunking, fingerprints, checkpoints, and transactional metadata | Heterogeneous and larger-than-memory sources become resumable, refresh-aware Parquet tables |
+| 6. Register | Strictly validated DuckDB views and declarative data contracts | Cross-table querying fails early on incompatible schemas or violated content rules |
+| 7. Reconcile | Non-destructive comparison of inventory, checkpoint, manifest, Parquet, and DuckDB | Repository drift is visible and repairable instead of silently accumulating |
+
+The generic example derives all behavior from synthetic data and an empty
+policy profile. The healthcare reference follows the same stages but supplies
+HCUP source paths, the opt-in `hcup` policy profile, domain-specific resource
+tuning, data dictionaries, and survey-weighted analysis examples.
+
+## Complete Workflow Example
+
+This example uses the built-in synthetic repository, but exercises the same
+schema review, Parquet loading, DuckDB registration, and reconciliation path as
+a production repository. During active development, source the implementation
+from the cloned repository; replace that line with `library(repoquet)` after
+installing a released package.
+
+### 1. Initialize The Run
+
+`generate_example_repository()` creates representative source files and a
+configured project without requiring external data. `RepositoryInitialize()`
+creates and returns every repository path. `new_repository_run_id()` must be
+called once per execution and the resulting `RunId` passed through the workflow
+so log, manifest, validation, and audit records can be traced to the same run.
+
+```r
+source("R/repoquet.R")
+
 example <- generate_example_repository("~/my_repository_example")
 cfg <- load_repository_config(example$ConfigPath)
 paths <- RepositoryInitialize(cfg$FormattedDBPath, profile = "generic")
 RunId <- new_repository_run_id()
 MDT <- openxlsx::read.xlsx(cfg$MDTPath, sheet = "Sheet1")
 DBLoad <- sort(unique(MDT$Database))
+```
 
-## 2) Preflight gate: validate path/partition/read options before any write
+### 2. Validate The Source Inventory
+
+`ValidateMDTPreflight()` is the fail-fast structural gate before any network or
+repository write. It checks required fields, remote-source declarations, reader
+settings, partition definitions,
+table naming collisions, output filename collisions, and supported formats.
+Partition identity comes only from `PartitionKey` and `PartitionValue`; a
+physical or legacy `Year` field is not used as a fallback. `MDTCompleteStatus()`
+then reports which inventory rows remain pending according to the checkpoint.
+Between those steps, `MaterializeRemoteSources()` resolves optional direct
+HTTP/HTTPS sources to the managed cache; local rows pass through unchanged.
+
+```r
 ValidateMDTPreflight(
   MDT = MDT,
   strict = TRUE,
   ParquetBasePath = paths$ParquetBasePath,
+  MaxFileStemTruncate = TRUE,
+  TerminalHivePartition = FALSE,
+  MasterDBPath = cfg$MasterDBPath,
   LogPath = paths$LogPath,
   RunId = RunId
 )
+MDT <- MaterializeRemoteSources(
+  MDT = MDT,
+  DownloadCachePath = paths$DownloadCachePath,
+  Offline = isTRUE(cfg$RemoteOffline),
+  DefaultDownloadPolicy = cfg$DownloadPolicy %||% "if_missing",
+  TimeoutSeconds = cfg$DownloadTimeout %||% 600,
+  LogPath = paths$LogPath,
+  RunId = RunId
+)
+pending <- MDTCompleteStatus(
+  MDT = MDT,
+  CheckpointPath = paths$CheckpointPath,
+  verbose = TRUE,
+  logStatus = TRUE
+)
+```
 
-## 3) Schema survey: collect per-file/per-column evidence and proposals
+### 3. Survey And Recommend Schemas
+
+`PrepareSchemaRegistry()` reads every source through the same configured reader
+used by final loading. Detailed per-file and per-column evidence is stored in
+`SchemaObservations.parquet`; the compact `SchemaReview.xlsx` presents type
+history, safe coercion recommendations, compatibility decisions, source issues,
+low-cardinality previews, and semantic labels. Recommendations are data-derived;
+an optional `SchemaRegistry.xlsx` policy is shown explicitly rather than applied
+invisibly. Source files remain read-only and no cleaned staging copy is created.
+A remote source's managed cache contains its original downloaded bytes, not
+rewritten records.
+
+```r
 prepared <- PrepareSchemaRegistry(
   MDT = MDT,
   DBLoad = DBLoad,
@@ -163,19 +339,59 @@ prepared <- PrepareSchemaRegistry(
   SchemaRegistryPath = paths$SchemaRegistryPath,
   n_workers = cfg$n_workers,
   SourceFingerprintMode = cfg$SourceFingerprintMode,
+  ValuePreviewMaxDistinct = 15L,
+  ValuePreviewTypes = c("character", "integer", "int64", "logical"),
+  ValuePreviewIdentifiers = FALSE,
   LogPath = paths$LogPath,
   RunId = RunId
 )
 
-## 4) Review gate: complete StartHere/ColumnDecisions/CompatibilityDecisions
-##    in SchemaReview.xlsx, then finalize approved table schemas
-FinalizeSchemaRegistry(
+# Optional bounded issue preview; this query does not load all observations.
+schema_issues <- GetSchemaObservations(
+  ObservationPath = paths$SchemaObservationPath,
+  IssuesOnly = TRUE,
+  Limit = 100L
+)
+if (nrow(schema_issues) > 0L) print(schema_issues)
+```
+
+### 4. Review And Finalize The Catalog
+
+Open `SchemaReview.xlsx` at `StartHere`. `ColumnDecisions` contains ambiguous
+types or reader warnings: `Accept` keeps `RecommendedType`, while `Override`
+requires `ApprovedType`. `CompatibilityDecisions` controls same-named columns:
+`Accept` uses the recommended common type, `Override` supplies another common
+type, and `Ignore` keeps intentionally unrelated fields apart.
+
+`DictionaryReview` handles code meanings such as `1 = Yes`: `Accept` keeps the
+proposal, `Add` supplies a missing label, `Override` replaces it, and `Ignore`
+omits the mapping. `FinalizeSchemaRegistry()` refuses unresolved blocking
+decisions and writes `TableSchemas.xlsx` in the exact format consumed by the
+Parquet writer. A second survey is unnecessary unless source evidence changes.
+
+```r
+repository_catalog <- FinalizeSchemaRegistry(
   SchemaReviewPath = paths$SchemaReviewPath,
   TableSchemaPath = paths$TableSchemaPath,
   strict = TRUE
 )
+```
 
-## 5) Load sources into partitioned Parquet with checkpointed progress
+### 5. Load Partitioned Parquet
+
+`ParquetBackEndCreate()` enforces the finalized table-specific catalog, routes
+records to the Hive partitions declared in the inventory, and writes
+memory-bounded chunks where supported. Progress is checkpointed only after a
+successful source write, making reruns resumable. Source fingerprints detect
+files replaced in place; coercion damage is bounded by `MaxCoerceNAPct`.
+
+At the beginning of a run, the loader snapshots the checkpoint, manifest,
+schema catalog, and policy registry into `StateBackups`. The transactional
+DuckDB manifest is authoritative, while `RepositoryMetadata.xlsx` is refreshed
+as an accessible presentation copy. Because preflight already ran in step 2,
+this call uses `RunPreflight = FALSE`.
+
+```r
 result <- ParquetBackEndCreate(
   MDT = MDT,
   DBLoad = DBLoad,
@@ -184,19 +400,52 @@ result <- ParquetBackEndCreate(
   CheckpointPath = paths$CheckpointPath,
   ParquetBasePath = paths$ParquetBasePath,
   LogPath = paths$LogPath,
+  n_workers = cfg$n_workers,
   PartitionBy = cfg$PartitionBy,
   RAMThreshold = cfg$RAMThreshold,
   SAV_ROW_THRESHOLD = cfg$SAV_ROW_THRESHOLD,
   SAV_CHUNK_SIZE = cfg$SAV_CHUNK_SIZE,
+  MaxFileStemTruncate = TRUE,
+  TerminalHivePartition = FALSE,
   SchemaRegistryPath = paths$SchemaRegistryPath,
   TableSchemaPath = paths$TableSchemaPath,
   ManifestPath = paths$ManifestPath,
+  MetadataWorkbookPath = paths$ManifestWorkbookPath,
+  UseSchemaCatalog = TRUE,
+  StrictPreflight = TRUE,
+  StrictSchemaValidation = TRUE,
+  RunPreflight = FALSE,
+  DownloadCachePath = paths$DownloadCachePath,
+  MaterializeRemote = FALSE, # already resolved before schema survey
   SourceFingerprintMode = cfg$SourceFingerprintMode,
+  MaxCoerceNAPct = cfg$MaxCoerceNAPct,
+  AutoCleanup = TRUE,
+  CleanupAfterPhase = "database",
   StopOnFileError = TRUE,
   ReturnRunResult = TRUE,
   RunId = RunId
 )
 print(result)
+
+SummaryVerification(
+  MDT = MDT,
+  CheckpointPath = paths$CheckpointPath,
+  LogPath = paths$LogPath,
+  logStatus = FALSE,
+  RunId = RunId,
+  MasterDBPath = cfg$MasterDBPath,
+  SourceFingerprintMode = cfg$SourceFingerprintMode
+)
+```
+
+`RepositoryMetadata.duckdb` remains the authoritative transactional manifest.
+For DuckDB manifests, the loader also refreshes `RepositoryMetadata.xlsx` at
+the end of each run. The workbook contains navigable table/run summaries and
+every manifest record across numbered detail sheets. It can also be regenerated
+without loading data:
+
+```r
+ExportRepositoryMetadata(paths$ManifestPath, paths$ManifestWorkbookPath)
 ```
 
 The detailed per-file and per-column evidence remains in Parquet so the Excel
@@ -209,6 +458,22 @@ GetSchemaObservations(
 )
 ```
 
+Low-cardinality values appear in `SchemaReview.xlsx` as compact column
+summaries and a filterable `ValuePreview` sheet with partition coverage. Full delimited scans are
+marked `complete`; bounded previews from other readers are marked `sampled`.
+Finalization carries the summaries into `TableSchemas` and writes the detailed
+rows to the `ValueDictionary` sheet. Identifier-like values are suppressed by
+default, and columns exceeding the configured distinct-value limit retain only
+an `exceeds_limit` status.
+
+For labeled formats such as SPSS, Stata, and SAS, the same survey also records
+variable labels and exact code-to-label metadata without modifying the source.
+`DictionaryReview` auto-approves stable source meanings, requires a decision
+when labels change across partitions, and offers blank labels as optional
+documentation. Finalization writes approved mappings to the partition-aware
+`ColumnDictionary` sheet in `TableSchemas.xlsx`; observed evidence remains
+separate in `ValueDictionary`.
+
 `SchemaRegistryPath` is an optional reusable policy-pattern file. A generic
 project creates an empty template, so no meaning is inferred from names such as
 `ID`, `KEY`, or `CODE`; domain rules are opt-in. `SchemaReviewPath` is the
@@ -218,24 +483,40 @@ writer. When both paths are passed to `ParquetBackEndCreate()`, reviewed columns
 come from `TableSchemaPath`; `SchemaRegistryPath` is retained only for policy
 metadata and for genuinely new columns absent from the finalized catalog.
 
-Register and validate DuckDB views with the catalog's partition types:
+### 6. Register And Validate DuckDB
+
+Open the persistent DuckDB database in read-write mode while creating views.
+`register_parquet_view_compile()` registers only successfully checkpointed
+tables and validates physical and Hive-partition column types against the
+finalized catalog. With strict validation enabled, a mismatch stops the step
+instead of allowing a subtly incompatible view. `validate_data_contracts()`
+then applies optional declarative content rules such as non-null, uniqueness,
+range, allowed-value, regex, and foreign-key checks.
 
 ```r
-## 6) Register compiled views over Parquet and validate contract rules
+TempDirPath <- file.path(cfg$FormattedDBPath, "duckdb_temp")
+dir.create(TempDirPath, recursive = TRUE, showWarnings = FALSE)
+
 con <- open_duckdb(
   FormattedDBPath = cfg$FormattedDBPath,
   DBName = cfg$DBName,
-  TempDirPath = file.path(cfg$FormattedDBPath, "duckdb_temp"),
+  TempDirPath = TempDirPath,
   GB = cfg$DuckDB_GB,
   ReadOnly = FALSE
 )
-done <- MDT[checkpoint_completed_mask(MDT, result$checkpoint), ]
+done <- MDT[checkpoint_completed_mask(
+  MDT,
+  result$checkpoint,
+  MasterDBPath = cfg$MasterDBPath,
+  SourceFingerprintMode = cfg$SourceFingerprintMode
+), ]
 register_parquet_view_compile(
   con = con,
   ParquetBasePath = paths$ParquetBasePath,
   tables_written = unique(repository_table_names(done)),
   TableSchemaPath = paths$TableSchemaPath,
   SchemaRegistryPath = paths$SchemaRegistryPath,
+  validate = TRUE,
   strict_validation = TRUE,
   LogPath = paths$LogPath,
   RunId = RunId
@@ -247,7 +528,38 @@ contract_results <- validate_data_contracts(
   LogPath = paths$LogPath,
   RunId = RunId
 )
-## 7) Reconcile workbook, checkpoint, manifest, and registered tables
+
+# Reopen read-only after view creation for safer analytical sessions.
+DBI::dbDisconnect(con, shutdown = TRUE)
+con <- open_duckdb(
+  FormattedDBPath = cfg$FormattedDBPath,
+  DBName = cfg$DBName,
+  TempDirPath = TempDirPath,
+  GB = cfg$DuckDB_GB,
+  ReadOnly = TRUE
+)
+
+# Optional dictionary-assisted discovery and decoding.
+describe_column(paths$TableSchemaPath, "SALES", "Orders", "STATUS")
+decoded <- decode_column(
+  con = con,
+  table = "SALES_Orders",
+  column = "STATUS",
+  TableSchemaPath = paths$TableSchemaPath,
+  limit = 1000L
+)
+```
+
+### 7. Reconcile Repository State
+
+`audit_repository()` is a non-destructive consistency check across the source
+inventory, checkpoint, transactional manifest, Parquet files on disk, and
+DuckDB row counts. It reports stale checkpoints, missing outputs, orphaned
+Parquet, manifest divergence, and count mismatches; it does not delete or repair
+anything automatically. Review its detail tables before using a targeted reset
+or rerunning the loader.
+
+```r
 repo_audit <- audit_repository(
   MDT = MDT,
   ParquetBasePath = paths$ParquetBasePath,
@@ -261,9 +573,40 @@ repo_audit$issues
 DBI::dbDisconnect(con, shutdown = TRUE)
 ```
 
-The healthcare loader reference uses the same step order with additional
-operational options (migration helpers, advanced diagnostics, stricter tuning).
-Use it when moving from a dry run to production operations.
+### Maintenance And Refresh
+
+The canonical load is resumable, so ordinary reruns process only incomplete or
+source-fingerprint-invalidated inventory rows. Two non-destructive helpers cover
+common repository maintenance outside the seven-stage run:
+
+```r
+# Propose inventory rows for newly delivered files. Review the workbook output;
+# the helper never edits DBSetup.xlsx or source files.
+new_files <- scan_for_new_source_files(
+  MasterDBPath = cfg$MasterDBPath,
+  MDT = MDT,
+  OutputPath = file.path(cfg$FormattedDBPath, "NewSourceFiles.xlsx")
+)
+
+# Preview a targeted rebuild after approving a changed schema. DryRun = TRUE
+# reports checkpoint, manifest, and Parquet changes without applying them.
+reset_table_for_reload(
+  MDT = MDT,
+  Database = "SALES",
+  TableName = "Orders",
+  ParquetBasePath = paths$ParquetBasePath,
+  CheckpointPath = paths$CheckpointPath,
+  ManifestPath = paths$ManifestPath,
+  DryRun = TRUE
+)
+```
+
+After inspecting a reset preview, use `DryRun = FALSE` and rerun stages 5-7.
+State snapshots created by the loader provide an additional recovery record.
+
+The healthcare reference uses the same sequence with domain policies, migration
+helpers, advanced diagnostics, and machine-specific tuning. Those additions
+are intentionally not hard-coded into the generic package workflow.
 
 ## Reproducibility And Tests
 

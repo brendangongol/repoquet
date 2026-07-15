@@ -15,6 +15,8 @@ source(RepoquetSourcePath, local = .GlobalEnv)
 run_schema_workflow_test <- function(MDT, MasterDBPath, ObservationPath,
                                      SchemaReviewPath, SchemaRegistryPath = NULL,
                                      SchemaProfile = "none", n_workers = 1L,
+                                     ValuePreviewMaxDistinct = 15L,
+                                     ValuePreviewIdentifiers = FALSE,
                                      LogPath = NULL, RunId = NULL) {
   DBLoad <- sort(unique(as.character(MDT$Database)))
   PrepareSchemaRegistry(
@@ -28,6 +30,8 @@ run_schema_workflow_test <- function(MDT, MasterDBPath, ObservationPath,
     n_workers = n_workers,
     SourceFingerprintMode = "metadata",
     StrictReaders = FALSE,
+    ValuePreviewMaxDistinct = ValuePreviewMaxDistinct,
+    ValuePreviewIdentifiers = ValuePreviewIdentifiers,
     LogPath = LogPath,
     RunId = RunId
   )

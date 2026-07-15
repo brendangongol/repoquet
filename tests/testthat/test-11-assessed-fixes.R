@@ -95,7 +95,11 @@ test_that("legacy manifests without PartitionValue still dedupe by Year", {
 
 test_that("coercion damage beyond the threshold fails the file; report is written", {
   fx <- new_repo_fixture(); on.exit(unlink(fx$root, recursive = TRUE))
-  #### DIED is registry-forced to integer; half its values are text.        ####
+  #### An explicit user policy pins DIED to integer; half its values are   ####
+  #### text. Generic mode deliberately has no implicit healthcare policy.  ####
+  write_schema_registry(data.table::data.table(
+    Profile = "generic", ColumnPattern = "^DIED$", CanonicalType = "integer",
+    Role = "analytic", AppliesTo = "REG", Notes = "Test coercion policy."), fx$reg)
   data.table::fwrite(data.table::data.table(DIED = c("0", "1", "UNKNOWN", "MISSING"), AGE = c(1, 2, 3, 4)),
                      file.path(fx$src, "dmg_2019.csv"))
   M <- data.frame(Database = "REG", MDBDir = "REG", TableName = "T", Path = "dmg_2019.csv",
