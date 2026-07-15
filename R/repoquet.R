@@ -2846,8 +2846,8 @@ safe_read_sav <- function(path){
 #'   years for this table, passed to \code{\link{align_columns}}.
 #' @param col_classes Named list (optional). Column class map from
 #'   \code{\link{build_col_classes}}, used for type enforcement.
-#' @param year_val Integer or character (optional). Year value passed to
-#'   \code{\link{add_year_if_missing}}.
+#' @param year_val Integer or character (optional). Year value derived from
+#'   partition specification for logging and diagnostics.
 #' @param chunk_size_decrement Integer (optional). Rows to subtract from the
 #'   chunk size after a chunk fails (e.g. with a memory-allocation error).
 #'   Defaults to 10\% of \code{chunk_size}. The reduction is local to this
@@ -4671,8 +4671,8 @@ validate_duckdb_table <- function(con, table_name, schema_registry = NULL, stric
 #'   written when chunking is used.
 #' @param col_classes Named list (optional). Column class map from
 #'   \code{\link{build_col_classes}}.
-#' @param year_val Integer or character (optional). Year value
-#'   passed to \code{\link{add_year_if_missing}}.
+#' @param year_val Integer or character (optional). Year value derived from
+#'   partition specification for logging and diagnostics.
 #' @param PrintStatus Logical. If \code{TRUE}, prints progress
 #'   messages to the console in addition to the log file. Default \code{FALSE}.
 #' @param TerminalHivePartition Logical. If \code{TRUE}, chunk files are
