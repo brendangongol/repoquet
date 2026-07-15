@@ -1923,6 +1923,40 @@ enforce_col_classes <- function(df, col_classes = NULL, max_coerce_na_pct = NULL
   df
 }
 
+##########################################################
+#### Add a year column to a data table if it's absent ####
+##########################################################
+#' Add a \code{year} column to a data frame if absent
+#'
+#' Checks for both \code{"year"} and \code{"YEAR"} column names (case
+#' insensitive).  If neither is present, adds a \code{year} column with the
+#' scalar value \code{year_value}.
+#' @param df A data frame or data.table.
+#' @param year_value Integer or character. The year value to assign.
+#' @return The input \code{df} with a \code{year} column guaranteed to be
+#'   present.
+#' @examples
+#' \dontrun{
+#' set.seed(1)
+#' df1 <- data.frame(AGE = sample(18:90, 5), SEX = sample(c("M","F"), 5, replace = TRUE))
+#' df1 <- add_year_if_missing(df1, 2019)
+#' stopifnot("year" %in% names(df1))
+#' #### Already has a year column -- left untouched ####
+#' df2 <- data.frame(AGE = sample(18:90, 5), year = 2018L)
+#' df2 <- add_year_if_missing(df2, 2019)
+#' unique(df2$year)  # still 2018, not overwritten
+#' }
+#' @export
+add_year_if_missing <- function(df, year_value) {
+  if (!data.table::is.data.table(df)) data.table::setDT(df)
+  df <- canonicalize_dataframe_names(df)
+  if (!"YEAR" %in% colnames(df)) {
+    data.table::set(df, j = "YEAR", value = as.integer(year_value))
+  } else {
+    data.table::set(df, j = "YEAR", value = as.integer(df[["YEAR"]]))
+  }
+  return(df)
+}
 
 ################################################################################
 #### Pluggable file readers ####################################################
@@ -2979,6 +3013,7 @@ safe_read_sav_chunked <- function(path, chunk_size = 1000000L, TerminalHiveParti
             df_chunk <- strip_haven(df_chunk)
             df_chunk <- normalize_character_encoding(df_chunk, reader_options$Encoding %||% NULL)
             if (direct_write) {
+              if (!is.null(year_val) && "YEAR" %in% partition_keys){ df_chunk <- add_year_if_missing(df_chunk, year_val) }
               if (!is.null(all_cols)){ df_chunk <- align_columns(df_chunk, all_cols, col_classes, max_coerce_na_pct = max_coerce_na_pct) }
             } else {
               df_chunk <- canonicalize_dataframe_names(df_chunk)
@@ -3112,6 +3147,7 @@ safe_read_sav_chunked <- function(path, chunk_size = 1000000L, TerminalHiveParti
               data.table::set(tail_df, j = col, value = as.character(tail_df[[col]])) }
             tail_df <- normalize_character_encoding(tail_df, reader_options$Encoding %||% NULL)
             if(direct_write) {
+              if(!is.null(year_val) && "YEAR" %in% partition_keys){ tail_df <- add_year_if_missing(tail_df, year_val) }
               if(!is.null(all_cols)){ tail_df <- align_columns(tail_df, all_cols, col_classes, max_coerce_na_pct = max_coerce_na_pct) }
             } else {
               tail_df <- canonicalize_dataframe_names(tail_df)
@@ -3306,6 +3342,7 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
     if (!is.data.frame(df_chunk)) stop(sprintf("Reader '%s' did not return a data frame chunk.", reader))
     data.table::setDT(df_chunk)
     df_chunk <- normalize_character_encoding(df_chunk, "UTF-8")
+    if (!is.null(year_val) && "YEAR" %in% partition_keys) df_chunk <- add_year_if_missing(df_chunk, year_val)
     if (!is.null(all_cols)) df_chunk <- align_columns(df_chunk, all_cols, col_classes,
                                                       max_coerce_na_pct = max_coerce_na_pct)
     num_cols <- names(df_chunk)[sapply(df_chunk, is.numeric)]
@@ -4781,6 +4818,7 @@ read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL,
       data.frame()
     })
     if (!is.data.frame(df) || nrow(df) == 0L) return(df)
+    if ("YEAR" %in% canonical_colnames(partition_keys)) df <- add_year_if_missing(df, year_val)
     df <- align_columns(df, all_cols, col_classes, max_coerce_na_pct = max_coerce_na_pct)
     return(list(data = df, pre_aligned = TRUE, written = FALSE))
   }
@@ -4827,6 +4865,7 @@ read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL,
     DFTemp <- tryCatch({
       df <- call_reader(rd, "read_full", full_path, reader_options = reader_options,
                         col_classes = col_classes)
+      if ("YEAR" %in% canonical_colnames(partition_keys)) df <- add_year_if_missing(df, year_val)
       df <- align_columns(df, all_cols, col_classes, max_coerce_na_pct = max_coerce_na_pct)
       list(data = df, error = FALSE, pre_aligned = TRUE)
     }, error = function(e){
@@ -8360,6 +8399,7 @@ generic_db_loader <- function(files, base_path, db_prefix, completed_checkpoint,
         }
         if(PrintStatus){ print("Performing Column type alignment") }
         if (!pre_aligned) {
+          if ("YEAR" %in% pspec$keys) df <- add_year_if_missing(df, year_val)
           df <- align_columns(df, all_cols_v, table_col_classes, max_coerce_na_pct = MaxCoerceNAPct)
         }
         if(PrintStatus){ print("Writing complete parquet file") }
