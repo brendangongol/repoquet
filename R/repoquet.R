@@ -4410,7 +4410,7 @@ update_parquet_manifest <- function(ManifestPath, Database, TableName, DuckDBTab
       slot <- if (!is.na(row$PartitionValue[1]) && nzchar(row$PartitionValue[1])) {
         row$PartitionValue[1]
       } else {
-        ""
+        as.character(row$Year[1])
       }
       DBI::dbExecute(con, paste0(
         "DELETE FROM ", table,
@@ -4433,7 +4433,7 @@ update_parquet_manifest <- function(ManifestPath, Database, TableName, DuckDBTab
   if (nrow(old) > 0L) {
     slot_of <- function(dt) {
       pv <- if ("PartitionValue" %in% names(dt)) as.character(dt$PartitionValue) else rep(NA_character_, nrow(dt))
-      ifelse(!is.na(pv) & nzchar(pv), pv, "")
+      ifelse(!is.na(pv) & nzchar(pv), pv, as.character(dt$Year))
     }
     key <- paste(old$Database, old$TableName, slot_of(old), old$SourcePath, old$ParquetPath, sep = "||")
     row_key <- paste(row$Database, row$TableName, slot_of(row), row$SourcePath, row$ParquetPath, sep = "||")
