@@ -5717,12 +5717,56 @@ discover_schema_relationships <- function(table_schema, include_candidates = TRU
 #' Load a repository configuration file
 #'
 #' Reads the \code{repository_config.R} written by
+#' Load repository configuration with optional runtime parameter overrides
+#'
+#' Loads the machine-specific repository configuration from a file and merges
+#' it with optional runtime overrides. This allows users to override defaults
+#' via function arguments without modifying the configuration file.
+#'
+#' The configuration file must define a list named \code{repository_config}
+#' with required paths and optional performance thresholds. See
 #' \code{\link{create_repository_project}}: an R file that defines a list
 #' named \code{repository_config} with the paths and thresholds the loader
 #' needs. Keeping configuration in one reviewable file removes every
 #' hard-coded machine path from the run script.
+#'
+#' @param path Character. Path to the repository configuration file (R script
+#'   that defines \code{repository_config} list).
+#' @param SAV_CHUNK_SIZE Integer. Rows per chunk for SAV file streaming.
+#'   Default 1000000L. Override required configuration file value.
+#' @param SAV_ROW_THRESHOLD Integer. Rows above which SAV files stream in chunks.
+#'   Default 1000000L. Override required configuration file value.
+#' @param RAMThreshold Numeric. RAM limit in GB for PartitionBy = "RAMEstimate".
+#'   Default 30. Override configuration file value.
+#' @param PartitionBy Character. Partitioning strategy: "NRows" (default),
+#'   "RAMEstimate", or "FAIL". Override configuration file value.
+#' @param n_workers Integer. Number of parallel workers. Default
+#'   max(1L, detectCores() - 1L). Override configuration file value.
+#' @param MaxCoerceNAPct Numeric. Fail file when coercion destroys more than
+#'   this percent of a column. Default 25. Override configuration file value.
+#' @param SourceFingerprintMode Character. Source file fingerprinting mode:
+#'   "metadata" (default), "sha256", or "none". Override configuration file value.
+#' @param DBName Character. DuckDB database file name. Default "Repository.duckdb".
+#'   Override configuration file value.
+#' @param DuckDB_GB Character. DuckDB memory limit (e.g., "8GB"). Default "8GB".
+#'   Override configuration file value.
+#'
+#' @return List containing all configuration keys (required + optional with defaults).
+#'   File values take precedence over function defaults, and function arguments
+#'   take precedence over both.
+#'
 #' @export
-load_repository_config <- function(path) {
+load_repository_config <- function(
+    path,
+    SAV_CHUNK_SIZE = 1000000L,
+    SAV_ROW_THRESHOLD = 1000000L,
+    RAMThreshold = 30,
+    PartitionBy = "NRows",
+    n_workers = max(1L, parallel::detectCores() - 1L),
+    MaxCoerceNAPct = 25,
+    SourceFingerprintMode = "metadata",
+    DBName = "Repository.duckdb",
+    DuckDB_GB = "8GB") {
   if (!file.exists(path)) stop(sprintf("Configuration file not found: %s", path))
   env <- new.env(parent = baseenv())
   sys.source(path, envir = env)
@@ -5731,12 +5775,27 @@ load_repository_config <- function(path) {
   required <- c("MasterDBPath", "FormattedDBPath", "MDTPath")
   missing_req <- setdiff(required, names(cfg))
   if (length(missing_req) > 0L) stop(sprintf("repository_config is missing: %s", paste(missing_req, collapse = ", ")))
-  defaults <- list(SAV_CHUNK_SIZE = 1000000L, SAV_ROW_THRESHOLD = 1000000L,
-                   RAMThreshold = 30, PartitionBy = "NRows",
-                   n_workers = max(1L, parallel::detectCores() - 1L),
-                   MaxCoerceNAPct = 25, SourceFingerprintMode = "metadata",
-                   DBName = "Repository.duckdb", DuckDB_GB = "8GB")
-  for (nm in names(defaults)) if (is.null(cfg[[nm]])) cfg[[nm]] <- defaults[[nm]]
+
+  # Create list of function argument overrides (excluding path)
+  function_args <- list(
+    SAV_CHUNK_SIZE = SAV_CHUNK_SIZE,
+    SAV_ROW_THRESHOLD = SAV_ROW_THRESHOLD,
+    RAMThreshold = RAMThreshold,
+    PartitionBy = PartitionBy,
+    n_workers = n_workers,
+    MaxCoerceNAPct = MaxCoerceNAPct,
+    SourceFingerprintMode = SourceFingerprintMode,
+    DBName = DBName,
+    DuckDB_GB = DuckDB_GB
+  )
+
+  # For each parameter: use config file value if present and not overridden,
+  # else use function argument value
+  for (nm in names(function_args)) {
+    if (is.null(cfg[[nm]])) {
+      cfg[[nm]] <- function_args[[nm]]
+    }
+  }
   cfg
 }
 
