@@ -8243,8 +8243,6 @@ generic_db_loader <- function(files, base_path, db_prefix, completed_checkpoint,
       pspec <- partition_spec_for_row(row_meta)
       year_val <- if ("YEAR" %in% pspec$keys) {
         pspec$values[match("YEAR", pspec$keys)]
-      } else if ("Year" %in% names(row_meta)) {
-        row_meta$Year[1]
       } else { NA }
       table_name <- repository_table_name_for_row(row_meta)
       reader_file <- tolower(row_meta$FileType[1])
