@@ -10,6 +10,30 @@ workflow rather than separate scripts. The loader supports SPSS, Stata, SAS,
 transport, delimited, Parquet, and RDS sources and exposes validated tables
 through DuckDB.
 
+`repoquet` provides a schema-aware, memory-bounded workflow for building large
+analytic databases from heterogeneous source files (including SPSS/SAV and CSV)
+into hive-partitioned Parquet with DuckDB-ready access. It is designed for
+out-of-memory operation on local machines, with chunked ingestion,
+deterministic column normalization, cross-release schema/class alignment,
+resumable checkpointed loading, and fast consolidation for downstream querying.
+In practice, this reduces RAM pressure and storage footprint, improves query
+performance, and enables reliable multi-year table unification without
+requiring the full dataset to be loaded into memory at once.
+
+
+## Why R for database generation?
+
+repoquet uses R because its vectorized data model and explicit coercion behavior
+make schema enforcement easier to apply consistently during ingestion. In this
+pipeline, column classes are validated and aligned before write, so type drift
+is surfaced early instead of silently propagating into Parquet files. While
+Python ecosystems can also enforce strict schemas, many common ingestion
+patterns are permissive by default, which can allow mixed or inconsistent types
+to slip through unless additional validation is added. By producing a strongly
+typed Parquet backend at build time, repoquet creates datasets that are
+reliable for both R and Python downstream users.
+
+
 ## Install
 
 ```r
@@ -101,34 +125,60 @@ Parquet chunks; repoquet does not create a cleaned CSV or overwrite the source.
 
 It is an example inventory rather than a required package configuration.
 
+## Canonical Workflow (Minimal + Production)
+
+repoquet follows one canonical 7-step sequence in both the minimal example
+below and the expanded production reference script at
+`inst/examples/healthcare/CECORC_loader_reference.R`.
+
 ## Minimal Workflow
 
-```r
-cfg <- load_repository_config("~/my_repository/repository_config.R")
-paths <- RepositoryInitialize(cfg$FormattedDBPath, profile = "generic")
-MDT <- openxlsx::read.xlsx(cfg$MDTPath, sheet = "Sheet1")
+For a zero-setup dry run, first generate the built-in dummy repository:
 
+```r
+## 1) Initialize paths and a run identifier for audit-traceable logging
+example <- generate_example_repository("~/my_repository_example")
+cfg <- load_repository_config(example$ConfigPath)
+paths <- RepositoryInitialize(cfg$FormattedDBPath, profile = "generic")
+RunId <- new_repository_run_id()
+MDT <- openxlsx::read.xlsx(cfg$MDTPath, sheet = "Sheet1")
+DBLoad <- sort(unique(MDT$Database))
+
+## 2) Preflight gate: validate path/partition/read options before any write
 ValidateMDTPreflight(
-  MDT, strict = TRUE, ParquetBasePath = paths$ParquetBasePath
+  MDT = MDT,
+  strict = TRUE,
+  ParquetBasePath = paths$ParquetBasePath,
+  LogPath = paths$LogPath,
+  RunId = RunId
 )
 
+## 3) Schema survey: collect per-file/per-column evidence and proposals
 prepared <- PrepareSchemaRegistry(
-  MDT, MasterDBPath = cfg$MasterDBPath,
+  MDT = MDT,
+  DBLoad = DBLoad,
+  MasterDBPath = cfg$MasterDBPath,
   ObservationPath = paths$SchemaObservationPath,
   SchemaReviewPath = paths$SchemaReviewPath,
-  n_workers = cfg$n_workers
+  SchemaRegistryPath = paths$SchemaRegistryPath,
+  n_workers = cfg$n_workers,
+  SourceFingerprintMode = cfg$SourceFingerprintMode,
+  LogPath = paths$LogPath,
+  RunId = RunId
 )
 
-# Open StartHere. Complete only the visible rows in ColumnDecisions and
-# CompatibilityDecisions. PolicyReport is informational.
+## 4) Review gate: complete StartHere/ColumnDecisions/CompatibilityDecisions
+##    in SchemaReview.xlsx, then finalize approved table schemas
 FinalizeSchemaRegistry(
   SchemaReviewPath = paths$SchemaReviewPath,
   TableSchemaPath = paths$TableSchemaPath,
   strict = TRUE
 )
 
+## 5) Load sources into partitioned Parquet with checkpointed progress
 result <- ParquetBackEndCreate(
-  MDT = MDT, DBLoad = sort(unique(MDT$Database)),
+  MDT = MDT,
+  DBLoad = DBLoad,
   MasterDBPath = cfg$MasterDBPath,
   completed_checkpoint = load_checkpoint(paths$CheckpointPath),
   CheckpointPath = paths$CheckpointPath,
@@ -144,9 +194,7 @@ result <- ParquetBackEndCreate(
   SourceFingerprintMode = cfg$SourceFingerprintMode,
   StopOnFileError = TRUE,
   ReturnRunResult = TRUE,
-  AutoCleanup = TRUE,           # ✨ Automatic temp file cleanup (Phase 2)
-  CleanupAfterPhase = "all",    # Clean after all writes complete
-  MaxTempAgeHours = 1L          # Remove temp files > 1 hour old
+  RunId = RunId
 )
 print(result)
 ```
@@ -170,47 +218,52 @@ writer. When both paths are passed to `ParquetBackEndCreate()`, reviewed columns
 come from `TableSchemaPath`; `SchemaRegistryPath` is retained only for policy
 metadata and for genuinely new columns absent from the finalized catalog.
 
-### Temporary File Cleanup (Phase 2)
-
-By default, `ParquetBackEndCreate()` automatically cleans up temporary `.tmp_*.parquet`
-files that may be left behind during write operations (due to file locking on Windows
-or other I/O delays). Control this with:
-
-- `AutoCleanup = TRUE` (default): Enable automatic cleanup
-- `CleanupAfterPhase = "all"` (default): Clean after all writes complete
-  - `"database"`: Clean after each database batch
-  - `"none"`: Disable auto-cleanup; call `cleanup_temp_files()` manually
-- `MaxTempAgeHours = 1L` (default): Only remove temp files older than this
-
-```r
-# Default: auto-cleanup after all writes
-ParquetBackEndCreate(MDT, DBLoad = databases, ...)
-
-# Aggressive: clean after each database
-ParquetBackEndCreate(MDT, DBLoad = databases, CleanupAfterPhase = "database", ...)
-
-# Manual: disable auto-cleanup, clean manually
-ParquetBackEndCreate(MDT, DBLoad = databases, AutoCleanup = FALSE, ...)
-cleanup_temp_files(paths$ParquetBasePath, max_age_hours = 1L)
-```
-
-All cleanup operations are logged with `[CLEANUP ...]` prefixes for visibility.
-
 Register and validate DuckDB views with the catalog's partition types:
 
 ```r
-con <- DBI::dbConnect(duckdb::duckdb())
+## 6) Register compiled views over Parquet and validate contract rules
+con <- open_duckdb(
+  FormattedDBPath = cfg$FormattedDBPath,
+  DBName = cfg$DBName,
+  TempDirPath = file.path(cfg$FormattedDBPath, "duckdb_temp"),
+  GB = cfg$DuckDB_GB,
+  ReadOnly = FALSE
+)
 done <- MDT[checkpoint_completed_mask(MDT, result$checkpoint), ]
 register_parquet_view_compile(
-  con, paths$ParquetBasePath, unique(repository_table_names(done)),
+  con = con,
+  ParquetBasePath = paths$ParquetBasePath,
+  tables_written = unique(repository_table_names(done)),
   TableSchemaPath = paths$TableSchemaPath,
   SchemaRegistryPath = paths$SchemaRegistryPath,
-  strict_validation = TRUE
+  strict_validation = TRUE,
+  LogPath = paths$LogPath,
+  RunId = RunId
 )
-validate_data_contracts(con, paths$DataContractPath, strict = TRUE)
-audit_repository(MDT, paths$ParquetBasePath, paths$CheckpointPath,
-                 paths$ManifestPath, con = con)
+contract_results <- validate_data_contracts(
+  con = con,
+  DataContractPath = paths$DataContractPath,
+  strict = TRUE,
+  LogPath = paths$LogPath,
+  RunId = RunId
+)
+## 7) Reconcile workbook, checkpoint, manifest, and registered tables
+repo_audit <- audit_repository(
+  MDT = MDT,
+  ParquetBasePath = paths$ParquetBasePath,
+  CheckpointPath = paths$CheckpointPath,
+  ManifestPath = paths$ManifestPath,
+  con = con,
+  LogPath = paths$LogPath,
+  RunId = RunId
+)
+repo_audit$issues
+DBI::dbDisconnect(con, shutdown = TRUE)
 ```
+
+The healthcare loader reference uses the same step order with additional
+operational options (migration helpers, advanced diagnostics, stricter tuning).
+Use it when moving from a dry run to production operations.
 
 ## Reproducibility And Tests
 
@@ -221,49 +274,3 @@ Run `Rscript tools/bootstrap-renv.R` once to restore the project-specific
 Rscript tests/run_tests.R
 R CMD check .
 ```
-
-## Troubleshooting
-
-### Temporary Parquet Files Left in Database
-
-After running a workflow, you may notice `.tmp_*.parquet` files left in your
-database directories (e.g., `year=2023/NEDS_2013_Comorbidities.SAV.parquet.tmp_abc123.parquet`).
-These are atomic write safeguards that should be cleaned up after each write completes.
-
-**What they are:** During Parquet writes, repoquet creates a temporary file first,
-then atomically renames it to the final location. This prevents corruption if the
-write is interrupted. Normally these are cleaned up immediately.
-
-**Why they persist:** Temporary files may remain if:
-
-- The write operation is interrupted or crashes
-- The file is locked by antivirus scanning, system services, or another process
-- The operating system prevents the file from being deleted (Windows file locking)
-- High I/O contention prevents timely cleanup
-
-**Are they harmful?**
-No. The final `.parquet` files are complete and valid. Temporary files are never
-promoted to the active database. DuckDB reads only `*.parquet` files (not `.tmp_*`).
-However, they do consume disk space and make auditing unclear.
-
-**How to clean them up:**
-
-```r
-# Clean temp files > 24 hours old
-library(repoquet)
-cleanup_temp_files("/path/to/ParquetBasePath")
-
-# Dry run: see what would be removed without deleting
-cleanup_temp_files("/path/to/ParquetBasePath", dry_run = TRUE)
-
-# Clean files > 1 hour old (more aggressive)
-cleanup_temp_files("/path/to/ParquetBasePath", max_age_hours = 1L)
-```
-
-The function logs each cleanup operation. Review the log output to confirm it's
-removing only old temporary files, not active data.
-
-**Prevention:**
-repoquet now includes retry logic and enhanced error handling to minimize
-temporary file accumulation. Future runs should leave fewer temp files.
-
