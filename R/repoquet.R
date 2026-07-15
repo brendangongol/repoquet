@@ -828,12 +828,11 @@ split_csv_by_partition <- function(path, partition_keys = "YEAR", partition_valu
 #### Hive partition specification ##############################################
 ################################################################################
 #### Each MDT row maps one source file to exactly one hive partition          ####
-#### directory. The required MDT columns PartitionKey / PartitionValue drive  ####
-#### this: both must be explicitly populated in the workbook. Multi-level     ####
+#### directory. The optional MDT columns PartitionKey / PartitionValue drive  ####
+#### this: blank or absent means the classic YEAR partition using the row's   ####
+#### Year value, so existing workbooks behave identically. Multi-level        ####
 #### partitions use ";" in both fields ("SITE;YEAR" / "MGH;2019" ->           ####
-#### SITE=MGH/year=2019 style nested directories).                            ####
-#### No legacy defaults or fallbacks are applied; partition identity must be  ####
-#### explicit in the MDT workbook.                                            ####
+#### SITE=MGH/year-style nested directories).                                 ####
 
 #' Sanitize a value for use in a hive partition directory name
 #' @export
@@ -845,37 +844,24 @@ sanitize_partition_value <- function(x) {
 #' Resolve the hive partition keys and values for one MDT row
 #'
 #' Returns the partition specification driving where a source file's Parquet
-#' output lands. Requires explicit \code{PartitionKey} and \code{PartitionValue}
-#' specification in the MDT row. No legacy fallbacks or defaults are applied;
-#' partition identity must be explicit in the workbook.
-#'
+#' output lands. Defaults reproduce the historical behavior: partition key
+#' \code{YEAR} with the row's \code{Year} as its value. When
+#' \code{PartitionValue} is blank the key must be \code{YEAR} (there is nothing
+#' to default a non-year value to).
 #' @param row_meta One row of the MDT (data.frame or data.table).
-#'   Must include \code{PartitionKey} and \code{PartitionValue} columns.
 #' @return A list with \code{keys} (canonical uppercase character vector),
 #'   \code{values} (sanitized character vector, same length), and \code{dir}
 #'   (the relative partition directory, e.g. \code{"site=MGH/year=2019"}).
-#'   Directory key names are lowercased to match hive conventions;
-#'   DuckDB matches hive partition columns case-insensitively.
+#'   Directory key names are lowercased to match the historical \code{year=}
+#'   layout; DuckDB matches hive partition columns case-insensitively.
 #' @seealso \code{\link{ValidateMDTPreflight}} which enforces per-table key
-#'   consistency and PartitionKey/PartitionValue population before any file
-#'   is written.
+#'   consistency before any file is written.
 #' @export
 partition_spec_for_row <- function(row_meta) {
   split_spec <- function(x) trimws(strsplit(as.character(x), ";", fixed = TRUE)[[1]])
   raw_key <- if ("PartitionKey" %in% names(row_meta)) as.character(row_meta$PartitionKey[1]) else NA_character_
   raw_val <- if ("PartitionValue" %in% names(row_meta)) as.character(row_meta$PartitionValue[1]) else NA_character_
-  
-  # Require explicit PartitionKey/PartitionValue specification (no Year fallback)
-  if (is.na(raw_key) || !nzchar(trimws(raw_key))) {
-    stop(sprintf("Row for %s is missing PartitionKey. Partition specification must be explicit (PartitionKey/PartitionValue columns required).",
-                 row_meta$Path[1]))
-  }
-  if (is.na(raw_val) || !nzchar(trimws(raw_val))) {
-    stop(sprintf("Row for %s is missing PartitionValue. Partition specification must be explicit (PartitionKey/PartitionValue columns required).",
-                 row_meta$Path[1]))
-  }
-  
-  keys <- canonical_colnames(split_spec(raw_key))
+  keys <- if (is.na(raw_key) || !nzchar(trimws(raw_key))) "YEAR" else canonical_colnames(split_spec(raw_key))
   invalid_keys <- !grepl("^[A-Z][A-Z0-9_]*$", keys)
   if (any(invalid_keys)) {
     stop(sprintf("Invalid PartitionKey name(s) for %s: %s. Use letters, digits, and underscores, beginning with a letter.",
@@ -885,8 +871,20 @@ partition_spec_for_row <- function(row_meta) {
     stop(sprintf("PartitionKey contains duplicate level name(s) for %s: %s.",
                  row_meta$Path[1], paste(keys[duplicated(keys)], collapse = ", ")))
   }
-  
-  values <- split_spec(raw_val)
+  if (is.na(raw_val) || !nzchar(trimws(raw_val))) {
+    if (!identical(keys, "YEAR")) {
+      stop(sprintf("PartitionValue is blank for %s but PartitionKey is '%s'; only the default YEAR partition can fall back to the Year column.",
+                   paste(row_meta$Path[1], collapse = ""), paste(keys, collapse = ";")))
+    }
+    fallback_year <- if ("Year" %in% names(row_meta)) row_meta$Year[1] else NA
+    if (is.na(fallback_year) || !nzchar(trimws(as.character(fallback_year)))) {
+      stop(sprintf("Row for %s has neither a PartitionValue nor a Year column to fall back to. Populate PartitionKey/PartitionValue in the MDT workbook.",
+                   row_meta$Path[1]))
+    }
+    values <- as.character(fallback_year)
+  } else {
+    values <- split_spec(raw_val)
+  }
   if (length(keys) != length(values)) {
     stop(sprintf("PartitionKey ('%s') and PartitionValue ('%s') disagree on the number of levels for %s.",
                  paste(keys, collapse = ";"), paste(values, collapse = ";"), row_meta$Path[1]))
