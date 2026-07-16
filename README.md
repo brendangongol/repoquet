@@ -197,10 +197,12 @@ Schema decisions remain an intentional human review step.
 
 `generate_real_world_repository()` writes a runnable `DBSetup.xlsx` containing
 curated official sources without downloading them by default. Profiles include
-the complete 26-table MIMIC-III demo, all public NHANES demographic cycles from
-1999-2000 through 2021-2023, two UCI healthcare datasets (including the diabetes
-lookup sections), and current ClinVar summaries useful for atherosclerosis and
-cerebral cavernous malformation discovery.
+the complete open 26-table MIMIC-III demo, metadata for all 26 tables in the
+credentialed MIMIC-III 1.4 release, all 1,593 public continuous NHANES transport
+files across demographics, dietary, examination, laboratory, and questionnaire
+components, all 58 standardized datasets currently returned by UCI's Health and
+Medicine API catalog, and current ClinVar summaries useful for atherosclerosis
+and cerebral cavernous malformation discovery.
 
 ```r
 public_example <- generate_real_world_repository(
@@ -214,18 +216,24 @@ MDT <- openxlsx::read.xlsx(public_example$MDTPath, sheet = "Sheet1")
 MDT <- MaterializeRemoteSources(MDT, public_example$DownloadCachePath)
 ```
 
-Use `profile = "all"` to inventory every curated source. This opts into the
-large MIMIC CHARTEVENTS table and weekly ClinVar variant summary; users should
-review source licenses, citations, download size, and NHANES survey-design
-requirements before analysis. The synthetic generator remains the recommended
-offline smoke test.
+Use `profile = "comprehensive"` (or `"all"`) to inventory every source.
+Credentialed MIMIC-III rows use `DownloadPolicy = "manual"`: users must obtain
+PhysioNet authorization and pre-stage the original `.csv.gz` files in the
+managed cache. repoquet never bypasses access controls or modifies source files.
+To reveal each deterministic cache destination without downloading, call
+`MaterializeRemoteSources(MDT, DownloadCachePath, Offline = TRUE,
+Strict = FALSE)` and inspect `ResolvedSourcePath` for the credentialed rows.
+Users should review source licenses, citations, download size, and NHANES
+survey-design requirements before analysis. The synthetic generator remains the
+recommended offline smoke test.
 
 `inst/extdata/DBSetupV2WithInternetDownload.xlsx` is the expanded healthcare
-example: its operational `Sheet1` preserves all 483 rows from the current HCUP
-inventory and appends all 45 curated internet rows. `SourceCatalog` summarizes
-scope, licensing, and citations; `ClinVarTopics` provides broad, reviewable
-atherosclerosis and CCM discovery filters without duplicating the weekly
-ClinVar source table.
+example. Its operational `Sheet1` preserves all 483 rows from the current HCUP
+inventory and appends 1,705 public or credentialed internet rows. `SourceCatalog`
+summarizes scope, access, licensing, and citations; `AccessGuide` distinguishes
+automatic public downloads from credentialed/manual sources; and
+`ClinVarTopics` provides broad, reviewable atherosclerosis and CCM discovery
+filters without duplicating the weekly ClinVar source table.
 
 ## Canonical Workflow
 

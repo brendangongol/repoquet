@@ -195,13 +195,23 @@ test_that("the synthetic example repository runs the full pipeline end-to-end", 
 test_that("real-world source profiles are complete and network-free", {
   all_sources <- real_world_source_catalog("all")
   expect_equal(sum(all_sources$Database == "MIMICIII_DEMO"), 26L)
-  expect_equal(sum(all_sources$Database == "NHANES"), 12L)
-  expect_equal(sum(grepl("^UCI_", all_sources$Database)), 5L)
+  expect_equal(sum(all_sources$Database == "MIMICIII_FULL"), 26L)
+  expect_equal(sum(all_sources$Database == "NHANES"), 1593L)
+  expect_equal(sum(all_sources$Database == "UCI_HEALTH"), 58L)
   expect_equal(sum(all_sources$Database == "CLINVAR"), 2L)
   expect_true(all(c("ArchiveType", "ArchiveMember", "SourceProvider",
-                    "CitationURL") %in% names(all_sources)))
-  expect_true(any(all_sources$ArchiveMember == "wdbc.data"))
-  expect_true(any(grepl("SectionHeader", all_sources$ReaderOptions, fixed = TRUE)))
+                    "CitationURL", "AccessMode", "AccessRequirements",
+                    "ApproxRows", "DatasetName", "SourceComponent") %in% names(all_sources)))
+  expect_equal(sum(all_sources$Database == "NHANES" &
+                     all_sources$SourceComponent == "Laboratory"), 768L)
+  expect_true(all(all_sources$DownloadPolicy[all_sources$Database == "MIMICIII_FULL"] == "manual"))
+  expect_true(all(all_sources$AccessMode[all_sources$Database == "MIMICIII_FULL"] == "credentialed"))
+  expect_true(any(all_sources$Database == "NHANES" & all_sources$TableName == "DEMO" &
+                    all_sources$PartitionValue == "2021-2023"))
+
+  quick_sources <- real_world_source_catalog("quick")
+  expect_equal(nrow(quick_sources), 11L)
+  expect_false(any(quick_sources$Database == "MIMICIII_FULL"))
 
   root <- tempfile("public_example_")
   on.exit(unlink(root, recursive = TRUE), add = TRUE)

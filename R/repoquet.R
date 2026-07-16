@@ -6797,27 +6797,44 @@ generate_example_repository <- function(dir, seed = 1) {
 #' Returns workbook rows for public sources chosen to exercise relational
 #' tables, schema drift, archive members, labelled transport files, and
 #' larger-than-memory loading. No network request is made.
-#' @param profile Example profile: quick, relational, schema_drift, stress, or all.
-#' @param IncludeLarge Include the 74 MB MIMIC CHARTEVENTS table and the large
-#'   weekly ClinVar variant summary. Defaults to TRUE for stress and all.
+#' @param profile Example profile: quick, relational, schema_drift, stress,
+#'   comprehensive, or all. Comprehensive and all include the packaged full
+#'   NHANES and UCI healthcare catalogs plus credentialed MIMIC-III metadata.
+#' @param IncludeLarge Include sources flagged as large. Defaults to TRUE for
+#'   stress, comprehensive, and all.
 #' @return A data frame ready for DBSetup.xlsx.
 #' @export
 real_world_source_catalog <- function(
-    profile = c("quick", "relational", "schema_drift", "stress", "all"),
+    profile = c("quick", "relational", "schema_drift", "stress", "comprehensive", "all"),
     IncludeLarge = NULL) {
   profile <- match.arg(profile)
-  if (is.null(IncludeLarge)) IncludeLarge <- profile %in% c("stress", "all")
+  if (is.null(IncludeLarge)) IncludeLarge <- profile %in% c("stress", "comprehensive", "all")
   row_frame <- function(Database, MDBDir, Path, TableName, FileType, PartitionKey,
                         PartitionValue, SourceURI, DownloadPolicy = "if_missing",
                         ExpectedSHA256 = "", ArchiveType = "", ArchiveMember = "",
                         Delimiter = "", ReaderOptions = "", SourceProvider = "",
                         SourceRelease = "", SourceLicense = "", CitationURL = "",
-                        SourceNotes = "", Group = "", Large = FALSE) {
+                        SourceNotes = "", AccessMode = "public",
+                        AccessRequirements = "", ApproxRows = NA_real_,
+                        ApproxColumns = NA_real_, DatasetName = "",
+                        SourceComponent = "", Group = "", Large = FALSE) {
     data.frame(Database, MDBDir, Path, TableName, FileType, PartitionKey,
       PartitionValue, SourceURI, DownloadPolicy, ExpectedSHA256, ArchiveType,
       ArchiveMember, Delimiter, ReaderOptions, SourceProvider, SourceRelease,
-      SourceLicense, CitationURL, SourceNotes, Group, Large,
+      SourceLicense, CitationURL, SourceNotes, AccessMode, AccessRequirements,
+      ApproxRows, ApproxColumns, DatasetName, SourceComponent, Group, Large,
       stringsAsFactors = FALSE)
+  }
+  read_packaged_catalog <- function(file) {
+    installed <- system.file("extdata", file, package = "repoquet")
+    candidates <- unique(c(installed,
+      file.path(getwd(), "inst", "extdata", file),
+      file.path("inst", "extdata", file)))
+    candidates <- candidates[nzchar(candidates) & file.exists(candidates)]
+    if (!length(candidates)) {
+      stop(sprintf("Packaged source catalog is unavailable: %s", file))
+    }
+    data.table::fread(candidates[1], encoding = "UTF-8", data.table = TRUE)
   }
 
   mimic_files <- c(
@@ -6862,66 +6879,29 @@ real_world_source_catalog <- function(
     SourceProvider = "PhysioNet", SourceRelease = "MIMIC-III Clinical Database Demo 1.4",
     SourceLicense = "ODbL 1.0", CitationURL = "https://doi.org/10.13026/C2HM2Q",
     SourceNotes = "Complete open-access demo table; NOTEEVENTS intentionally contains no note rows.",
-    Group = "mimic", Large = mimic_files == "CHARTEVENTS.csv")
+    AccessRequirements = "No credentialed access is required for the demo release.",
+    DatasetName = "MIMIC-III Clinical Database Demo", SourceComponent = "Relational table",
+    Group = "mimic_demo", Large = mimic_files == "CHARTEVENTS.csv")
 
-  cycles <- data.frame(
-    YearPath = c("1999", "2001", "2003", "2005", "2007", "2009", "2011", "2013", "2015", "2017", "2017", "2021"),
-    File = c("DEMO.XPT", "DEMO_B.XPT", "DEMO_C.XPT", "DEMO_D.XPT", "DEMO_E.XPT", "DEMO_F.XPT",
-             "DEMO_G.XPT", "DEMO_H.XPT", "DEMO_I.XPT", "DEMO_J.XPT", "P_DEMO.XPT", "DEMO_L.XPT"),
-    Cycle = c("1999-2000", "2001-2002", "2003-2004", "2005-2006", "2007-2008", "2009-2010",
-              "2011-2012", "2013-2014", "2015-2016", "2017-2018", "2017-March 2020", "2021-2023"),
-    stringsAsFactors = FALSE)
-  nhanes <- row_frame("NHANES", "remote/nhanes/demographics", cycles$File,
-    "Demographics", "xpt", "survey_cycle", cycles$Cycle,
-    sprintf("https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/%s/DataFiles/%s", cycles$YearPath, cycles$File),
-    SourceProvider = "CDC/NCHS", SourceRelease = cycles$Cycle,
-    SourceLicense = "United States government public data",
-    CitationURL = "https://wwwn.cdc.gov/nchs/nhanes/Search/DataPage.aspx?Component=Demographics",
-    SourceNotes = "Public demographic transport file. Use NHANES survey weights and design variables for inference.",
-    Group = "nhanes")
+  mimic_full_files <- paste0(mimic_files, ".gz")
+  mimic_full_large <- sub("\\.csv$", "", mimic_files) %in% c(
+    "CHARTEVENTS", "INPUTEVENTS_CV", "INPUTEVENTS_MV", "LABEVENTS",
+    "NOTEEVENTS", "OUTPUTEVENTS", "PRESCRIPTIONS")
+  mimic_full <- row_frame("MIMICIII_FULL", "remote/mimiciii-1.4", mimic_full_files,
+    sub("\\.csv$", "", mimic_files), "gz", "release", "1.4",
+    paste0("https://physionet.org/files/mimiciii/1.4/", mimic_full_files, "?download="),
+    DownloadPolicy = "manual", Delimiter = ",", SourceProvider = "PhysioNet",
+    SourceRelease = "MIMIC-III Clinical Database 1.4",
+    SourceLicense = "PhysioNet Credentialed Health Data License 1.5.0",
+    CitationURL = "https://doi.org/10.13026/C2XW26",
+    SourceNotes = "Complete credentialed MIMIC-III table. Pre-stage the authorized .csv.gz file in the managed cache; repoquet does not bypass PhysioNet access controls.",
+    AccessMode = "credentialed",
+    AccessRequirements = "PhysioNet credentialing, required training, and a signed data use agreement.",
+    DatasetName = "MIMIC-III Clinical Database", SourceComponent = "Relational table",
+    Group = "mimic_full", Large = mimic_full_large)
 
-  wdbc_names <- c("ID", "DIAGNOSIS",
-    paste0(c("RADIUS", "TEXTURE", "PERIMETER", "AREA", "SMOOTHNESS", "COMPACTNESS",
-             "CONCAVITY", "CONCAVE_POINTS", "SYMMETRY", "FRACTAL_DIMENSION"), "_MEAN"),
-    paste0(c("RADIUS", "TEXTURE", "PERIMETER", "AREA", "SMOOTHNESS", "COMPACTNESS",
-             "CONCAVITY", "CONCAVE_POINTS", "SYMMETRY", "FRACTAL_DIMENSION"), "_SE"),
-    paste0(c("RADIUS", "TEXTURE", "PERIMETER", "AREA", "SMOOTHNESS", "COMPACTNESS",
-             "CONCAVITY", "CONCAVE_POINTS", "SYMMETRY", "FRACTAL_DIMENSION"), "_WORST"))
-  wdbc_options <- sprintf('{"Header":false,"ColumnNames":[%s]}',
-    paste(sprintf('"%s"', wdbc_names), collapse = ","))
-  uci17_uri <- "https://archive.ics.uci.edu/static/public/17/breast%2Bcancer%2Bwisconsin%2Bdiagnostic.zip"
-  uci296_uri <- "https://archive.ics.uci.edu/static/public/296/diabetes%2B130-us%2Bhospitals%2Bfor%2Byears%2B1999-2008.zip"
-  uci_rows <- list(
-    row_frame("UCI_BREAST_CANCER", "remote/uci/breast_cancer_diagnostic", "wdbc.data", "Diagnostic",
-      "csv", "release", "1995", uci17_uri,
-      ExpectedSHA256 = "bc154869ef13f753f9e2b5a17e248cfe1ba4b6721db7c4da9f4880e40b05d3af",
-      ArchiveType = "zip", ArchiveMember = "wdbc.data", Delimiter = ",",
-      ReaderOptions = wdbc_options, SourceProvider = "UCI Machine Learning Repository",
-      SourceRelease = "1995", SourceLicense = "CC BY 4.0",
-      CitationURL = "https://doi.org/10.24432/C5DW2B",
-      SourceNotes = "Headerless data; canonical variable names are declared in ReaderOptions.", Group = "uci"),
-    row_frame("UCI_DIABETES", "remote/uci/diabetes_130_hospitals", "diabetic_data.csv", "Encounters",
-      "csv", "release", "2014", uci296_uri,
-      ExpectedSHA256 = "f82ac129da2ddd2299391ff6fbae3a6a58b3edcf59ac9d7bd480c00fe453112a",
-      ArchiveType = "zip", ArchiveMember = "diabetic_data.csv", Delimiter = ",",
-      SourceProvider = "UCI Machine Learning Repository", SourceRelease = "2014",
-      SourceLicense = "CC BY 4.0", CitationURL = "https://doi.org/10.24432/C5230J",
-      SourceNotes = "101,766 deidentified diabetes encounters from 130 US hospitals, 1999-2008.", Group = "uci"))
-  lookup_names <- c(admission_type_id = "AdmissionType",
-                    discharge_disposition_id = "DischargeDisposition",
-                    admission_source_id = "AdmissionSource")
-  uci_rows <- c(uci_rows, lapply(names(lookup_names), function(section) {
-    row_frame("UCI_DIABETES", "remote/uci/diabetes_130_hospitals", paste0(section, ".csv"),
-      unname(lookup_names[[section]]), "csv", "release", "2014", uci296_uri,
-      ExpectedSHA256 = "f82ac129da2ddd2299391ff6fbae3a6a58b3edcf59ac9d7bd480c00fe453112a",
-      ArchiveType = "zip", ArchiveMember = "IDS_mapping.csv", Delimiter = ",",
-      ReaderOptions = sprintf('{"SectionHeader":"%s"}', section),
-      SourceProvider = "UCI Machine Learning Repository", SourceRelease = "2014",
-      SourceLicense = "CC BY 4.0", CitationURL = "https://doi.org/10.24432/C5230J",
-      SourceNotes = "One lookup section extracted in memory from IDS_mapping.csv; the archive remains read-only.",
-      Group = "uci")
-  }))
-  uci <- data.table::rbindlist(uci_rows, fill = TRUE)
+  nhanes <- read_packaged_catalog("NHANESComprehensiveCatalog.csv")
+  uci <- read_packaged_catalog("UCIHealthcareCatalog.csv")
 
   clinvar <- data.table::rbindlist(list(
     row_frame("CLINVAR", "remote/clinvar", "gene_specific_summary.txt", "GeneSpecificSummary", "txt",
@@ -6940,16 +6920,18 @@ real_world_source_catalog <- function(
       Group = "clinvar", Large = TRUE)
   ), fill = TRUE)
 
-  all_rows <- data.table::rbindlist(list(mimic, nhanes, uci, clinvar), fill = TRUE)
+  all_rows <- data.table::rbindlist(list(mimic, mimic_full, nhanes, uci, clinvar), fill = TRUE)
+  all_rows[, Large := as.logical(Large)]
   keep <- switch(profile,
-    quick = (all_rows$Group == "mimic" & all_rows$TableName %in%
+    quick = (all_rows$Group == "mimic_demo" & all_rows$TableName %in%
                c("ADMISSIONS", "DIAGNOSES_ICD", "ICUSTAYS", "PATIENTS", "PROCEDURES_ICD")) |
-      (all_rows$Group == "nhanes" & all_rows$PartitionValue == "2021-2023") |
-      all_rows$Group == "uci" |
+      (all_rows$Group == "nhanes" & all_rows$PartitionValue == "2021-2023" & all_rows$TableName == "DEMO") |
+      (all_rows$Group == "uci" & grepl("^UCI(17|296|519|891)_", all_rows$TableName)) |
       (all_rows$Group == "clinvar" & all_rows$TableName == "GeneSpecificSummary"),
-    relational = all_rows$Group == "mimic",
+    relational = all_rows$Group == "mimic_demo",
     schema_drift = all_rows$Group == "nhanes",
     stress = all_rows$Large,
+    comprehensive = rep(TRUE, nrow(all_rows)),
     all = rep(TRUE, nrow(all_rows)))
   if (!isTRUE(IncludeLarge)) keep <- keep & !all_rows$Large
   out <- all_rows[keep]
@@ -6966,7 +6948,7 @@ real_world_source_catalog <- function(
 #' @return Invisibly, scaffold paths plus the generated MDT in \code{Sources}.
 #' @export
 generate_real_world_repository <- function(
-    dir, profile = c("quick", "relational", "schema_drift", "stress", "all"),
+    dir, profile = c("quick", "relational", "schema_drift", "stress", "comprehensive", "all"),
     IncludeLarge = NULL, Download = FALSE, overwrite = FALSE) {
   profile <- match.arg(profile)
   paths <- create_repository_project(dir, profile = "generic", overwrite = overwrite)

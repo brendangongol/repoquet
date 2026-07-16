@@ -55,6 +55,10 @@
   requiring manual cleanup calls.
 * Added curated real-world repository profiles for the MIMIC-III demo, NHANES
   demographic cycles, UCI healthcare datasets, and ClinVar summaries.
+* Expanded the comprehensive real-world catalog to all 1,593 public continuous
+  NHANES XPT files, all 58 standardized UCI Health and Medicine datasets, and
+  all 26 credentialed MIMIC-III 1.4 tables. Access metadata keeps restricted
+  MIMIC sources manual and explicit.
 * Added `inst/extdata/DBSetupV2WithInternetDownload.xlsx`, preserving the
   current HCUP inventory and appending the complete curated public catalog.
 * Remote acquisition now supports explicit ZIP members with atomic extraction,
