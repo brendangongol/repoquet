@@ -24,30 +24,37 @@ source(RepoquetSourcePath, local = .GlobalEnv)
 #### This is the HCUP specialization of the canonical README workflow. Paths  ####
 #### and tuning below are deployment-specific; the seven operational stages   ####
 #### and their validation behavior intentionally match the generic example.   ####
-MasterDBPath <- "X:/National Databases"
-FormattedDBPath <- "X:/Brendan/NationalDatabases/formattedDatabases"
-ParquetBasePath <- file.path(FormattedDBPath, "parquet")
-CheckpointPath <- file.path(FormattedDBPath, "load_checkpoint.rds")
-LogPath <- file.path(FormattedDBPath, "load_log.txt")
-MDTPath <- "C:/Users/e282219/Downloads/github/repoquet/inst/extdata/DBSetupV2.xlsx"
+# ParquetBasePath <- file.path(FormattedDBPath, "parquet")
+# CheckpointPath <- file.path(FormattedDBPath, "load_checkpoint.rds")
+# LogPath <- file.path(FormattedDBPath, "load_log.txt")
+# SupportingInfoPath <- "C:/Users/e282219/Downloads/github/CECORC/inst/Misc/DatabaseLoadInfo.xlsx"
+# DuckDBTempPath <- file.path(FormattedDBPath, "duckdb_temp")
+# MasterDBPath <- "X:/National Databases"
+# FormattedDBPath <- "X:/Brendan/NationalDatabases/formattedDatabases"
+# MDTPath <- "C:/Users/e282219/Downloads/github/repoquet/inst/extdata/DBSetupV2.xlsx"
+# DuckDBName <- "DuckDBRelationalDatabase.duckdb"
+# DuckDB_GB <- "48GB"
+# n_workers <- min(15L, max(1L, parallel::detectCores() - 1L))
+# PartitionBy <- "FAIL"
+# RAMThreshold <- 30
+# SAV_ROW_THRESHOLD <- 4000000L
+# SAV_CHUNK_SIZE <- 4000000L
+# MaxCoerceNAPct <- 25
+# SourceFingerprintMode <- "metadata"
+# ParquetBasePath <- file.path(cfg$FormattedDBPath, "parquet")
+# CheckpointPath <- file.path(cfg$FormattedDBPath, "load_checkpoint.rds")
+# LogPath <- file.path(cfg$FormattedDBPath, "load_log.txt")
+cfg <- load_repository_config(path = "C:/Users/e282219/Downloads/github/repoquet/inst/examples/healthcare/repository_config.R")
+RepositoryPaths <- RepositoryInitialize(FormattedDBPath = cfg$FormattedDBPath,
+                                        # ParquetBasePath = ParquetBasePath,
+                                        # CheckpointPath = CheckpointPath,
+                                        # LogPath = LogPath,
+                                        profile = "hcup"
+                                        )
 SupportingInfoPath <- "C:/Users/e282219/Downloads/github/CECORC/inst/Misc/DatabaseLoadInfo.xlsx"
-DuckDBName <- "DuckDBRelationalDatabase.duckdb"
-DuckDBTempPath <- file.path(FormattedDBPath, "duckdb_temp")
-DuckDB_GB <- "48GB"
-n_workers <- min(15L, max(1L, parallel::detectCores() - 1L))
-PartitionBy <- "FAIL"
-RAMThreshold <- 30
-SAV_ROW_THRESHOLD <- 4000000L
-SAV_CHUNK_SIZE <- 4000000L
-MaxCoerceNAPct <- 25
-SourceFingerprintMode <- "metadata"
-RepositoryPaths <- RepositoryInitialize(FormattedDBPath = FormattedDBPath,
-                                        ParquetBasePath = ParquetBasePath,
-                                        CheckpointPath = CheckpointPath,
-                                        LogPath = LogPath,
-                                        profile = "hcup")
+DuckDBTempPath <- file.path(cfg$FormattedDBPath, "duckdb_temp")
 RunId <- new_repository_run_id()
-dir.create(ParquetBasePath, recursive = TRUE, showWarnings = FALSE)
+# dir.create(RepositoryPaths$ParquetBasePath, recursive = TRUE, showWarnings = FALSE)
 dir.create(DuckDBTempPath, recursive = TRUE, showWarnings = FALSE)
 
 ###############################################################################
@@ -103,7 +110,7 @@ if (!isTRUE(getOption("CECORC.cleanup_installed"))) {
 #### [WARN] and manifest Status="partial_accepted" instead of failing and    ####
 #### re-reading the whole file on every run. Verified-empty files (declared  ####
 #### and confirmed 0 rows) checkpoint automatically with Status="empty".     ####
-MDT <- openxlsx::read.xlsx(MDTPath, sheet = "Sheet1")
+MDT <- openxlsx::read.xlsx(cfg$MDTPath, sheet = "Sheet1")
 
 #### ONE-TIME MIGRATION (2026-07-11): the case-collision preflight found     ####
 #### three tables whose workbook spellings differed only by case, and the    ####
