@@ -21,6 +21,11 @@ test_that("schema discovery produces observations, review, and finalized catalog
     M, MasterDBPath = fx$root, ObservationPath = observations,
     SchemaReviewPath = review_path, n_workers = 1,
     SourceFingerprintMode = "none"))
+  progress_output <- paste(output, collapse = "\n")
+  expect_match(progress_output, "[SCHEMA PREPARE] Stage 1/3", fixed = TRUE)
+  expect_match(progress_output, "[SCAN PROGRESS] repository schema survey", fixed = TRUE)
+  expect_match(progress_output, "2/2 complete (100.0%)", fixed = TRUE)
+  expect_match(progress_output, "[SCHEMA PREPARE] Stage 3/3", fixed = TRUE)
   expect_true(file.exists(observations))
   expect_true(file.exists(review_path))
 

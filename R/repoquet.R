@@ -2903,16 +2903,75 @@ align_columns <- function(df, all_cols, comprehensive_sample = NULL, max_coerce_
 # Run independent metadata scans in parallel, then retry only worker failures
 # in the main R process. This protects mapped/network drives that are visible
 # to the interactive session but not inherited by multisession workers.
+.format_scan_duration <- function(seconds) {
+  seconds <- max(0, as.numeric(seconds))
+  if (!is.finite(seconds)) return("unknown")
+  if (seconds < 60) return(sprintf("%ds", round(seconds)))
+  if (seconds < 3600) return(sprintf("%dm %02ds", floor(seconds / 60), round(seconds %% 60)))
+  sprintf("%dh %02dm", floor(seconds / 3600), floor((seconds %% 3600) / 60))
+}
+
+.serial_scan_with_progress <- function(items, scan_one, context,
+                                       progress = TRUE, progress_every = NULL) {
+  total <- length(items)
+  if (total == 0L) return(list())
+  if (is.null(progress_every)) progress_every <- min(25L, max(1L, ceiling(total / 20L)))
+  progress_every <- suppressWarnings(as.integer(progress_every[1]))
+  if (is.na(progress_every) || progress_every < 1L) {
+    stop("progress_every must be NULL or a positive integer.")
+  }
+  started <- Sys.time()
+  results <- vector("list", total)
+  scan_formals <- names(formals(scan_one))
+  supports_detail <- all(c("progress", "progress_index", "progress_total") %in% scan_formals)
+  if (isTRUE(progress)) {
+    log_msg(sprintf("[SCAN PROGRESS] %s: starting serial scan of %d item(s).",
+                    context, total))
+  }
+  for (position in seq_len(total)) {
+    item <- items[[position]]
+    results[[position]] <- if (supports_detail) {
+      scan_one(item, progress = isTRUE(progress),
+               progress_index = position, progress_total = total)
+    } else {
+      scan_one(item)
+    }
+    if (isTRUE(progress) && (position %% progress_every == 0L || position == total)) {
+      elapsed <- as.numeric(difftime(Sys.time(), started, units = "secs"))
+      eta <- if (position >= total || elapsed <= 0) 0 else elapsed * (total - position) / position
+      log_msg(sprintf(paste0("[SCAN PROGRESS] %s: %d/%d complete (%.1f%%); ",
+                             "elapsed %s; ETA %s."),
+                      context, position, total, 100 * position / total,
+                      .format_scan_duration(elapsed), .format_scan_duration(eta)))
+    }
+  }
+  results
+}
+
 .parallel_scan_with_serial_retry <- function(items, scan_one, n_workers = 1,
                                             future_packages = character(),
                                             is_failure = is.null,
-                                            context = "source metadata scan") {
+                                            context = "source metadata scan",
+                                            progress = TRUE,
+                                            progress_every = NULL) {
   if (length(items) == 0L) return(list())
-  if (as.integer(n_workers) <= 1L) return(lapply(items, scan_one))
+  force(items)
+  force(scan_one)
+  n_workers <- max(1L, as.integer(n_workers[1]))
+  if (n_workers <= 1L) {
+    return(.serial_scan_with_progress(
+      items, scan_one, context, progress = progress,
+      progress_every = progress_every))
+  }
+
+  if (isTRUE(progress)) {
+    log_msg(sprintf("[SCAN START] %s: submitting %d item(s) to %d worker(s).",
+                    context, length(items), n_workers))
+  }
 
   old_plan <- future::plan()
   on.exit(future::plan(old_plan), add = TRUE)
-  future::plan(future::multisession, workers = as.integer(n_workers))
+  future::plan(future::multisession, workers = n_workers)
   parallel_error <- NULL
   results <- tryCatch(
     future.apply::future_lapply(items, scan_one, future.seed = NULL,
@@ -2927,11 +2986,19 @@ align_columns <- function(df, all_cols, comprehensive_sample = NULL, max_coerce_
   if (is.null(results)) {
     log_msg(sprintf("[PARALLEL FALLBACK] %s failed before producing results (%s); retrying all %d item(s) serially.",
                     context, parallel_error, length(items)))
-    return(lapply(items, scan_one))
+    return(.serial_scan_with_progress(
+      items, scan_one, context, progress = progress,
+      progress_every = progress_every))
   }
 
   failed <- vapply(results, is_failure, logical(1))
-  if (!any(failed)) return(results)
+  if (!any(failed)) {
+    if (isTRUE(progress)) {
+      log_msg(sprintf("[SCAN COMPLETE] %s: %d/%d item(s) completed in parallel.",
+                      context, length(results), length(items)))
+    }
+    return(results)
+  }
 
   retry_indices <- which(failed)
   failure_messages <- unique(vapply(results[retry_indices], function(result) {
@@ -2945,7 +3012,9 @@ align_columns <- function(df, all_cols, comprehensive_sample = NULL, max_coerce_
                   context, length(retry_indices)))
   log_msg(sprintf("[PARALLEL FALLBACK] First worker error(s): %s",
                   paste(utils::head(failure_messages, 3L), collapse = " | ")))
-  retried <- lapply(items[retry_indices], scan_one)
+  retried <- .serial_scan_with_progress(
+    items[retry_indices], scan_one, paste0(context, " serial retry"),
+    progress = progress, progress_every = progress_every)
   results[retry_indices] <- retried
   recovered <- !vapply(retried, is_failure, logical(1))
   if (any(recovered)) {
@@ -7431,7 +7500,9 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
 
 .profile_delimited_schema <- function(path, reader, reader_options = list(), chunk_size = 100000L,
                                       ValuePreviewMaxDistinct = 15L,
-                                      ValuePreviewTypes = c("character", "integer", "int64", "logical")) {
+                                      ValuePreviewTypes = c("character", "integer", "int64", "logical"),
+                                      Progress = FALSE, ProgressContext = NULL,
+                                      ProgressIntervalSeconds = 30) {
   header <- call_reader(reader, "read_header", path, reader_options = reader_options)
   columns <- canonical_colnames(header)
   accumulators <- stats::setNames(vector("list", length(columns)), columns)
@@ -7483,6 +7554,8 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
   }
 
   total_rows <- 0
+  profile_started <- Sys.time()
+  last_progress <- profile_started
   # Use one sequential logical-record pass for every delimited format. This
   # remains memory bounded and avoids offset-based O(n^2) decompression for
   # gzip sources while applying the same malformed-row policy as loading.
@@ -7491,6 +7564,20 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
     callback = function(df) {
       total_rows <<- total_rows + nrow(df)
       update_profile(df)
+      now <- Sys.time()
+      since_update <- as.numeric(difftime(now, last_progress, units = "secs"))
+      if (isTRUE(Progress) && since_update >= ProgressIntervalSeconds) {
+        elapsed <- as.numeric(difftime(now, profile_started, units = "secs"))
+        label <- if (is.null(ProgressContext) || !nzchar(ProgressContext)) {
+          basename(path)
+        } else {
+          ProgressContext
+        }
+        log_msg(sprintf("[SCHEMA PROGRESS] %s: %s row(s) profiled; elapsed %s.",
+                        label, format(total_rows, big.mark = ",", scientific = FALSE),
+                        .format_scan_duration(elapsed)))
+        last_progress <<- now
+      }
     })
 
   finalize <- function(acc) {
@@ -7544,7 +7631,9 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
 .survey_schema_source <- function(row_meta, MasterDBPath, SourceFingerprintMode = "metadata",
                                   ValuePreviewMaxDistinct = 15L,
                                   ValuePreviewTypes = c("character", "integer", "int64", "logical"),
-                                  ValuePreviewIdentifiers = FALSE) {
+                                  ValuePreviewIdentifiers = FALSE,
+                                  Progress = FALSE, ProgressContext = NULL,
+                                  ProgressIntervalSeconds = 30) {
   full_path <- source_path_for_row(row_meta, MasterDBPath)
   encoding_info <- NULL
   warnings_seen <- character(0)
@@ -7580,7 +7669,9 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
       profile <- capture_warnings(.profile_delimited_schema(
         full_path, rd, options,
         ValuePreviewMaxDistinct = ValuePreviewMaxDistinct,
-        ValuePreviewTypes = ValuePreviewTypes))
+        ValuePreviewTypes = ValuePreviewTypes,
+        Progress = Progress, ProgressContext = ProgressContext,
+        ProgressIntervalSeconds = ProgressIntervalSeconds))
       sample_rows <- profile$Rows
       sample_columns <- names(profile$Stats)
       stats_for <- function(column) profile$Stats[[column]]
@@ -7749,7 +7840,9 @@ SurveyRepositorySchema <- function(MDT, MasterDBPath, ObservationPath,
                                    ValuePreviewMaxDistinct = 15L,
                                    ValuePreviewTypes = c("character", "integer", "int64", "logical"),
                                    ValuePreviewIdentifiers = FALSE,
-                                   LogPath = NULL, RunId = NULL) {
+                                   LogPath = NULL, RunId = NULL,
+                                   Progress = TRUE, ProgressEvery = NULL,
+                                   ProgressIntervalSeconds = 30) {
   SourceFingerprintMode <- match.arg(SourceFingerprintMode)
   ValuePreviewMaxDistinct <- suppressWarnings(as.integer(ValuePreviewMaxDistinct[1]))
   if (is.na(ValuePreviewMaxDistinct) || ValuePreviewMaxDistinct < 1L ||
@@ -7764,6 +7857,10 @@ SurveyRepositorySchema <- function(MDT, MasterDBPath, ObservationPath,
   if (length(ObservationPath) != 1L || is.na(ObservationPath) || !nzchar(trimws(ObservationPath))) {
     stop("ObservationPath must be one non-empty Parquet file path.")
   }
+  ProgressIntervalSeconds <- suppressWarnings(as.numeric(ProgressIntervalSeconds[1]))
+  if (!is.finite(ProgressIntervalSeconds) || ProgressIntervalSeconds < 1) {
+    stop("ProgressIntervalSeconds must be a positive number of seconds.")
+  }
   if (tolower(tools::file_ext(ObservationPath)) != "parquet") {
     stop("ObservationPath must end in .parquet.")
   }
@@ -7775,19 +7872,31 @@ SurveyRepositorySchema <- function(MDT, MasterDBPath, ObservationPath,
   MDTdt <- data.table::as.data.table(MDT)
   if (!is.null(DBLoad)) MDTdt <- MDTdt[as.character(Database) %in% as.character(DBLoad)]
   if (nrow(MDTdt) == 0L) stop("Schema survey has no MDT rows to inspect.")
-  scan_one <- function(i) {
+  scan_one <- function(i, progress = FALSE, progress_index = NULL, progress_total = NULL) {
     register_builtin_file_readers()
+    row <- MDTdt[i, ]
+    progress_context <- if (isTRUE(progress)) {
+      sprintf("source %d/%d (%s/%s: %s)",
+              progress_index, progress_total,
+              as.character(row$Database[1]), as.character(row$TableName[1]),
+              basename(source_path_for_row(row, MasterDBPath)))
+    } else {
+      NULL
+    }
     .survey_schema_source(
-      MDTdt[i, ], MasterDBPath, SourceFingerprintMode,
+      row, MasterDBPath, SourceFingerprintMode,
       ValuePreviewMaxDistinct = ValuePreviewMaxDistinct,
       ValuePreviewTypes = ValuePreviewTypes,
-      ValuePreviewIdentifiers = ValuePreviewIdentifiers)
+      ValuePreviewIdentifiers = ValuePreviewIdentifiers,
+      Progress = progress, ProgressContext = progress_context,
+      ProgressIntervalSeconds = ProgressIntervalSeconds)
   }
   results <- .parallel_scan_with_serial_retry(
     seq_len(nrow(MDTdt)), scan_one, n_workers = n_workers,
     future_packages = c("data.table", "haven", "arrow", "bit64", "openxlsx", "stringi"),
     is_failure = function(x) !is.list(x) || !isTRUE(x$ok),
-    context = "repository schema survey"
+    context = "repository schema survey",
+    progress = Progress, progress_every = ProgressEvery
   )
   observations <- data.table::rbindlist(lapply(results, `[[`, "data"), fill = TRUE)
   dir.create(dirname(ObservationPath), recursive = TRUE, showWarnings = FALSE)
@@ -9325,7 +9434,14 @@ PrepareSchemaRegistry <- function(MDT, MasterDBPath, ObservationPath, SchemaRevi
                                   ValuePreviewMaxDistinct = 15L,
                                   ValuePreviewTypes = c("character", "integer", "int64", "logical"),
                                   ValuePreviewIdentifiers = FALSE,
-                                  LogPath = NULL, RunId = NULL) {
+                                  LogPath = NULL, RunId = NULL,
+                                  Progress = TRUE, ProgressEvery = NULL,
+                                  ProgressIntervalSeconds = 30) {
+  selected_sources <- if (is.null(DBLoad)) nrow(MDT) else
+    sum(as.character(MDT$Database) %in% as.character(DBLoad))
+  log_msg(sprintf(paste0("[SCHEMA PREPARE] Stage 1/3: surveying %d source(s). ",
+                         "Delimited files are fully profiled in memory-bounded chunks."),
+                  selected_sources), log_path = LogPath, run_id = RunId)
   survey <- SurveyRepositorySchema(MDT = MDT, MasterDBPath = MasterDBPath,
                                    ObservationPath = ObservationPath, DBLoad = DBLoad,
                                    n_workers = n_workers,
@@ -9334,13 +9450,19 @@ PrepareSchemaRegistry <- function(MDT, MasterDBPath, ObservationPath, SchemaRevi
                                    ValuePreviewMaxDistinct = ValuePreviewMaxDistinct,
                                    ValuePreviewTypes = ValuePreviewTypes,
                                    ValuePreviewIdentifiers = ValuePreviewIdentifiers,
+                                   Progress = Progress, ProgressEvery = ProgressEvery,
+                                   ProgressIntervalSeconds = ProgressIntervalSeconds,
                                    LogPath = LogPath, RunId = RunId)
+  log_msg("[SCHEMA PREPARE] Stage 2/3: deriving type recommendations and compatibility decisions.",
+          log_path = LogPath, run_id = RunId)
   proposal <- RecommendRepositorySchema(
     survey = survey, SchemaRegistryPath = SchemaRegistryPath,
     schema_registry = schema_registry, SchemaProfile = match.arg(SchemaProfile),
     ValuePreviewMaxDistinct = ValuePreviewMaxDistinct,
     ValuePreviewTypes = ValuePreviewTypes,
     ValuePreviewIdentifiers = ValuePreviewIdentifiers)
+  log_msg("[SCHEMA PREPARE] Stage 3/3: writing the schema review workbook.",
+          log_path = LogPath, run_id = RunId)
   written <- WriteSchemaProposal(proposal, SchemaReviewPath)
   review_status <- attr(written, "ReviewStatus")
   log_msg(sprintf(paste0("[SCHEMA READY] Open StartHere in %s: %d column decision(s), ",
