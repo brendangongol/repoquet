@@ -2,7 +2,7 @@
 repository_config <- list(
   MasterDBPath    = "X:/National Databases",   # root of the source data files
   FormattedDBPath = "X:/Brendan/NationalDatabases/formattedDatabases",   # parquet store, checkpoints, logs, catalog
-  MDTPath         = "C:/Users/e282219/Downloads/github/repoquet/inst/extdata/DBSetupV2.xlsx",   # the Master Database Table workbook
+  MDTPath         = "C:/Users/e282219/Downloads/github/repoquet/inst/extdata/DBSetupV2WithDEMODownload.xlsx",   # the Master Database Table workbook
   PartitionBy       = "FAIL",     # NRows | RAMEstimate | FAIL
   SAV_ROW_THRESHOLD = 4000000L,    # rows above which files stream in chunks
   SAV_CHUNK_SIZE    = 4000000L,    # rows per chunk

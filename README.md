@@ -81,27 +81,16 @@ highest precedence; a named `overrides` list is useful when settings are built
 programmatically:
 
 ```r
-cfg <- load_repository_config(
-  "repository_config.R",
-  n_workers = 1L,
-  PartitionBy = "RAMEstimate",
-  overrides = list(RAMThreshold = 16, DuckDB_GB = "6GB")
-)
+cfg <- load_repository_config("repository_config.R",
+                              n_workers = 1L,
+                              PartitionBy = "RAMEstimate",
+                              overrides = list(RAMThreshold = 16, DuckDB_GB = "6GB"))
 ```
 
 Precedence is: package defaults, configuration file, `overrides`, then explicit
 arguments. Runtime overrides change only the returned list and never modify
 `repository_config.R`.
 
-The command-line equivalent is:
-
-```text
-Rscript inst/scripts/repoquet.R init ~/my_repository generic
-Rscript inst/scripts/repoquet.R validate ~/my_repository
-Rscript inst/scripts/repoquet.R catalog ~/my_repository
-Rscript inst/scripts/repoquet.R load ~/my_repository
-Rscript inst/scripts/repoquet.R audit ~/my_repository
-```
 
 ## DBSetup Workbook
 
@@ -153,20 +142,6 @@ relative member, and both the archive download and extracted file are replaced
 atomically. Headerless delimited data can declare `Header` and `ColumnNames` in
 `ReaderOptions`; a small multi-section lookup file can declare `SectionHeader`.
 
-Delimited sources are strict by default. If a vendor file contains a verified
-one-field line that continues the preceding record, configure that source row
-without editing the source itself:
-
-```json
-{"MalformedRowPolicy":"append_previous","ContinuationColumn":"DESCRIPTION","ContinuationJoin":" "}
-```
-
-The same memory-bounded logical-record reader is then used for schema discovery
-and repository loading. Corrected records flow directly to schema inference or
-Parquet chunks; repoquet does not create a cleaned CSV or overwrite the source.
-
-
-It is an example inventory rather than a required package configuration.
 
 ## Minimal Runnable Example
 
@@ -204,15 +179,31 @@ components, all 58 standardized datasets currently returned by UCI's Health and
 Medicine API catalog, and current ClinVar summaries useful for atherosclerosis
 and cerebral cavernous malformation discovery.
 
-```r
-public_example <- generate_real_world_repository(
-  "~/repoquet_public_example",
-  profile = "quick",
-  Download = FALSE
-)
+DBSetup.xlsx loaded into `MDT` drives hive partitioning with two columns:
+  PartitionKey   -- hive key name(s) for each file's partition dir
+  PartitionValue -- the value(s) that file belongs to the PartitionKey
+These columns are required on every row. 
+Example year partitioning: 
+  PartitionKey = "year", PartitionValue = "2019" -> parquet/<DB>_<Table>/year=2019/*.parquet
+Example site partitioning:          
+  PartitionKey = "SITE", PartitionValue = "MGH" -> parquet/<DB>_<Table>/site=MGH/*.parquet
+Nested partitions use ";" in both:
+  PartitionKey = "SITE;YEAR", PartitionValue = "MGH;2019" -> parquet/<DB>_<Table>/site=MGH/year=2019/*.parquet
 
+Checkpoint identities are used to monitor unique table writed and are derived from PartitionKey and 
+PartitionValue. This needs to be unique to avoid over-writing tables. This is enforced by
+ValidateMDTPreflight below before anything is written. 
+
+```r
+public_example <- generate_real_world_repository("~/repoquet_public_example", profile = "quick", Download = FALSE)
 # Review DBSetup.xlsx, then materialize its declared sources:
 MDT <- openxlsx::read.xlsx(public_example$MDTPath, sheet = "Sheet1")
+ValidateMDTPreflight(MDT = MDT, strict = TRUE, logStatus = TRUE,
+                     ParquetBasePath = paths$ParquetBasePath,
+                     MaxFileStemTruncate = TRUE,
+                     TerminalHivePartition = FALSE,
+                     MasterDBPath = cfg$MasterDBPath,
+                     LogPath = paths$LogPath, RunId = RunId)
 MDT <- MaterializeRemoteSources(MDT, public_example$DownloadCachePath)
 ```
 
@@ -227,13 +218,6 @@ Users should review source licenses, citations, download size, and NHANES
 survey-design requirements before analysis. The synthetic generator remains the
 recommended offline smoke test.
 
-`inst/extdata/DBSetupV2WithInternetDownload.xlsx` is the expanded healthcare
-example. Its operational `Sheet1` preserves all 483 rows from the current HCUP
-inventory and appends 1,705 public or credentialed internet rows. `SourceCatalog`
-summarizes scope, access, licensing, and citations; `AccessGuide` distinguishes
-automatic public downloads from credentialed/manual sources; and
-`ClinVarTopics` provides broad, reviewable atherosclerosis and CCM discovery
-filters without duplicating the weekly ClinVar source table.
 
 ## Canonical Workflow
 
@@ -276,7 +260,6 @@ so log, manifest, validation, and audit records can be traced to the same run.
 
 ```r
 source("R/repoquet.R")
-
 example <- generate_example_repository("~/my_repository_example")
 cfg <- load_repository_config(example$ConfigPath)
 paths <- RepositoryInitialize(cfg$FormattedDBPath, profile = "generic")
@@ -308,21 +291,42 @@ ValidateMDTPreflight(
   LogPath = paths$LogPath,
   RunId = RunId
 )
-MDT <- MaterializeRemoteSources(
-  MDT = MDT,
-  DownloadCachePath = paths$DownloadCachePath,
-  Offline = isTRUE(cfg$RemoteOffline),
-  DefaultDownloadPolicy = cfg$DownloadPolicy %||% "if_missing",
-  TimeoutSeconds = cfg$DownloadTimeout %||% 600,
-  LogPath = paths$LogPath,
-  RunId = RunId
-)
-pending <- MDTCompleteStatus(
-  MDT = MDT,
-  CheckpointPath = paths$CheckpointPath,
-  verbose = TRUE,
-  logStatus = TRUE
-)
+```
+
+Changing a row's \code{TableName} in the workbook (e.g. after a case-collision preflight error)
+changes that row's checkpoint identity, so already-loaded files would be
+re-ingested. This helper rewrites the affected checkpoint entries (both the
+generalized and legacy key formats) and the manifest's TableName/DuckDBTable
+fields in place, so completed files stay completed under the new name.
+Run it once on the loading machine after editing the workbook; the MDT you
+pass must already carry the NEW TableName. It's recommended to fun with 
+DryRun = TRUE first to monitor what will be changed before running DryRun = FALSE
+to make changes. 
+
+```r
+rename_checkpoint_table(CheckpointPath, MDT, "NRD", "CORE", "Core", RepositoryPaths$ManifestPath, DryRun = TRUE)
+# Optionally, once loaded checkpoints are migrated to generalized keys:
+migrate_checkpoint_keys(CheckpointPath, MDT, DryRun = TRUE)
+```
+
+Optional: remote acquisition. 
+Download data from the internet using the SourceURI column in MDT. 
+The SourceURI must be a direct HTTP/HTTPS file URL; Path remains its stable logical filename. 
+Remote files are copied atomically into SourceCache and every later stage reads that managed
+local copy. 
+
+```r
+MDT <- MaterializeRemoteSources(MDT = MDT,
+                                DownloadCachePath = paths$DownloadCachePath,
+                                Offline = isTRUE(cfg$RemoteOffline),
+                                DefaultDownloadPolicy = cfg$DownloadPolicy %||% "if_missing",
+                                TimeoutSeconds = cfg$DownloadTimeout %||% 600,
+                                LogPath = paths$LogPath,
+                                RunId = RunId)
+pending <- MDTCompleteStatus(MDT = MDT,
+                             CheckpointPath = paths$CheckpointPath,
+                             verbose = TRUE,
+                             logStatus = TRUE)
 ```
 
 ### 3. Survey And Recommend Schemas
@@ -338,29 +342,27 @@ A remote source's managed cache contains its original downloaded bytes, not
 rewritten records.
 
 ```r
-prepared <- PrepareSchemaRegistry(
-  MDT = MDT,
-  DBLoad = DBLoad,
-  MasterDBPath = cfg$MasterDBPath,
-  ObservationPath = paths$SchemaObservationPath,
-  SchemaReviewPath = paths$SchemaReviewPath,
-  SchemaRegistryPath = paths$SchemaRegistryPath,
-  n_workers = cfg$n_workers,
-  SourceFingerprintMode = cfg$SourceFingerprintMode,
-  ValuePreviewMaxDistinct = 15L,
-  ValuePreviewTypes = c("character", "integer", "int64", "logical"),
-  ValuePreviewIdentifiers = FALSE,
-  LogPath = paths$LogPath,
-  RunId = RunId
-)
+DBLoad <- sort(unique(MDT$Database))
+prepared <- PrepareSchemaRegistry(MDT = MDT,
+                                  DBLoad = DBLoad,
+                                  MasterDBPath = cfg$MasterDBPath,
+                                  ObservationPath = paths$SchemaObservationPath,
+                                  SchemaReviewPath = paths$SchemaReviewPath,
+                                  n_workers = cfg$n_workers,
+                                  SourceFingerprintMode = cfg$SourceFingerprintMode,
+                                  StrictReaders = FALSE,
+                                  ValuePreviewMaxDistinct = 15L,
+                                  ValuePreviewTypes = c("character", "integer", "int64", "logical"),
+                                  ValuePreviewIdentifiers = FALSE,
+                                  SchemaRegistryPath = paths$SchemaRegistryPath,
+                                  SchemaProfile = "hcup",
+                                  LogPath = paths$LogPath,
+                                  RunId = RunId )
 
 # Optional bounded issue preview; this query does not load all observations.
-schema_issues <- GetSchemaObservations(
-  ObservationPath = paths$SchemaObservationPath,
-  IssuesOnly = TRUE,
-  Limit = 100L
-)
-if (nrow(schema_issues) > 0L) print(schema_issues)
+schema_issues <- GetSchemaObservations(ObservationPath = paths$SchemaObservationPath,
+                                       IssuesOnly = TRUE, Limit = 100L)
+if(nrow(schema_issues) > 0L){ print(schema_issues) }
 ```
 
 ### 4. Review And Finalize The Catalog
@@ -377,12 +379,35 @@ omits the mapping. `FinalizeSchemaRegistry()` refuses unresolved blocking
 decisions and writes `TableSchemas.xlsx` in the exact format consumed by the
 Parquet writer. A second survey is unnecessary unless source evidence changes.
 
+In summary: 
+StartHere identifies every blocking item and its worksheet. 
+ColumnDecisions contains only genuinely ambiguous evidence or reader 
+warnings. Safe promotions are automatic; PolicyReport records policy 
+differences without forcing repetitive decisions. For every visible 
+ColumnDecisions row: 
+  Decision = "Accept" keeps RecommendedType. 
+  Decision = "Override" requires the desired ApprovedType. 
+CompatibilityDecisions contains unresolved same-named table conflicts: 
+  Accept   = use RecommendedCommonType for that approved merge group. 
+  Override = use ApprovedCommonType instead. 
+  Ignore   = the similarly named fields are intentionally kept apart. 
+DictionaryReview contains code meanings such as 1 = Yes: 
+  Accept   = keep a proposed source label for this partition scope. 
+  Add      = add an optional label where no source meaning exists. 
+  Override = replace a source label with ApprovedLabel. 
+  Ignore   = omit a conflicting mapping from the finalized dictionary. 
+PolicyPattern/PolicyType show every SchemaRegistry.xlsx match, including 
+cases where the observed data makes the policy potentially lossy. 
+After review, run FinalizeSchemaRegistry below; a second survey is not 
+needed. Rerun the survey after fixing SourceIssues or changing sources. 
+Existing decisions survive only while their observation signature is 
+unchanged; changed evidence returns to the appropriate decision sheet. 
+Finalization stops here until all required decisions are complete, then 
+writes TableSchemas.xlsx in the exact format ParquetBackEndCreate uses.
+
 ```r
-repository_catalog <- FinalizeSchemaRegistry(
-  SchemaReviewPath = paths$SchemaReviewPath,
-  TableSchemaPath = paths$TableSchemaPath,
-  strict = TRUE
-)
+repository_catalog <- FinalizeSchemaRegistry(SchemaReviewPath = paths$SchemaReviewPath,
+                                             TableSchemaPath = paths$TableSchemaPath, strict = TRUE)
 ```
 
 ### 5. Load Partitioned Parquet
@@ -400,39 +425,37 @@ as an accessible presentation copy. Because preflight already ran in step 2,
 this call uses `RunPreflight = FALSE`.
 
 ```r
-result <- ParquetBackEndCreate(
-  MDT = MDT,
-  DBLoad = DBLoad,
-  MasterDBPath = cfg$MasterDBPath,
-  completed_checkpoint = load_checkpoint(paths$CheckpointPath),
-  CheckpointPath = paths$CheckpointPath,
-  ParquetBasePath = paths$ParquetBasePath,
-  LogPath = paths$LogPath,
-  n_workers = cfg$n_workers,
-  PartitionBy = cfg$PartitionBy,
-  RAMThreshold = cfg$RAMThreshold,
-  SAV_ROW_THRESHOLD = cfg$SAV_ROW_THRESHOLD,
-  SAV_CHUNK_SIZE = cfg$SAV_CHUNK_SIZE,
-  MaxFileStemTruncate = TRUE,
-  TerminalHivePartition = FALSE,
-  SchemaRegistryPath = paths$SchemaRegistryPath,
-  TableSchemaPath = paths$TableSchemaPath,
-  ManifestPath = paths$ManifestPath,
-  MetadataWorkbookPath = paths$ManifestWorkbookPath,
-  UseSchemaCatalog = TRUE,
-  StrictPreflight = TRUE,
-  StrictSchemaValidation = TRUE,
-  RunPreflight = FALSE,
-  DownloadCachePath = paths$DownloadCachePath,
-  MaterializeRemote = FALSE, # already resolved before schema survey
-  SourceFingerprintMode = cfg$SourceFingerprintMode,
-  MaxCoerceNAPct = cfg$MaxCoerceNAPct,
-  AutoCleanup = TRUE,
-  CleanupAfterPhase = "database",
-  StopOnFileError = TRUE,
-  ReturnRunResult = TRUE,
-  RunId = RunId
-)
+result <- ParquetBackEndCreate(MDT = MDT,
+                               DBLoad = DBLoad,
+                               MasterDBPath = cfg$MasterDBPath,
+                               completed_checkpoint = load_checkpoint(paths$CheckpointPath),
+                               CheckpointPath = paths$CheckpointPath,
+                               ParquetBasePath = paths$ParquetBasePath,
+                               LogPath = paths$LogPath,
+                               n_workers = cfg$n_workers,
+                               PartitionBy = cfg$PartitionBy,
+                               RAMThreshold = cfg$RAMThreshold,
+                               SAV_ROW_THRESHOLD = cfg$SAV_ROW_THRESHOLD,
+                               SAV_CHUNK_SIZE = cfg$SAV_CHUNK_SIZE,
+                               MaxFileStemTruncate = TRUE,
+                               TerminalHivePartition = FALSE,
+                               SchemaRegistryPath = paths$SchemaRegistryPath,
+                               TableSchemaPath = paths$TableSchemaPath,
+                               ManifestPath = paths$ManifestPath,
+                               MetadataWorkbookPath = paths$ManifestWorkbookPath,
+                               UseSchemaCatalog = TRUE,
+                               StrictPreflight = TRUE,
+                               StrictSchemaValidation = TRUE,
+                               RunPreflight = FALSE,
+                               DownloadCachePath = paths$DownloadCachePath,
+                               MaterializeRemote = FALSE, # already resolved before schema survey
+                               SourceFingerprintMode = cfg$SourceFingerprintMode,
+                               MaxCoerceNAPct = cfg$MaxCoerceNAPct,
+                               AutoCleanup = TRUE,
+                               CleanupAfterPhase = "database",
+                               StopOnFileError = TRUE,
+                               ReturnRunResult = TRUE,
+                               RunId = RunId)
 print(result)
 
 SummaryVerification(
@@ -504,58 +527,43 @@ range, allowed-value, regex, and foreign-key checks.
 ```r
 TempDirPath <- file.path(cfg$FormattedDBPath, "duckdb_temp")
 dir.create(TempDirPath, recursive = TRUE, showWarnings = FALSE)
-
-con <- open_duckdb(
-  FormattedDBPath = cfg$FormattedDBPath,
-  DBName = cfg$DBName,
-  TempDirPath = TempDirPath,
-  GB = cfg$DuckDB_GB,
-  ReadOnly = FALSE
-)
-done <- MDT[checkpoint_completed_mask(
-  MDT,
-  result$checkpoint,
-  MasterDBPath = cfg$MasterDBPath,
-  SourceFingerprintMode = cfg$SourceFingerprintMode
-), ]
-register_parquet_view_compile(
-  con = con,
-  ParquetBasePath = paths$ParquetBasePath,
-  tables_written = unique(repository_table_names(done)),
-  TableSchemaPath = paths$TableSchemaPath,
-  SchemaRegistryPath = paths$SchemaRegistryPath,
-  validate = TRUE,
-  strict_validation = TRUE,
-  LogPath = paths$LogPath,
-  RunId = RunId
-)
-contract_results <- validate_data_contracts(
-  con = con,
-  DataContractPath = paths$DataContractPath,
-  strict = TRUE,
-  LogPath = paths$LogPath,
-  RunId = RunId
-)
-
+con <- open_duckdb(FormattedDBPath = cfg$FormattedDBPath,
+                   DBName = cfg$DBName,
+                   TempDirPath = TempDirPath,
+                   GB = cfg$DuckDB_GB,
+                   ReadOnly = FALSE)
+done <- MDT[checkpoint_completed_mask(MDT, 
+                                      result$checkpoint,
+                                      MasterDBPath = cfg$MasterDBPath,
+                                      SourceFingerprintMode = cfg$SourceFingerprintMode ), ]
+register_parquet_view_compile(con = con,
+                              ParquetBasePath = paths$ParquetBasePath,
+                              tables_written = unique(repository_table_names(done)),
+                              TableSchemaPath = paths$TableSchemaPath,
+                              SchemaRegistryPath = paths$SchemaRegistryPath,
+                              validate = TRUE,
+                              strict_validation = TRUE,
+                              LogPath = paths$LogPath,
+                              RunId = RunId)
+contract_results <- validate_data_contracts(con = con,
+                                            DataContractPath = paths$DataContractPath,
+                                            strict = TRUE,
+                                            LogPath = paths$LogPath,
+                                            RunId = RunId)
 # Reopen read-only after view creation for safer analytical sessions.
-DBI::dbDisconnect(con, shutdown = TRUE)
-con <- open_duckdb(
-  FormattedDBPath = cfg$FormattedDBPath,
-  DBName = cfg$DBName,
-  TempDirPath = TempDirPath,
-  GB = cfg$DuckDB_GB,
-  ReadOnly = TRUE
-)
-
+if(exists("con") && DBI::dbIsValid(con)){ DBI::dbDisconnect(con, shutdown = TRUE) }
+con <- open_duckdb(FormattedDBPath = cfg$FormattedDBPath,
+                   DBName = cfg$DBName,
+                   TempDirPath = TempDirPath,
+                   GB = cfg$DuckDB_GB,
+                   ReadOnly = TRUE)
 # Optional dictionary-assisted discovery and decoding.
 describe_column(paths$TableSchemaPath, "SALES", "Orders", "STATUS")
-decoded <- decode_column(
-  con = con,
-  table = "SALES_Orders",
-  column = "STATUS",
-  TableSchemaPath = paths$TableSchemaPath,
-  limit = 1000L
-)
+decoded <- decode_column(con = con,
+                         table = "SALES_Orders",
+                         column = "STATUS",
+                         TableSchemaPath = paths$TableSchemaPath,
+                         limit = 1000L)
 ```
 
 ### 7. Reconcile Repository State
@@ -564,19 +572,17 @@ decoded <- decode_column(
 inventory, checkpoint, transactional manifest, Parquet files on disk, and
 DuckDB row counts. It reports stale checkpoints, missing outputs, orphaned
 Parquet, manifest divergence, and count mismatches; it does not delete or repair
-anything automatically. Review its detail tables before using a targeted reset
-or rerunning the loader.
+anything automatically. Review its detail tables (e.g. repo_audit$orphan_parquet) 
+before using a targeted reset (e.g. reset_table_for_reload()) or rerunning the loader.
 
 ```r
-repo_audit <- audit_repository(
-  MDT = MDT,
-  ParquetBasePath = paths$ParquetBasePath,
-  CheckpointPath = paths$CheckpointPath,
-  ManifestPath = paths$ManifestPath,
-  con = con,
-  LogPath = paths$LogPath,
-  RunId = RunId
-)
+repo_audit <- audit_repository(MDT = MDT,
+                               ParquetBasePath = paths$ParquetBasePath,
+                               CheckpointPath = paths$CheckpointPath,
+                               ManifestPath = paths$ManifestPath,
+                               con = con,
+                               LogPath = paths$LogPath,
+                               RunId = RunId)
 repo_audit$issues
 DBI::dbDisconnect(con, shutdown = TRUE)
 ```
@@ -587,26 +593,34 @@ The canonical load is resumable, so ordinary reruns process only incomplete or
 source-fingerprint-invalidated inventory rows. Two non-destructive helpers cover
 common repository maintenance outside the seven-stage run:
 
+new-release onboarding:  
+Scans every MDBDir the workbook references for files that have no MDT row yet and proposes 
+candidate rows (Database/TableName/year guessed from filenames, flagged. 
+This requires manual review where a guess failed. Review the output, correct it, and
+paste the rows into DBSetup.xlsx. Nothing is written automatically.
+
 ```r
 # Propose inventory rows for newly delivered files. Review the workbook output;
 # the helper never edits DBSetup.xlsx or source files.
-new_files <- scan_for_new_source_files(
-  MasterDBPath = cfg$MasterDBPath,
-  MDT = MDT,
-  OutputPath = file.path(cfg$FormattedDBPath, "NewSourceFiles.xlsx")
-)
+new_files <- scan_for_new_source_files(MasterDBPath = MasterDBPath, MDT = MDT,
+                                       OutputPath = file.path(FormattedDBPath, "NewSourceFiles.xlsx"))
+```
 
-# Preview a targeted rebuild after approving a changed schema. DryRun = TRUE
-# reports checkpoint, manifest, and Parquet changes without applying them.
-reset_table_for_reload(
-  MDT = MDT,
-  Database = "SALES",
-  TableName = "Orders",
-  ParquetBasePath = paths$ParquetBasePath,
-  CheckpointPath = paths$CheckpointPath,
-  ManifestPath = paths$ManifestPath,
-  DryRun = TRUE
-)
+Rebuild or re-load tables:
+Force one table to rebuild under the current schema
+Parquet already on disk keeps the column types it was written with; 
+changes approved in SchemaReview.xlsx and finalized to 
+TableSchemas.xlsx affect only future writes. To apply them to an 
+existing table, clear and reload it. DryRun = TRUE (the default) 
+only reports what would be removed; once it looks right, set 
+DryRun = FALSE and then re-run the ParquetBackEndCreate step above to 
+rebuild the table from source.
+
+```r
+reset_table_for_reload(MDT = MDT, Database = "NIS", TableName = "Core",
+                       ParquetBasePath = ParquetBasePath,
+                       CheckpointPath = CheckpointPath,
+                       ManifestPath = RepositoryPaths$ManifestPath, DryRun = TRUE)
 ```
 
 After inspecting a reset preview, use `DryRun = FALSE` and rerun stages 5-7.
@@ -616,12 +630,3 @@ The healthcare reference uses the same sequence with domain policies, migration
 helpers, advanced diagnostics, and machine-specific tuning. Those additions
 are intentionally not hard-coded into the generic package workflow.
 
-## Reproducibility And Tests
-
-Run `Rscript tools/bootstrap-renv.R` once to restore the project-specific
-`renv.lock`. Run tests with:
-
-```text
-Rscript tests/run_tests.R
-R CMD check .
-```
