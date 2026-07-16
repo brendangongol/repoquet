@@ -24,7 +24,7 @@ jobs:
           install.packages(c(
             "data.table", "arrow", "haven", "openxlsx", "readxl", "glue",
             "DBI", "duckdb", "future", "future.apply", "foreign", "testthat",
-            "bit64", "digest", "jsonlite"
+            "bit64", "digest", "jsonlite", "stringi"
           ))
 
       - name: Run test suite
@@ -32,3 +32,8 @@ jobs:
 
       - name: Build package
         run: R CMD build . --no-manual --no-build-vignettes
+
+      - name: Check package
+        env:
+          _R_CHECK_FORCE_SUGGESTS_: false
+        run: R CMD check *.tar.gz --no-manual --no-vignettes

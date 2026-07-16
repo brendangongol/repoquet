@@ -22,6 +22,28 @@ test_that("year- and site-partitioned tables load, resume, and reconcile", {
   expect_true(all(is.na(mf[mf$TableName == "Ev", ]$Year)))
 })
 
+test_that("a direct-read source spanning multiple years is routed to its own Hive partitions", {
+  fx <- new_repo_fixture(); on.exit(unlink(fx$root, recursive = TRUE))
+  # header carries YEAR itself, so this is eligible for source-defined partition
+  # routing even though PartitionBy="FAIL" would otherwise try a direct read first
+  data.table::fwrite(data.table::data.table(
+    YEAR = c(2020L, 2021L, 2022L, 2023L), AGE = c(10L, 20L, 30L, 40L)),
+    file.path(fx$src, "multi_year.csv"))
+  M <- data.frame(Database = "REG", MDBDir = "REG", TableName = "MultiYr",
+                  Path = "multi_year.csv", FileType = "csv",
+                  PartitionKey = "YEAR", PartitionValue = "2020")
+  r <- run_loader(fx, M, "REG", PartitionBy = "FAIL")
+  expect_true(any(grepl("PARTITION ROUTE", r$output)))
+  for (yr in 2020:2023) {
+    expect_true(dir.exists(file.path(fx$pq, "REG_MultiYr", sprintf("year=%d", yr))))
+  }
+  rows_per_year <- sapply(2020:2023, function(yr) {
+    f <- list.files(file.path(fx$pq, "REG_MultiYr", sprintf("year=%d", yr)), full.names = TRUE)
+    nrow(arrow::read_parquet(f[1]))
+  })
+  expect_identical(sum(rows_per_year), 4L)
+})
+
 test_that("physical parquet schemas are identical across years despite type drift", {
   fx <- new_repo_fixture(); on.exit(unlink(fx$root, recursive = TRUE))
   # KEY_X numeric one year / character the next; AGE int vs decimal; DIED string vs int

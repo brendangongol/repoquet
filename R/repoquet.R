@@ -54,7 +54,8 @@ utils::globalVariables(c(
   "StatusNormalized", "NRows", "run_time", "LastUpdate",
   "age_hours", "mtime", "should_clean", "size_bytes",
   "TypeSet", "code", "column_name", "database_table", "diagnosis_column",
-  "URI", "URIs", "n_keysets", "n_raw", "n_rows", "n_typesets", "pct_of_table"
+  "URI", "URIs", "n_keysets", "n_raw", "n_rows", "n_typesets", "pct_of_table",
+  "Member", "Sources"
 ))
 
 # Internal globals
@@ -1722,7 +1723,13 @@ promote_types <- function(types, col_name = NULL) {
   types <- types[!is.na(types) & nzchar(types) & types != "unknown"]
   if (length(types) == 0L) return("character")
   if ("character" %in% types) return("character")
-  if (all(types == "logical")) return("logical")
+  #### A pure-logical vote almost always means every sampled file saw only ####
+  #### NA/blank values for this column (fread defaults all-NA columns to  ####
+  #### logical) rather than a genuinely boolean column. Trusting it as    ####
+  #### "logical" causes real, rare text/code values encountered later in  ####
+  #### a full-file read to be destroyed by coercion, so fall back to the  ####
+  #### safe universal type instead.                                      ####
+  if (all(types == "logical")) return("character")
   if (all(types %in% c("integer", "int64"))) return(if ("int64" %in% types) "int64" else "integer")
   decimal_types <- types[grepl("^decimal\\([0-9]+,[0-9]+\\)$", types)]
   if (length(decimal_types) > 0L) {
@@ -5054,6 +5061,8 @@ update_parquet_manifest <- function(ManifestPath, Database, TableName, DuckDBTab
   invisible(row)
 }
 
+#' Record remote-source download provenance on an existing manifest row
+#' @keywords internal
 update_manifest_source_provenance <- function(ManifestPath, Database, TableName,
                                               SourcePath, row_meta) {
   uri <- .remote_source_uri(row_meta)

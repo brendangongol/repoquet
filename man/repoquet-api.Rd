@@ -161,6 +161,7 @@
 \alias{table_partition_types}
 \alias{touch_repository_lock}
 \alias{update_parquet_manifest}
+\alias{update_manifest_source_provenance}
 \alias{upgrade_checkpoint_source_fingerprints}
 \alias{validate_against_dictionary}
 \alias{validate_data_contracts}

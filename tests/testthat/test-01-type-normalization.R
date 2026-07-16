@@ -2,9 +2,11 @@ test_that("promote_types resolves drift conservatively", {
   expect_identical(promote_types(c("integer", "numeric")), "numeric")
   expect_identical(promote_types(c("character", "integer")), "character")
   expect_identical(promote_types(c("logical", "integer")), "integer")
-  # a pure-logical vote means every sampled row was NA -- trusting it corrupts
-  # real values beyond the sample (as.logical(3) is TRUE), so fall back to character
-  expect_identical(promote_types("logical"), "logical")
+  # a pure-logical vote means every sampled row was NA (fread defaults all-NA
+  # columns to logical) -- trusting it corrupts real values encountered later
+  # in a full-file read, so fall back to the safe universal type instead
+  expect_identical(promote_types("logical"), "character")
+  expect_identical(promote_types(c("logical", "logical")), "character")
   expect_identical(promote_types(character(0)), "character")
 })
 

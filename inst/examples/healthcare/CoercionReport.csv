@@ -1,9 +1,0 @@
-Column,FromClass,ToClass,NDestroyed,NPresent,PctDestroyed
-DEATHINED_BIU,character,integer,1995940,1995940,100
-READMRELICD105,character,logical,60,60,100
-OTHERCPT10,character,integer,25,15548,0.1608
-CONCPT7,character,integer,3,1166,0.2573
-READMRELICD94,character,numeric,2,14,14.2857
-READMRELICD95,character,numeric,2,2,100
-READMUNRELICD105,character,logical,2,2,100
-CONCPT10,character,integer,1,188,0.5319
