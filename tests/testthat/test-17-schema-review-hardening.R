@@ -75,6 +75,38 @@ test_that("unsafe policies remain visible but retain the safe data recommendatio
   expect_identical(resolved$Risk, "Lossless")
 })
 
+test_that("registry policies do not narrow inferred character columns", {
+  policy <- data.table::data.table(
+    ColumnPattern = "^AGE$", CanonicalType = "numeric",
+    Role = "analytic", AppliesTo = "all")
+
+  resolved <- apply_schema_registry(
+    list(AGE = "character", SCORE = "integer"), policy,
+    database = "UCI_DIABETES", table_name = "Admissions")
+
+  expect_identical(resolved$AGE, "character")
+  expect_identical(resolved$SCORE, "integer")
+})
+
+test_that("accepted compatibility decisions cannot narrow data-derived types", {
+  internal <- function(name) get(name, envir = environment(PrepareSchemaRegistry))
+  registry <- data.table::data.table(
+    Database = c("D1", "D2"), TableName = c("A", "B"),
+    DuckDBTable = c("D1_A", "D2_B"), Column = "AGE",
+    DataRecommendedType = c("character", "numeric"),
+    ApprovedType = c("character", "numeric"),
+    RecommendedType = c("character", "numeric"), Role = "data", MergeGroup = "")
+  compatibility <- data.table::data.table(
+    Scope = "cross_database", Database = "ALL", Column = "AGE",
+    MergeGroup = "ALL::AGE", RecommendedCommonType = "numeric",
+    ApprovedCommonType = "numeric", SuggestedRole = "compatible_column",
+    Decision = "Accept")
+
+  expect_error(
+    internal(".apply_compatibility_review")(registry, compatibility, strict = TRUE),
+    "Accept is permitted only for lossless promotions")
+})
+
 test_that("mixed character evidence is a lossless automatic promotion", {
   internal <- function(name) get(name, envir = environment(PrepareSchemaRegistry))
   rows <- data.table::data.table(

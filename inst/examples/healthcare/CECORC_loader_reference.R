@@ -19,7 +19,9 @@ source(RepoquetSourcePath, local = .GlobalEnv)
 #### 1. Initialize the run #####################################################
 ################################################################################
 cfg <- load_repository_config(path = "C:/Users/e282219/Downloads/github/repoquet/inst/examples/healthcare/repository_config.R")
-RepositoryPaths <- RepositoryInitialize(FormattedDBPath = cfg$FormattedDBPath, profile = "hcup")
+# This example loads heterogeneous public-health sources, so start with no
+# healthcare-specific policy overrides. Use profile = "hcup" for an HCUP-only run.
+RepositoryPaths <- RepositoryInitialize(FormattedDBPath = cfg$FormattedDBPath, profile = "generic")
 SupportingInfoPath <- "C:/Users/e282219/Downloads/github/CECORC/inst/Misc/DatabaseLoadInfo.xlsx"
 DuckDBTempPath <- file.path(cfg$FormattedDBPath, "duckdb_temp")
 RunId <- new_repository_run_id()
@@ -107,7 +109,7 @@ prepared <- PrepareSchemaRegistry(MDT = MDT,
                                   ValuePreviewTypes = c("character", "integer", "int64", "logical"),
                                   ValuePreviewIdentifiers = FALSE,
                                   SchemaRegistryPath = RepositoryPaths$SchemaRegistryPath,
-                                  SchemaProfile = "hcup",
+                                  SchemaProfile = "generic",
                                   LogPath = RepositoryPaths$LogPath,
                                   RunId = RunId)
 # Optional bounded issue preview; this query does not load all observations.
@@ -116,13 +118,13 @@ schema_issues <- GetSchemaObservations(ObservationPath = RepositoryPaths$SchemaO
 if(nrow(schema_issues) > 0L){ print(schema_issues) }
 
 ###############################################################################
-#### 4. Review decisions and finalize the HCUP catalog ########################
+#### 4. Review decisions and finalize the catalog #############################
 ###############################################################################
 repository_catalog <- FinalizeSchemaRegistry(SchemaReviewPath = RepositoryPaths$SchemaReviewPath,
                                              TableSchemaPath = RepositoryPaths$TableSchemaPath, strict = TRUE)
 
 ################################################################################
-#### 5. Load reviewed HCUP schemas to partitioned Parquet #####################
+#### 5. Load reviewed schemas to partitioned Parquet ##########################
 ################################################################################
 run_result <- ParquetBackEndCreate(MDT = MDT,
                                    DBLoad = DBLoad,

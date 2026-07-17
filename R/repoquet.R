@@ -2991,7 +2991,7 @@ align_columns <- function(df, all_cols, comprehensive_sample = NULL, max_coerce_
   if (length(items) == 0L) return(list())
   force(items)
   force(scan_one)
-  n_workers <- max(1L, as.integer(n_workers[1]))
+  n_workers <- min(length(items), max(1L, as.integer(n_workers[1])))
   if (n_workers <= 1L) {
     return(.serial_scan_with_progress(
       items, scan_one, context, progress = progress,
@@ -4671,7 +4671,10 @@ apply_schema_registry <- function(col_classes, schema_registry = NULL, database 
         grepl(schema_registry$ColumnPattern[i], col, perl = TRUE, ignore.case = TRUE)
     }
     if (any(hit)) {
-      col_classes[[col]] <- normalize_type_name(schema_registry$CanonicalType[which(hit)[1]])
+      policy_type <- normalize_type_name(schema_registry$CanonicalType[which(hit)[1]])
+      if (identical(promote_types(c(col_classes[[col]], policy_type), col), policy_type)) {
+        col_classes[[col]] <- policy_type
+      }
     }
   }
   col_classes
@@ -5206,8 +5209,9 @@ update_manifest_source_provenance <- function(ManifestPath, Database, TableName,
                     " WHERE COALESCE(CAST(Database AS VARCHAR), '') = ?",
                     " AND COALESCE(CAST(TableName AS VARCHAR), '') = ?",
                     " AND COALESCE(CAST(SourcePath AS VARCHAR), '') = ?")
-      DBI::dbExecute(con, sql, params = c(as.list(values[1]),
-        list(as.character(Database), as.character(TableName), as.character(SourcePath))))
+      # DuckDB positional placeholders reject a named parameter list.
+      DBI::dbExecute(con, sql, params = unname(c(as.list(values[1]),
+        list(as.character(Database), as.character(TableName), as.character(SourcePath)))))
     })))
   }
   manifest <- read_parquet_manifest(ManifestPath)
@@ -9495,6 +9499,26 @@ WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = 
     if (length(target) == 0L) next
     registry[target, MergeReviewed := TRUE]
     if (decision[i] == "ignore") next
+    data_types <- if ("DataRecommendedType" %in% names(registry)) {
+      as.character(registry$DataRecommendedType[target])
+    } else {
+      as.character(registry$ApprovedType[target])
+    }
+    missing_data_type <- is.na(data_types) | !nzchar(trimws(data_types))
+    data_types[missing_data_type] <- as.character(registry$ApprovedType[target][missing_data_type])
+    safe_targets <- vapply(data_types, function(data_type) {
+      identical(promote_types(c(data_type, approved[i]), column), approved[i])
+    }, logical(1))
+    if (any(!safe_targets) && decision[i] != "override") {
+      examples <- paste(utils::head(sprintf("%s/%s", registry$Database[target][!safe_targets],
+                                            registry$DuckDBTable[target][!safe_targets]), 5L), collapse = ", ")
+      stop(sprintf(paste0(
+        "Compatibility decision %s/%s/%s would coerce a data-derived %s column to %s. ",
+        "Accept is permitted only for lossless promotions. Regenerate the recommendation or use Ignore; ",
+        "use Override only when this lossy conversion is explicitly intended. Affected: %s."),
+        compatibility$Scope[i], compatibility$Database[i], column,
+        paste(sort(unique(data_types[!safe_targets])), collapse = ","), approved[i], examples))
+    }
     assignments[[length(assignments) + 1L]] <- data.table::data.table(
       Row = target, CanonicalType = approved[i],
       MergeGroup = toupper(trimws(as.character(compatibility$MergeGroup[i]))),
