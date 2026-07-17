@@ -186,6 +186,78 @@ test_that("delimited schema profiling detects rare types after the former sample
   expect_identical(profile$Stats$SPARSE_VALUE$NumericParseFailureCount, 1)
 })
 
+test_that("adaptive schema profiling uses bounded fast and sampled paths", {
+  fx <- new_repo_fixture(); on.exit(unlink(fx$root, recursive = TRUE))
+  path <- file.path(fx$src, "adaptive.csv")
+  data.table::fwrite(data.table::data.table(
+    ID = seq_len(100005L),
+    LATE_VALUE = c(rep("1", 100004L), "TEXT")), path, quote = TRUE)
+  profile_fun <- if (exists(".profile_delimited_schema", mode = "function")) {
+    get(".profile_delimited_schema", mode = "function")
+  } else {
+    getFromNamespace(".profile_delimited_schema", "repoquet")
+  }
+
+  fast <- profile_fun(
+    path, get_file_reader("csv"), SchemaSurveyMode = "adaptive",
+    FastReadMaxBytes = file.info(path)$size + 1)
+  sampled <- profile_fun(
+    path, get_file_reader("csv"), SchemaSurveyMode = "adaptive",
+    FastReadMaxBytes = 0, AdaptiveSampleRows = 100000L)
+
+  expect_identical(fast$ProfileMode, "full_fast")
+  expect_identical(fast$Rows, 100005)
+  expect_identical(fast$Stats$LATE_VALUE$ObservedType, "character")
+  expect_identical(sampled$ProfileMode, "adaptive_sample")
+  expect_identical(sampled$Rows, 100000)
+  expect_identical(sampled$Stats$ID$ValueProfileStatus, "suppressed_identifier")
+})
+
+test_that("schema surveys resume from unchanged per-source observations", {
+  skip_if_not_installed("arrow")
+  fx <- new_repo_fixture(); on.exit(unlink(fx$root, recursive = TRUE))
+  path <- file.path(fx$src, "cached.csv")
+  data.table::fwrite(data.table::data.table(ID = 1:3, VALUE = c("A", "B", "C")), path)
+  M <- data.frame(
+    Database = "REG", MDBDir = "REG", TableName = "Core",
+    Path = "cached.csv", FileType = "csv",
+    PartitionKey = "year", PartitionValue = "2024")
+  observations <- file.path(fx$root, "cached_observations.parquet")
+  cache <- file.path(fx$root, "source_observations")
+
+  first <- suppressMessages(SurveyRepositorySchema(
+    M, MasterDBPath = fx$root, ObservationPath = observations,
+    ObservationCachePath = cache, SchemaSurveyMode = "sample",
+    n_workers = 1L, SourceFingerprintMode = "metadata"))
+  unlink(observations)
+  second_output <- utils::capture.output(second <- SurveyRepositorySchema(
+    M, MasterDBPath = fx$root, ObservationPath = observations,
+    ObservationCachePath = cache, SchemaSurveyMode = "sample",
+    n_workers = 1L, SourceFingerprintMode = "metadata"))
+
+  expect_identical(first$summary$ScannedSources, 1L)
+  expect_identical(first$summary$CachedSources, 0L)
+  expect_identical(second$summary$ScannedSources, 0L)
+  expect_identical(second$summary$CachedSources, 1L)
+  expect_true(file.exists(observations))
+  expect_match(paste(second_output, collapse = "\n"), "[SCHEMA CACHE] Reusing 1 of 1", fixed = TRUE)
+})
+
+test_that("value profiling stops materializing high-cardinality counts", {
+  stats_fun <- if (exists(".schema_observation_stats", mode = "function")) {
+    get(".schema_observation_stats", mode = "function")
+  } else {
+    getFromNamespace(".schema_observation_stats", "repoquet")
+  }
+  high <- stats_fun(as.character(seq_len(1000)), ValuePreviewMaxDistinct = 15L)
+  suppressed <- stats_fun(as.character(seq_len(1000)), ValuePreviewMaxDistinct = 15L,
+                          CollectValueCounts = FALSE)
+  expect_identical(high$ValueProfileStatus, "exceeds_limit")
+  expect_length(high$ValueCounts, 0L)
+  expect_identical(suppressed$ValueProfileStatus, "suppressed_identifier")
+  expect_length(suppressed$ValueCounts, 0L)
+})
+
 test_that("value previews enforce the distinct limit across source partitions", {
   fx <- new_repo_fixture(); on.exit(unlink(fx$root, recursive = TRUE))
   data.table::fwrite(data.table::data.table(CATEGORY = paste0("C", 1:10)),

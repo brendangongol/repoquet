@@ -373,6 +373,28 @@ source_path_for_row <- function(row_meta, MasterDBPath) {
   invisible(destination)
 }
 
+.conditional_http_download <- function(uri, destination, cached_path,
+                                       timeout_seconds = 600) {
+  if (!requireNamespace("curl", quietly = TRUE) || !file.exists(cached_path)) {
+    return(NULL)
+  }
+  modified <- file.info(cached_path)$mtime[1]
+  if (is.na(modified)) return(NULL)
+  handle <- curl::new_handle()
+  curl::handle_setopt(handle, timeout = as.numeric(timeout_seconds))
+  stamp <- format(as.POSIXct(modified, tz = "GMT"),
+                  "%a, %d %b %Y %H:%M:%S GMT", tz = "GMT")
+  do.call(curl::handle_setheaders,
+          c(list(handle = handle), stats::setNames(list(stamp), "If-Modified-Since")))
+  response <- curl::curl_fetch_disk(uri, destination, handle = handle)
+  status <- suppressWarnings(as.integer(response$status_code))
+  if (is.na(status) || (!status %in% c(304L) && (status < 200L || status >= 300L))) {
+    stop(sprintf("Conditional HTTP request returned status %s.",
+                 ifelse(is.na(status), "unknown", status)))
+  }
+  list(NotModified = identical(status, 304L), StatusCode = status)
+}
+
 #' Materialize remote source files into the repository cache
 #'
 #' Rows with a non-empty \code{SourceURI} are downloaded to a managed local
@@ -534,29 +556,40 @@ MaterializeRemoteSources <- function(
         tmp <- tempfile(pattern = paste0(basename(download_path), ".part_"),
                         tmpdir = dirname(download_path))
         tryCatch({
-          result <- downloader(uri, tmp)
-          if (!file.exists(tmp) || is.na(file.info(tmp)$size[1])) {
-            stop("Downloader did not create a readable destination file.")
-          }
-          if (is.logical(result) && length(result) == 1L && !is.na(result) && !result) {
-            stop("Downloader reported failure.")
-          }
-          if (is.numeric(result) && length(result) == 1L && !is.na(result) && result != 0) {
-            stop(sprintf("Downloader returned status %s.", result))
-          }
-          downloaded_sha <- tolower(digest::digest(file = tmp, algo = "sha256", serialize = FALSE))
-          if (!is.na(expected) && !identical(downloaded_sha, expected)) {
-            stop(sprintf("SHA-256 mismatch: expected %s, received %s.", expected, downloaded_sha))
-          }
-          existing_sha <- if (cache_exists && policy == "if_changed") {
-            tolower(digest::digest(file = download_path, algo = "sha256", serialize = FALSE))
-          } else NA_character_
-          if (cache_exists && policy == "if_changed" && identical(downloaded_sha, existing_sha)) {
-            unlink(tmp)
+          conditional <- if (policy == "if_changed" && cache_exists &&
+                             is.null(DownloadFunction)) {
+            .conditional_http_download(uri, tmp, download_path, TimeoutSeconds)
+          } else NULL
+          if (!is.null(conditional) && isTRUE(conditional$NotModified)) {
+            if (file.exists(tmp)) unlink(tmp)
             status <- "unchanged"
           } else {
-            status <- if (cache_exists) "updated" else "downloaded"
-            replace_file_safely(tmp, download_path)
+            result <- if (is.null(conditional)) downloader(uri, tmp) else 0L
+          }
+          if (!identical(status, "unchanged")) {
+            if (!file.exists(tmp) || is.na(file.info(tmp)$size[1])) {
+              stop("Downloader did not create a readable destination file.")
+            }
+            if (is.logical(result) && length(result) == 1L && !is.na(result) && !result) {
+              stop("Downloader reported failure.")
+            }
+            if (is.numeric(result) && length(result) == 1L && !is.na(result) && result != 0) {
+              stop(sprintf("Downloader returned status %s.", result))
+            }
+            downloaded_sha <- tolower(digest::digest(file = tmp, algo = "sha256", serialize = FALSE))
+            if (!is.na(expected) && !identical(downloaded_sha, expected)) {
+              stop(sprintf("SHA-256 mismatch: expected %s, received %s.", expected, downloaded_sha))
+            }
+            existing_sha <- if (cache_exists && policy == "if_changed") {
+              tolower(digest::digest(file = download_path, algo = "sha256", serialize = FALSE))
+            } else NA_character_
+            if (cache_exists && policy == "if_changed" && identical(downloaded_sha, existing_sha)) {
+              unlink(tmp)
+              status <- "unchanged"
+            } else {
+              status <- if (cache_exists) "updated" else "downloaded"
+              replace_file_safely(tmp, download_path)
+            }
           }
         }, finally = {
           if (exists("tmp", inherits = FALSE) && file.exists(tmp)) unlink(tmp)
@@ -2953,7 +2986,8 @@ align_columns <- function(df, all_cols, comprehensive_sample = NULL, max_coerce_
                                             is_failure = is.null,
                                             context = "source metadata scan",
                                             progress = TRUE,
-                                            progress_every = NULL) {
+                                            progress_every = NULL,
+                                            future_globals_max_size = NULL) {
   if (length(items) == 0L) return(list())
   force(items)
   force(scan_one)
@@ -2971,6 +3005,15 @@ align_columns <- function(df, all_cols, comprehensive_sample = NULL, max_coerce_
 
   old_plan <- future::plan()
   on.exit(future::plan(old_plan), add = TRUE)
+  old_globals_limit <- getOption("future.globals.maxSize")
+  if (!is.null(future_globals_max_size)) {
+    future_globals_max_size <- suppressWarnings(as.numeric(future_globals_max_size[1]))
+    if (!is.finite(future_globals_max_size) || future_globals_max_size < 1) {
+      stop("future_globals_max_size must be NULL or a positive number of bytes.")
+    }
+    options(future.globals.maxSize = future_globals_max_size)
+    on.exit(options(future.globals.maxSize = old_globals_limit), add = TRUE)
+  }
   future::plan(future::multisession, workers = n_workers)
   parallel_error <- NULL
   results <- tryCatch(
@@ -6498,6 +6541,14 @@ discover_schema_relationships <- function(table_schema, include_candidates = TRU
 #'   this percent of a column. NULL retains the file value or the default of 25.
 #' @param SourceFingerprintMode Character. Source file fingerprinting mode:
 #'   "metadata" (default), "sha256", or "none". NULL retains the file value.
+#' @param SchemaSurveyMode Character. "adaptive" (default), "full", or "sample".
+#' @param SchemaFastReadMaxBytes Numeric maximum source bytes for the bounded
+#'   in-memory fread schema fast path.
+#' @param SchemaChunkSize Integer rows per exhaustive schema-stream chunk.
+#' @param SchemaAdaptiveSampleRows Integer rows retained for adaptive/sample mode.
+#' @param SchemaFutureGlobalsMaxSizeMB Numeric future worker-export allowance.
+#' @param SchemaReuseCache Logical. Reuse unchanged per-source observations.
+#' @param SchemaWorkers Integer worker count used by schema discovery.
 #' @param RemoteOffline Logical. If TRUE, remote rows must use cached copies.
 #' @param DownloadPolicy Character default remote refresh policy.
 #' @param DownloadTimeout Numeric remote download timeout in seconds.
@@ -6522,6 +6573,13 @@ load_repository_config <- function(
     n_workers = NULL,
     MaxCoerceNAPct = NULL,
     SourceFingerprintMode = NULL,
+    SchemaSurveyMode = NULL,
+    SchemaFastReadMaxBytes = NULL,
+    SchemaChunkSize = NULL,
+    SchemaAdaptiveSampleRows = NULL,
+    SchemaFutureGlobalsMaxSizeMB = NULL,
+    SchemaReuseCache = NULL,
+    SchemaWorkers = NULL,
     RemoteOffline = NULL,
     DownloadPolicy = NULL,
     DownloadTimeout = NULL,
@@ -6549,6 +6607,13 @@ load_repository_config <- function(
     n_workers = max(1L, parallel::detectCores() - 1L),
     MaxCoerceNAPct = 25,
     SourceFingerprintMode = "metadata",
+    SchemaSurveyMode = "adaptive",
+    SchemaFastReadMaxBytes = 256 * 1024^2,
+    SchemaChunkSize = 100000L,
+    SchemaAdaptiveSampleRows = 100000L,
+    SchemaFutureGlobalsMaxSizeMB = 768,
+    SchemaReuseCache = TRUE,
+    SchemaWorkers = min(6L, max(1L, parallel::detectCores() - 1L)),
     RemoteOffline = FALSE,
     DownloadPolicy = "if_missing",
     DownloadTimeout = 600,
@@ -6582,6 +6647,13 @@ load_repository_config <- function(
     n_workers = n_workers,
     MaxCoerceNAPct = MaxCoerceNAPct,
     SourceFingerprintMode = SourceFingerprintMode,
+    SchemaSurveyMode = SchemaSurveyMode,
+    SchemaFastReadMaxBytes = SchemaFastReadMaxBytes,
+    SchemaChunkSize = SchemaChunkSize,
+    SchemaAdaptiveSampleRows = SchemaAdaptiveSampleRows,
+    SchemaFutureGlobalsMaxSizeMB = SchemaFutureGlobalsMaxSizeMB,
+    SchemaReuseCache = SchemaReuseCache,
+    SchemaWorkers = SchemaWorkers,
     RemoteOffline = RemoteOffline,
     DownloadPolicy = DownloadPolicy,
     DownloadTimeout = DownloadTimeout,
@@ -6606,6 +6678,31 @@ load_repository_config <- function(
   }
   cfg$DownloadPolicy <- match.arg(tolower(as.character(cfg$DownloadPolicy)),
                                   c("if_missing", "if_changed", "always", "manual"))
+  cfg$SchemaSurveyMode <- match.arg(tolower(as.character(cfg$SchemaSurveyMode)),
+                                    c("adaptive", "full", "sample"))
+  for (field in c("SchemaChunkSize", "SchemaAdaptiveSampleRows",
+                  "SchemaFutureGlobalsMaxSizeMB")) {
+    cfg[[field]] <- suppressWarnings(as.numeric(cfg[[field]]))
+    if (length(cfg[[field]]) != 1L || is.na(cfg[[field]]) || cfg[[field]] < 1) {
+      stop(sprintf("repository_config %s must be a positive number.", field))
+    }
+  }
+  cfg$SchemaFastReadMaxBytes <- suppressWarnings(as.numeric(cfg$SchemaFastReadMaxBytes))
+  if (length(cfg$SchemaFastReadMaxBytes) != 1L || is.na(cfg$SchemaFastReadMaxBytes) ||
+      cfg$SchemaFastReadMaxBytes < 0) {
+    stop("repository_config SchemaFastReadMaxBytes must be a non-negative number.")
+  }
+  if (cfg$SchemaAdaptiveSampleRows > 100000) {
+    stop("repository_config SchemaAdaptiveSampleRows cannot exceed 100000.")
+  }
+  if (length(cfg$SchemaReuseCache) != 1L || is.na(cfg$SchemaReuseCache) ||
+      !is.logical(cfg$SchemaReuseCache)) {
+    stop("repository_config SchemaReuseCache must be TRUE or FALSE.")
+  }
+  cfg$SchemaWorkers <- suppressWarnings(as.integer(cfg$SchemaWorkers))
+  if (length(cfg$SchemaWorkers) != 1L || is.na(cfg$SchemaWorkers) || cfg$SchemaWorkers < 1L) {
+    stop("repository_config SchemaWorkers must be a positive integer.")
+  }
   cfg$DownloadTimeout <- suppressWarnings(as.numeric(cfg$DownloadTimeout))
   if (length(cfg$DownloadTimeout) != 1L || is.na(cfg$DownloadTimeout) || cfg$DownloadTimeout < 1) {
     stop("repository_config DownloadTimeout must be a positive number.")
@@ -6660,6 +6757,13 @@ create_repository_project <- function(dir, MasterDBPath = file.path(dir, "source
     "  RAMThreshold      = 30,          # GB, for PartitionBy = \"RAMEstimate\"",
     "  MaxCoerceNAPct    = 25,          # fail a file when coercion destroys more than this % of a column",
     "  SourceFingerprintMode = \"metadata\", # metadata | sha256 | none",
+    "  SchemaSurveyMode   = \"adaptive\", # adaptive | full | sample",
+    "  SchemaFastReadMaxBytes = 256 * 1024^2, # bounded fread fast path",
+    "  SchemaChunkSize    = 100000L,      # rows per exhaustive schema chunk",
+    "  SchemaAdaptiveSampleRows = 100000L, # rows sampled from large clean files",
+    "  SchemaFutureGlobalsMaxSizeMB = 768, # sourced-development worker allowance",
+    "  SchemaReuseCache   = TRUE,         # reuse unchanged per-source evidence",
+    "  SchemaWorkers      = min(6L, max(1L, parallel::detectCores() - 1L)),",
     "  RemoteOffline      = FALSE,        # TRUE uses only previously cached remote sources",
     "  DownloadPolicy    = \"if_missing\", # if_missing | if_changed | always | manual",
     "  DownloadTimeout   = 600,          # seconds",
@@ -6721,9 +6825,15 @@ create_repository_project <- function(dir, MasterDBPath = file.path(dir, "source
     "PrepareSchemaRegistry(MDT, DBLoad = DBLoad, MasterDBPath = cfg$MasterDBPath,",
     "                      ObservationPath = paths$SchemaObservationPath,",
     "                      SchemaReviewPath = paths$SchemaReviewPath,",
-    "                      n_workers = cfg$n_workers,",
+    "                      n_workers = cfg$SchemaWorkers,",
     "                      SchemaRegistryPath = paths$SchemaRegistryPath,",
     "                      SourceFingerprintMode = cfg$SourceFingerprintMode,",
+    "                      SchemaSurveyMode = cfg$SchemaSurveyMode,",
+    "                      FastReadMaxBytes = cfg$SchemaFastReadMaxBytes,",
+    "                      SchemaChunkSize = cfg$SchemaChunkSize,",
+    "                      AdaptiveSampleRows = cfg$SchemaAdaptiveSampleRows,",
+    "                      FutureGlobalsMaxSizeMB = cfg$SchemaFutureGlobalsMaxSizeMB,",
+    "                      ReuseObservationCache = cfg$SchemaReuseCache,",
     "                      ValuePreviewMaxDistinct = 15L,",
     "                      ValuePreviewTypes = c(\"character\", \"integer\", \"int64\", \"logical\"),",
     "                      ValuePreviewIdentifiers = FALSE,",
@@ -7400,7 +7510,8 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
 }
 
 .schema_profile_value_counts <- function(x, type, max_distinct = 15L,
-                                         allowed_types = c("character", "integer", "int64", "logical")) {
+                                         allowed_types = c("character", "integer", "int64", "logical"),
+                                         collect_counts = TRUE) {
   out <- list(DistinctValueCount = NA_real_, BlankCount = 0,
               ValueProfileStatus = "not_applicable", ValueCounts = numeric(0))
   if (!type %in% allowed_types) return(out)
@@ -7420,12 +7531,27 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
     out$BlankCount <- sum(blank)
     values <- values[!blank]
   }
-  counts <- sort(table(values, useNA = "no"), decreasing = TRUE)
-  out$DistinctValueCount <- as.numeric(length(counts))
-  if (length(counts) > max_distinct) {
+  if (!isTRUE(collect_counts)) {
+    out$ValueProfileStatus <- "suppressed_identifier"
+    return(out)
+  }
+  # Most identifier-like columns are suppressed by the caller. This bounded
+  # probe catches other high-cardinality fields before unique() allocates a
+  # vector proportional to the complete source column.
+  probe_size <- min(length(values), max(1000L, max_distinct * 4L))
+  probe <- unique(values[seq_len(probe_size)])
+  if (length(probe) > max_distinct) {
+    out$DistinctValueCount <- as.numeric(max_distinct + 1L)
     out$ValueProfileStatus <- "exceeds_limit"
     return(out)
   }
+  distinct <- unique(values)
+  out$DistinctValueCount <- as.numeric(length(distinct))
+  if (length(distinct) > max_distinct) {
+    out$ValueProfileStatus <- "exceeds_limit"
+    return(out)
+  }
+  counts <- sort(table(values, useNA = "no"), decreasing = TRUE)
   out$ValueProfileStatus <- "complete"
   out$ValueCounts <- stats::setNames(as.numeric(counts), names(counts))
   out
@@ -7443,7 +7569,8 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
 }
 
 .schema_observation_stats <- function(x, ValuePreviewMaxDistinct = 15L,
-                                      ValuePreviewTypes = c("character", "integer", "int64", "logical")) {
+                                      ValuePreviewTypes = c("character", "integer", "int64", "logical"),
+                                      CollectValueCounts = TRUE) {
   type <- if (inherits(x, "integer64")) "int64" else normalize_type_name(class(x)[1])
   present <- !is.na(x)
   n_present <- sum(present)
@@ -7481,7 +7608,8 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
 
   value_profile <- .schema_profile_value_counts(
     x, type, max_distinct = ValuePreviewMaxDistinct,
-    allowed_types = ValuePreviewTypes)
+    allowed_types = ValuePreviewTypes,
+    collect_counts = CollectValueCounts)
   c(list(
     ObservedType = type,
     RowsSampled = as.numeric(n_total),
@@ -7501,8 +7629,22 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
 .profile_delimited_schema <- function(path, reader, reader_options = list(), chunk_size = 100000L,
                                       ValuePreviewMaxDistinct = 15L,
                                       ValuePreviewTypes = c("character", "integer", "int64", "logical"),
+                                      ValuePreviewIdentifiers = FALSE,
+                                      SchemaSurveyMode = c("full", "adaptive", "sample"),
+                                      AdaptiveSampleRows = 100000L,
+                                      FastReadMaxBytes = 256 * 1024^2,
                                       Progress = FALSE, ProgressContext = NULL,
                                       ProgressIntervalSeconds = 30) {
+  SchemaSurveyMode <- match.arg(SchemaSurveyMode)
+  AdaptiveSampleRows <- suppressWarnings(as.integer(AdaptiveSampleRows[1]))
+  if (is.na(AdaptiveSampleRows) || AdaptiveSampleRows < 1L || AdaptiveSampleRows > 100000L) {
+    stop("AdaptiveSampleRows must be an integer from 1 through 100000.")
+  }
+  FastReadMaxBytes <- suppressWarnings(as.numeric(FastReadMaxBytes[1]))
+  if (!is.finite(FastReadMaxBytes) || FastReadMaxBytes < 0) {
+    stop("FastReadMaxBytes must be a non-negative number of bytes.")
+  }
+  reader_options <- .resolve_delimited_reader_options(path, reader_options)
   header <- call_reader(reader, "read_header", path, reader_options = reader_options)
   columns <- canonical_colnames(header)
   accumulators <- stats::setNames(vector("list", length(columns)), columns)
@@ -7510,10 +7652,14 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
     if (!is.data.frame(df)) stop("Delimited schema profiler received a non-tabular chunk.")
     df <- canonicalize_dataframe_names(normalize_character_encoding(df, "UTF-8"))
     for (column in names(df)) {
+      acc <- accumulators[[column]]
+      identifier <- isTRUE(merge_key_name_candidate(column))
+      collect_values <- (isTRUE(ValuePreviewIdentifiers) || !identifier) &&
+        (is.null(acc) || !identical(acc$ValueProfileStatus, "exceeds_limit"))
       current <- .schema_observation_stats(
         df[[column]], ValuePreviewMaxDistinct = ValuePreviewMaxDistinct,
-        ValuePreviewTypes = ValuePreviewTypes)
-      acc <- accumulators[[column]]
+        ValuePreviewTypes = ValuePreviewTypes,
+        CollectValueCounts = collect_values)
       if (is.null(acc)) {
         acc <- list(Types = character(), RowsSampled = 0, NonMissingCount = 0,
                     FractionalCount = 0, LeadingZeroCount = 0,
@@ -7531,6 +7677,10 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
       acc$BlankCount <- acc$BlankCount + current$BlankCount
       if (current$ValueProfileStatus == "exceeds_limit") {
         acc$ValueProfileStatus <- "exceeds_limit"
+        acc$ValueCounts <- numeric(0)
+      } else if (current$ValueProfileStatus == "suppressed_identifier" &&
+                 acc$ValueProfileStatus != "exceeds_limit") {
+        acc$ValueProfileStatus <- "suppressed_identifier"
         acc$ValueCounts <- numeric(0)
       } else if (current$ValueProfileStatus == "complete" &&
                  acc$ValueProfileStatus != "exceeds_limit") {
@@ -7556,12 +7706,7 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
   total_rows <- 0
   profile_started <- Sys.time()
   last_progress <- profile_started
-  # Use one sequential logical-record pass for every delimited format. This
-  # remains memory bounded and avoids offset-based O(n^2) decompression for
-  # gzip sources while applying the same malformed-row policy as loading.
-  diagnostics <- .stream_delimited_logical_records(
-    path, reader_options = reader_options, chunk_size = chunk_size,
-    callback = function(df) {
+  profile_chunk <- function(df) {
       total_rows <<- total_rows + nrow(df)
       update_profile(df)
       now <- Sys.time()
@@ -7578,7 +7723,48 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
                         .format_scan_duration(elapsed)))
         last_progress <<- now
       }
-    })
+    invisible(NULL)
+  }
+  repair <- .delimited_repair_settings(reader_options)
+  source_size <- suppressWarnings(as.numeric(file.info(path)$size[1]))
+  compressed_source <- grepl("\\.(gz|bz2)$", path, ignore.case = TRUE)
+  clean_source <- identical(repair$Policy, "error")
+  use_fast_full <- clean_source && !compressed_source && SchemaSurveyMode != "sample" &&
+    !is.na(source_size) && source_size <= FastReadMaxBytes
+  use_sample <- SchemaSurveyMode == "sample" ||
+    (SchemaSurveyMode == "adaptive" && clean_source && !use_fast_full)
+  diagnostics <- if (use_fast_full) {
+    if (isTRUE(Progress)) {
+      log_msg(sprintf("[SCHEMA PROGRESS] %s: using bounded fread fast path (%s MiB source).",
+                      ProgressContext %||% basename(path),
+                      format(round(source_size / 1024^2, 1), nsmall = 1)))
+    }
+    df <- read_delimited_full(path, reader_options = reader_options)
+    profile_chunk(df)
+    list(Header = names(df), LogicalRows = as.numeric(nrow(df)),
+         PhysicalLinesRead = NA_real_, RepairCount = 0, RepairLines = integer(),
+         RepairPolicy = repair$Policy, ContinuationColumn = repair$Column,
+         EncodingInfo = reader_options$.EncodingInfo,
+         ProfileMode = "full_fast")
+  } else if (use_sample) {
+    df <- call_reader(reader, "read_sample", path, reader_options = reader_options)
+    if (nrow(df) > AdaptiveSampleRows) df <- utils::head(df, AdaptiveSampleRows)
+    profile_chunk(df)
+    list(Header = names(df), LogicalRows = as.numeric(nrow(df)),
+         PhysicalLinesRead = NA_real_, RepairCount = 0, RepairLines = integer(),
+         RepairPolicy = repair$Policy, ContinuationColumn = repair$Column,
+         EncodingInfo = reader_options$.EncodingInfo,
+         ProfileMode = if (SchemaSurveyMode == "sample") "sample" else "adaptive_sample")
+  } else {
+    # Large exhaustive scans and repair-configured files retain the sequential
+    # logical-record reader so memory remains bounded and verified continuation
+    # records are interpreted identically during schema discovery and loading.
+    result <- .stream_delimited_logical_records(
+      path, reader_options = reader_options, chunk_size = chunk_size,
+      callback = profile_chunk)
+    result$ProfileMode <- "full_stream"
+    result
+  }
 
   finalize <- function(acc) {
     if (is.null(acc)) {
@@ -7624,14 +7810,64 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
       ValueProfileStatus = profile_status
     ), list(ValueCounts = profile_counts))
   }
+  confidence <- switch(diagnostics$ProfileMode,
+                       full_fast = "full_profiled_fast",
+                       full_stream = "full_profiled",
+                       adaptive_sample = "adaptive_sampled",
+                       sample = "sampled",
+                       "full_profiled")
   list(Header = header, Stats = lapply(accumulators, finalize), Rows = as.numeric(total_rows),
-       Diagnostics = diagnostics)
+       Diagnostics = diagnostics, Confidence = confidence,
+       ProfileMode = diagnostics$ProfileMode)
+}
+
+.schema_survey_cache_key <- function(row_meta, MasterDBPath, settings,
+                                     fingerprint_mode = c("metadata", "sha256")) {
+  fingerprint_mode <- match.arg(fingerprint_mode)
+  full_path <- source_path_for_row(row_meta, MasterDBPath)
+  fingerprint <- source_fingerprint(full_path, mode = fingerprint_mode)$fingerprint
+  pspec <- partition_spec_for_row(row_meta)
+  reader_settings <- jsonlite::toJSON(
+    reader_options_for_row(row_meta), auto_unbox = TRUE, null = "null",
+    na = "null", digits = NA)
+  identity <- paste(
+    "schema_survey_cache_v1",
+    as.character(row_meta$Database[1]), as.character(row_meta$TableName[1]),
+    repository_table_name_for_row(row_meta),
+    normalizePath(full_path, winslash = "/", mustWork = FALSE),
+    tolower(as.character(row_meta$FileType[1])),
+    paste(pspec$keys, pspec$values, sep = "=", collapse = ";"),
+    fingerprint, reader_settings, settings, sep = "||")
+  digest::digest(identity, algo = "sha256", serialize = FALSE)
+}
+
+.read_schema_survey_cache <- function(path) {
+  tryCatch({
+    data <- data.table::as.data.table(arrow::read_parquet(path))
+    if (nrow(data) == 0L || !all(c("SurveyStatus", "SourcePath") %in% names(data))) {
+      stop("cached observation has no usable rows")
+    }
+    list(ok = all(data$SurveyStatus == "ok"), path = unique(data$SourcePath)[1],
+         data = data, error = NA_character_, cached = TRUE)
+  }, error = function(e) NULL)
+}
+
+.write_schema_survey_cache <- function(result, path) {
+  if (!is.list(result) || !isTRUE(result$ok) || !is.data.frame(result$data) ||
+      nrow(result$data) == 0L) return(invisible(FALSE))
+  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  write_arrow_table_safely(arrow::as_arrow_table(result$data), path)
+  invisible(TRUE)
 }
 
 .survey_schema_source <- function(row_meta, MasterDBPath, SourceFingerprintMode = "metadata",
                                   ValuePreviewMaxDistinct = 15L,
                                   ValuePreviewTypes = c("character", "integer", "int64", "logical"),
                                   ValuePreviewIdentifiers = FALSE,
+                                  SchemaSurveyMode = "adaptive",
+                                  AdaptiveSampleRows = 100000L,
+                                  FastReadMaxBytes = 256 * 1024^2,
+                                  SchemaChunkSize = 100000L,
                                   Progress = FALSE, ProgressContext = NULL,
                                   ProgressIntervalSeconds = 30) {
   full_path <- source_path_for_row(row_meta, MasterDBPath)
@@ -7668,8 +7904,13 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
     if (delimited) {
       profile <- capture_warnings(.profile_delimited_schema(
         full_path, rd, options,
+        chunk_size = SchemaChunkSize,
         ValuePreviewMaxDistinct = ValuePreviewMaxDistinct,
         ValuePreviewTypes = ValuePreviewTypes,
+        ValuePreviewIdentifiers = ValuePreviewIdentifiers,
+        SchemaSurveyMode = SchemaSurveyMode,
+        AdaptiveSampleRows = AdaptiveSampleRows,
+        FastReadMaxBytes = FastReadMaxBytes,
         Progress = Progress, ProgressContext = ProgressContext,
         ProgressIntervalSeconds = ProgressIntervalSeconds))
       sample_rows <- profile$Rows
@@ -7688,7 +7929,9 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
       sample_columns <- names(sample)
       stats_for <- function(column) .schema_observation_stats(
         sample[[column]], ValuePreviewMaxDistinct = ValuePreviewMaxDistinct,
-        ValuePreviewTypes = ValuePreviewTypes)
+        ValuePreviewTypes = ValuePreviewTypes,
+        CollectValueCounts = isTRUE(ValuePreviewIdentifiers) ||
+          !isTRUE(merge_key_name_candidate(column)))
     }
     if (!is.null(repair_info) && isTRUE(repair_info$RepairCount > 0L)) {
       warnings_seen <- unique(c(
@@ -7704,7 +7947,7 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
     fingerprint <- source_fingerprint(full_path, mode = SourceFingerprintMode)
     original_header <- as.character(original_header)
     header_map <- split(original_header, canonical_colnames(original_header))
-    confidence <- if (delimited) "full_profiled" else "declared_or_stored"
+    confidence <- if (delimited) profile$Confidence else "declared_or_stored"
     warning_text <- warning_info$Text
     base <- list(
       Database = as.character(row_meta$Database[1]),
@@ -7841,9 +8084,18 @@ SurveyRepositorySchema <- function(MDT, MasterDBPath, ObservationPath,
                                    ValuePreviewTypes = c("character", "integer", "int64", "logical"),
                                    ValuePreviewIdentifiers = FALSE,
                                    LogPath = NULL, RunId = NULL,
+                                   SchemaSurveyMode = c("adaptive", "full", "sample"),
+                                   AdaptiveSampleRows = 100000L,
+                                   FastReadMaxBytes = 256 * 1024^2,
+                                   SchemaChunkSize = 100000L,
+                                   ObservationCachePath = NULL,
+                                   ReuseObservationCache = TRUE,
+                                   RefreshObservationCache = FALSE,
+                                   FutureGlobalsMaxSizeMB = 768,
                                    Progress = TRUE, ProgressEvery = NULL,
                                    ProgressIntervalSeconds = 30) {
   SourceFingerprintMode <- match.arg(SourceFingerprintMode)
+  SchemaSurveyMode <- match.arg(SchemaSurveyMode)
   ValuePreviewMaxDistinct <- suppressWarnings(as.integer(ValuePreviewMaxDistinct[1]))
   if (is.na(ValuePreviewMaxDistinct) || ValuePreviewMaxDistinct < 1L ||
       ValuePreviewMaxDistinct > 100L) {
@@ -7864,6 +8116,19 @@ SurveyRepositorySchema <- function(MDT, MasterDBPath, ObservationPath,
   if (tolower(tools::file_ext(ObservationPath)) != "parquet") {
     stop("ObservationPath must end in .parquet.")
   }
+  if (is.null(ObservationCachePath)) {
+    ObservationCachePath <- file.path(
+      dirname(ObservationPath),
+      paste0(tools::file_path_sans_ext(basename(ObservationPath)), "_sources"))
+  }
+  if (length(ObservationCachePath) != 1L || is.na(ObservationCachePath) ||
+      !nzchar(trimws(ObservationCachePath))) {
+    stop("ObservationCachePath must be one non-empty directory path.")
+  }
+  FutureGlobalsMaxSizeMB <- suppressWarnings(as.numeric(FutureGlobalsMaxSizeMB[1]))
+  if (!is.finite(FutureGlobalsMaxSizeMB) || FutureGlobalsMaxSizeMB < 1) {
+    stop("FutureGlobalsMaxSizeMB must be a positive number.")
+  }
   previous_run <- if (!is.null(LogPath) || !is.null(RunId)) begin_repository_run(LogPath, RunId) else NULL
   if (!is.null(previous_run)) on.exit(restore_repository_run(previous_run), add = TRUE)
   required <- c("Database", "MDBDir", "Path", "TableName", "FileType", "PartitionKey", "PartitionValue")
@@ -7872,32 +8137,70 @@ SurveyRepositorySchema <- function(MDT, MasterDBPath, ObservationPath,
   MDTdt <- data.table::as.data.table(MDT)
   if (!is.null(DBLoad)) MDTdt <- MDTdt[as.character(Database) %in% as.character(DBLoad)]
   if (nrow(MDTdt) == 0L) stop("Schema survey has no MDT rows to inspect.")
+  cache_settings <- paste(
+    SchemaSurveyMode, AdaptiveSampleRows, FastReadMaxBytes, SchemaChunkSize,
+    SourceFingerprintMode, ValuePreviewMaxDistinct,
+    paste(sort(ValuePreviewTypes), collapse = ","),
+    isTRUE(ValuePreviewIdentifiers), sep = "|")
+  cache_keys <- vapply(seq_len(nrow(MDTdt)), function(i) {
+    .schema_survey_cache_key(
+      MDTdt[i, ], MasterDBPath, cache_settings,
+      fingerprint_mode = if (SourceFingerprintMode == "sha256") "sha256" else "metadata")
+  }, character(1))
+  cache_paths <- file.path(ObservationCachePath, paste0(cache_keys, ".parquet"))
+  results <- vector("list", nrow(MDTdt))
+  cache_hits <- rep(FALSE, nrow(MDTdt))
+  if (isTRUE(ReuseObservationCache) && !isTRUE(RefreshObservationCache)) {
+    candidates <- which(file.exists(cache_paths))
+    for (i in candidates) {
+      cached <- .read_schema_survey_cache(cache_paths[i])
+      if (!is.null(cached) && isTRUE(cached$ok)) {
+        results[[i]] <- cached
+        cache_hits[i] <- TRUE
+      }
+    }
+  }
+  scan_indices <- which(!cache_hits)
+  if (any(cache_hits)) {
+    log_msg(sprintf("[SCHEMA CACHE] Reusing %d of %d unchanged source observation(s); %d require scanning.",
+                    sum(cache_hits), nrow(MDTdt), length(scan_indices)))
+  }
   scan_one <- function(i, progress = FALSE, progress_index = NULL, progress_total = NULL) {
     register_builtin_file_readers()
     row <- MDTdt[i, ]
     progress_context <- if (isTRUE(progress)) {
       sprintf("source %d/%d (%s/%s: %s)",
-              progress_index, progress_total,
+              i, nrow(MDTdt),
               as.character(row$Database[1]), as.character(row$TableName[1]),
               basename(source_path_for_row(row, MasterDBPath)))
     } else {
       NULL
     }
-    .survey_schema_source(
+    result <- .survey_schema_source(
       row, MasterDBPath, SourceFingerprintMode,
       ValuePreviewMaxDistinct = ValuePreviewMaxDistinct,
       ValuePreviewTypes = ValuePreviewTypes,
       ValuePreviewIdentifiers = ValuePreviewIdentifiers,
+      SchemaSurveyMode = SchemaSurveyMode,
+      AdaptiveSampleRows = AdaptiveSampleRows,
+      FastReadMaxBytes = FastReadMaxBytes,
+      SchemaChunkSize = SchemaChunkSize,
       Progress = progress, ProgressContext = progress_context,
       ProgressIntervalSeconds = ProgressIntervalSeconds)
+    if (isTRUE(result$ok)) .write_schema_survey_cache(result, cache_paths[i])
+    result
   }
-  results <- .parallel_scan_with_serial_retry(
-    seq_len(nrow(MDTdt)), scan_one, n_workers = n_workers,
-    future_packages = c("data.table", "haven", "arrow", "bit64", "openxlsx", "stringi"),
-    is_failure = function(x) !is.list(x) || !isTRUE(x$ok),
-    context = "repository schema survey",
-    progress = Progress, progress_every = ProgressEvery
-  )
+  if (length(scan_indices) > 0L) {
+    scanned <- .parallel_scan_with_serial_retry(
+      scan_indices, scan_one, n_workers = n_workers,
+      future_packages = c("data.table", "haven", "arrow", "bit64", "openxlsx", "stringi", "digest"),
+      is_failure = function(x) !is.list(x) || !isTRUE(x$ok),
+      context = "repository schema survey",
+      progress = Progress, progress_every = ProgressEvery,
+      future_globals_max_size = FutureGlobalsMaxSizeMB * 1024^2
+    )
+    results[scan_indices] <- scanned
+  }
   observations <- data.table::rbindlist(lapply(results, `[[`, "data"), fill = TRUE)
   dir.create(dirname(ObservationPath), recursive = TRUE, showWarnings = FALSE)
   write_arrow_table_safely(arrow::as_arrow_table(observations), ObservationPath)
@@ -7906,7 +8209,8 @@ SurveyRepositorySchema <- function(MDT, MasterDBPath, ObservationPath,
   summary <- data.table::data.table(
     Sources = nrow(MDTdt), ObservationRows = nrow(observations),
     Columns = data.table::uniqueN(observations[SurveyStatus == "ok"]$Column, na.rm = TRUE),
-    FailedSources = sum(failed), WarningRows = n_warnings,
+    FailedSources = sum(failed), CachedSources = sum(cache_hits),
+    ScannedSources = length(scan_indices), WarningRows = n_warnings,
     ObservationPath = normalizePath(ObservationPath, winslash = "/", mustWork = FALSE)
   )
   log_msg(sprintf("[SCHEMA SURVEY] %d source(s), %d observation row(s), %d failed source(s); wrote %s",
@@ -7915,7 +8219,9 @@ SurveyRepositorySchema <- function(MDT, MasterDBPath, ObservationPath,
                         ObservationPath = ObservationPath,
                         ValuePreviewMaxDistinct = ValuePreviewMaxDistinct,
                         ValuePreviewTypes = ValuePreviewTypes,
-                        ValuePreviewIdentifiers = isTRUE(ValuePreviewIdentifiers)),
+                        ValuePreviewIdentifiers = isTRUE(ValuePreviewIdentifiers),
+                        SchemaSurveyMode = SchemaSurveyMode,
+                        ObservationCachePath = ObservationCachePath),
                    class = "RepositorySchemaSurvey")
   if (isTRUE(StrictReaders) && any(failed)) {
     stop(sprintf("Schema survey failed for %d source file(s). Detailed error rows were written to %s.",
@@ -9435,13 +9741,22 @@ PrepareSchemaRegistry <- function(MDT, MasterDBPath, ObservationPath, SchemaRevi
                                   ValuePreviewTypes = c("character", "integer", "int64", "logical"),
                                   ValuePreviewIdentifiers = FALSE,
                                   LogPath = NULL, RunId = NULL,
+                                  SchemaSurveyMode = c("adaptive", "full", "sample"),
+                                  AdaptiveSampleRows = 100000L,
+                                  FastReadMaxBytes = 256 * 1024^2,
+                                  SchemaChunkSize = 100000L,
+                                  ObservationCachePath = NULL,
+                                  ReuseObservationCache = TRUE,
+                                  RefreshObservationCache = FALSE,
+                                  FutureGlobalsMaxSizeMB = 768,
                                   Progress = TRUE, ProgressEvery = NULL,
                                   ProgressIntervalSeconds = 30) {
+  SchemaSurveyMode <- match.arg(SchemaSurveyMode)
   selected_sources <- if (is.null(DBLoad)) nrow(MDT) else
     sum(as.character(MDT$Database) %in% as.character(DBLoad))
-  log_msg(sprintf(paste0("[SCHEMA PREPARE] Stage 1/3: surveying %d source(s). ",
-                         "Delimited files are fully profiled in memory-bounded chunks."),
-                  selected_sources), log_path = LogPath, run_id = RunId)
+  log_msg(sprintf(paste0("[SCHEMA PREPARE] Stage 1/3: surveying %d source(s) in '%s' mode. ",
+                         "Completed source evidence is cached for resumable runs."),
+                  selected_sources, SchemaSurveyMode), log_path = LogPath, run_id = RunId)
   survey <- SurveyRepositorySchema(MDT = MDT, MasterDBPath = MasterDBPath,
                                    ObservationPath = ObservationPath, DBLoad = DBLoad,
                                    n_workers = n_workers,
@@ -9450,6 +9765,14 @@ PrepareSchemaRegistry <- function(MDT, MasterDBPath, ObservationPath, SchemaRevi
                                    ValuePreviewMaxDistinct = ValuePreviewMaxDistinct,
                                    ValuePreviewTypes = ValuePreviewTypes,
                                    ValuePreviewIdentifiers = ValuePreviewIdentifiers,
+                                   SchemaSurveyMode = SchemaSurveyMode,
+                                   AdaptiveSampleRows = AdaptiveSampleRows,
+                                   FastReadMaxBytes = FastReadMaxBytes,
+                                   SchemaChunkSize = SchemaChunkSize,
+                                   ObservationCachePath = ObservationCachePath,
+                                   ReuseObservationCache = ReuseObservationCache,
+                                   RefreshObservationCache = RefreshObservationCache,
+                                   FutureGlobalsMaxSizeMB = FutureGlobalsMaxSizeMB,
                                    Progress = Progress, ProgressEvery = ProgressEvery,
                                    ProgressIntervalSeconds = ProgressIntervalSeconds,
                                    LogPath = LogPath, RunId = RunId)

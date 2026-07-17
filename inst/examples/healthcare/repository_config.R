@@ -9,6 +9,13 @@ repository_config <- list(
   RAMThreshold      = 30,          # GB, for PartitionBy = "RAMEstimate"
   MaxCoerceNAPct    = 25,          # fail a file when coercion destroys more than this % of a column
   SourceFingerprintMode = "metadata", # metadata | sha256 | none
+  SchemaSurveyMode   = "adaptive", # adaptive | full | sample
+  SchemaFastReadMaxBytes = 512 * 1024^2, # bounded fread fast path; tune to available RAM
+  SchemaChunkSize    = 250000L,      # rows per exhaustive schema chunk
+  SchemaAdaptiveSampleRows = 100000L, # rows sampled from large clean files
+  SchemaFutureGlobalsMaxSizeMB = 768, # sourced-development worker allowance
+  SchemaReuseCache   = TRUE,         # resume and reuse unchanged source evidence
+  SchemaWorkers      = 6L,           # schema readers; keep modest on network storage
   RemoteOffline      = FALSE,        # TRUE uses only previously cached remote sources
   DownloadPolicy    = "if_missing", # if_missing | if_changed | always | manual
   DownloadTimeout   = 600,          # seconds

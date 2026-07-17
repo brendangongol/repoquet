@@ -313,7 +313,9 @@ Optional: remote acquisition.
 Download data from the internet using the SourceURI column in MDT. 
 The SourceURI must be a direct HTTP/HTTPS file URL; Path remains its stable logical filename. 
 Remote files are copied atomically into SourceCache and every later stage reads that managed
-local copy. 
+local copy. Repeated `if_missing` runs reuse that cache. When the optional
+`curl` package is available, `if_changed` sends a conditional HTTP request and
+avoids downloading unchanged content when the server honors modification dates.
 
 ```r
 MDT <- MaterializeRemoteSources(MDT = MDT,
@@ -339,7 +341,17 @@ low-cardinality previews, and semantic labels. Recommendations are data-derived;
 an optional `SchemaRegistry.xlsx` policy is shown explicitly rather than applied
 invisibly. Source files remain read-only and no cleaned staging copy is created.
 A remote source's managed cache contains its original downloaded bytes, not
-rewritten records.
+rewritten records. Schema evidence is also checkpointed one source at a time in
+`SchemaObservations_sources`, so interrupted runs resume and unchanged sources
+are not scanned again.
+
+`SchemaSurveyMode = "adaptive"` fully profiles bounded clean files with a fast
+`fread` path, samples larger clean files, and retains exhaustive logical-record
+scanning for sources configured for continuation repair. Use `"full"` when every
+delimited row must be inspected before review, or `"sample"` for rapid discovery.
+Final loading still enforces the approved schema in every mode. Use a modest
+`SchemaWorkers` value (typically 4-6) for network storage; the separate
+`n_workers` setting remains available for other repository phases.
 
 ```r
 DBLoad <- sort(unique(MDT$Database))
@@ -348,14 +360,20 @@ prepared <- PrepareSchemaRegistry(MDT = MDT,
                                   MasterDBPath = cfg$MasterDBPath,
                                   ObservationPath = paths$SchemaObservationPath,
                                   SchemaReviewPath = paths$SchemaReviewPath,
-                                  n_workers = cfg$n_workers,
+                                  n_workers = cfg$SchemaWorkers,
                                   SourceFingerprintMode = cfg$SourceFingerprintMode,
+                                  SchemaSurveyMode = cfg$SchemaSurveyMode,
+                                  FastReadMaxBytes = cfg$SchemaFastReadMaxBytes,
+                                  SchemaChunkSize = cfg$SchemaChunkSize,
+                                  AdaptiveSampleRows = cfg$SchemaAdaptiveSampleRows,
+                                  FutureGlobalsMaxSizeMB = cfg$SchemaFutureGlobalsMaxSizeMB,
+                                  ReuseObservationCache = cfg$SchemaReuseCache,
                                   StrictReaders = FALSE,
                                   ValuePreviewMaxDistinct = 15L,
                                   ValuePreviewTypes = c("character", "integer", "int64", "logical"),
                                   ValuePreviewIdentifiers = FALSE,
                                   SchemaRegistryPath = paths$SchemaRegistryPath,
-                                  SchemaProfile = "hcup",
+                                  SchemaProfile = "generic",
                                   LogPath = paths$LogPath,
                                   RunId = RunId )
 
@@ -629,4 +647,3 @@ State snapshots created by the loader provide an additional recovery record.
 The healthcare reference uses the same sequence with domain policies, migration
 helpers, advanced diagnostics, and machine-specific tuning. Those additions
 are intentionally not hard-coded into the generic package workflow.
-

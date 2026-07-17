@@ -160,10 +160,20 @@ test_that("remote acquisition settings can be overridden through config loading"
 
   cfg <- load_repository_config(
     config, RemoteOffline = TRUE, DownloadPolicy = "if_changed",
-    DownloadTimeout = 120)
+    DownloadTimeout = 120, SchemaSurveyMode = "full",
+    SchemaWorkers = 3L, SchemaReuseCache = FALSE,
+    SchemaFastReadMaxBytes = 1024, SchemaChunkSize = 2000L,
+    SchemaAdaptiveSampleRows = 500L, SchemaFutureGlobalsMaxSizeMB = 900)
   expect_true(cfg$RemoteOffline)
   expect_identical(cfg$DownloadPolicy, "if_changed")
   expect_identical(cfg$DownloadTimeout, 120)
+  expect_identical(cfg$SchemaSurveyMode, "full")
+  expect_identical(cfg$SchemaWorkers, 3L)
+  expect_false(cfg$SchemaReuseCache)
+  expect_identical(cfg$SchemaFastReadMaxBytes, 1024)
+  expect_identical(cfg$SchemaChunkSize, 2000)
+  expect_identical(cfg$SchemaAdaptiveSampleRows, 500)
+  expect_identical(cfg$SchemaFutureGlobalsMaxSizeMB, 900)
 })
 
 test_that("remote provenance is retained in the repository manifest", {

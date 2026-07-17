@@ -34,6 +34,7 @@ Imports:
 Suggests:
     circlize,
     ComplexHeatmap,
+    curl,
     RColorBrewer,
     R.utils,
     renv,

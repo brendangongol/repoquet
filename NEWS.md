@@ -13,6 +13,12 @@
 - Added a user-guided schema workflow: detailed source observations are stored
   in Parquet, a compact Excel workbook exposes recommendations and type history,
   and approved decisions finalize into the existing writer catalog.
+- Added adaptive schema surveys, bounded clean-file `fread` profiling,
+  per-source resumable observation caches, bounded low-cardinality previews,
+  and configurable schema worker/export limits.
+- Added optional conditional HTTP revalidation for `if_changed` sources when
+  `curl` is available, while preserving full-download hash comparison as the
+  compatibility fallback.
 - Redesigned `SchemaReview.xlsx` around a `StartHere` dashboard. Only unresolved
   column and compatibility decisions remain visible; policy results are clearly
   informational and advanced registries/history are hidden by default.

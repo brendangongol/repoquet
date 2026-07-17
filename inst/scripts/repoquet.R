@@ -50,9 +50,15 @@ if (command == "validate") {
   PrepareSchemaRegistry(MDT, MasterDBPath = cfg$MasterDBPath,
                         ObservationPath = paths$SchemaObservationPath,
                         SchemaReviewPath = paths$SchemaReviewPath,
-                        n_workers = cfg$n_workers,
+                        n_workers = cfg$SchemaWorkers,
                         SchemaRegistryPath = paths$SchemaRegistryPath,
                         SourceFingerprintMode = cfg$SourceFingerprintMode,
+                        SchemaSurveyMode = cfg$SchemaSurveyMode,
+                        FastReadMaxBytes = cfg$SchemaFastReadMaxBytes,
+                        SchemaChunkSize = cfg$SchemaChunkSize,
+                        AdaptiveSampleRows = cfg$SchemaAdaptiveSampleRows,
+                        FutureGlobalsMaxSizeMB = cfg$SchemaFutureGlobalsMaxSizeMB,
+                        ReuseObservationCache = cfg$SchemaReuseCache,
                         LogPath = paths$LogPath, RunId = RunId)
   message("Open StartHere in SchemaReview.xlsx, complete its required decisions, then run 'finalize'.")
 } else if (command == "finalize") {
