@@ -90,7 +90,7 @@ pending <- MDTCompleteStatus(MDT = MDT, CheckpointPath = RepositoryPaths$Checkpo
 ###############################################################################
 DBLoad <- sort(unique(MDT$Database))
 # c("NEDS", "NIS", "NISBishoy", "NRD", "NSQIP", "NTDB", "TQP")
-DBLoad <- c("NHANES", "CLINVAR", "MIMICIII_DEMO", "UCI_BREAST_CANCER", "UCI_DIABETES")
+# DBLoad <- c("NHANES", "CLINVAR", "MIMICIII_DEMO", "UCI_BREAST_CANCER", "UCI_DIABETES")
 prepared <- PrepareSchemaRegistry(MDT = MDT,
                                   DBLoad = DBLoad,
                                   MasterDBPath = cfg$MasterDBPath,
