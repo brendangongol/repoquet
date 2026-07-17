@@ -1,59 +1,499 @@
-[2026-07-16 17:54:00] [SCHEMA REGISTRY] Created default 'hcup' registry: X:/Brendan/NationalDatabases/formattedDatabases/Schema/SchemaRegistry.xlsx
-[2026-07-16 17:54:50] [run_id=20260716T175400_26572_230722] [LOCK] Acquired repository lock: X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/.materialize.lock (PCMC400005437 | 26572 | 2026-07-16 17:54:50 | MaterializeRemoteSources)
-[2026-07-16 17:54:50] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://physionet.org/files/mimiciii-demo/1.4/ADMISSIONS.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/2293a0fd84d8e70d_ADMISSIONS.csv
-[2026-07-16 17:54:51] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://physionet.org/files/mimiciii-demo/1.4/CALLOUT.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/27e6894938a62176_CALLOUT.csv
-[2026-07-16 17:54:51] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://physionet.org/files/mimiciii-demo/1.4/CAREGIVERS.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/b0f95b0264bea851_CAREGIVERS.csv
-[2026-07-16 17:54:52] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://physionet.org/files/mimiciii-demo/1.4/CHARTEVENTS.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/c3e55006c313e1f4_CHARTEVENTS.csv
-[2026-07-16 17:54:52] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://physionet.org/files/mimiciii-demo/1.4/CPTEVENTS.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/528201f66dc640f8_CPTEVENTS.csv
-[2026-07-16 17:54:52] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://physionet.org/files/mimiciii-demo/1.4/DATETIMEEVENTS.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/89d4c7664261bb39_DATETIMEEVENTS.csv
-[2026-07-16 17:54:52] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://physionet.org/files/mimiciii-demo/1.4/DIAGNOSES_ICD.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/495856753bd52f15_DIAGNOSES_ICD.csv
-[2026-07-16 17:54:52] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://physionet.org/files/mimiciii-demo/1.4/DRGCODES.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/46df46b48b299b0c_DRGCODES.csv
-[2026-07-16 17:54:52] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://physionet.org/files/mimiciii-demo/1.4/D_CPT.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/ffc7cbd58e0c8d7d_D_CPT.csv
-[2026-07-16 17:54:52] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://physionet.org/files/mimiciii-demo/1.4/D_ICD_DIAGNOSES.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/25853305f41cde7c_D_ICD_DIAGNOSES.csv
-[2026-07-16 17:54:52] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://physionet.org/files/mimiciii-demo/1.4/D_ICD_PROCEDURES.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/9a9d748c010afda1_D_ICD_PROCEDURES.csv
-[2026-07-16 17:54:53] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://physionet.org/files/mimiciii-demo/1.4/D_ITEMS.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/f88ec40892aaf479_D_ITEMS.csv
-[2026-07-16 17:54:53] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://physionet.org/files/mimiciii-demo/1.4/D_LABITEMS.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/97eede8c07ce1084_D_LABITEMS.csv
-[2026-07-16 17:54:53] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://physionet.org/files/mimiciii-demo/1.4/ICUSTAYS.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/f453f85a57d08010_ICUSTAYS.csv
-[2026-07-16 17:54:53] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://physionet.org/files/mimiciii-demo/1.4/INPUTEVENTS_CV.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/a5027ec912fea44d_INPUTEVENTS_CV.csv
-[2026-07-16 17:54:53] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://physionet.org/files/mimiciii-demo/1.4/INPUTEVENTS_MV.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/75773c6032890de3_INPUTEVENTS_MV.csv
-[2026-07-16 17:54:53] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://physionet.org/files/mimiciii-demo/1.4/LABEVENTS.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/cfb59fcd53ecabac_LABEVENTS.csv
-[2026-07-16 17:54:53] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://physionet.org/files/mimiciii-demo/1.4/MICROBIOLOGYEVENTS.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/3ee501772d95e8eb_MICROBIOLOGYEVENTS.csv
-[2026-07-16 17:54:53] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://physionet.org/files/mimiciii-demo/1.4/NOTEEVENTS.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/d5d8026433bc27c1_NOTEEVENTS.csv
-[2026-07-16 17:54:53] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://physionet.org/files/mimiciii-demo/1.4/OUTPUTEVENTS.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/64257f0fc1e40cdd_OUTPUTEVENTS.csv
-[2026-07-16 17:54:53] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://physionet.org/files/mimiciii-demo/1.4/PATIENTS.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/e2273aaa5fac4d9a_PATIENTS.csv
-[2026-07-16 17:54:54] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://physionet.org/files/mimiciii-demo/1.4/PRESCRIPTIONS.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/4680036ca628a3e5_PRESCRIPTIONS.csv
-[2026-07-16 17:54:54] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://physionet.org/files/mimiciii-demo/1.4/PROCEDUREEVENTS_MV.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/81860c220211ef14_PROCEDUREEVENTS_MV.csv
-[2026-07-16 17:54:54] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://physionet.org/files/mimiciii-demo/1.4/PROCEDURES_ICD.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/4a729aec2ecc0e3a_PROCEDURES_ICD.csv
-[2026-07-16 17:54:54] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://physionet.org/files/mimiciii-demo/1.4/SERVICES.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/3fd9ec5f886d223d_SERVICES.csv
-[2026-07-16 17:54:54] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://physionet.org/files/mimiciii-demo/1.4/TRANSFERS.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/e317bdbe4da69d3e_TRANSFERS.csv
-[2026-07-16 17:54:54] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/1999/DataFiles/DEMO.xpt -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/NHANES/2b341c6164294fd3_DEMO.xpt
-[2026-07-16 17:54:54] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2001/DataFiles/DEMO_B.xpt -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/NHANES/0d909bb8edb4cd15_DEMO_B.xpt
-[2026-07-16 17:54:54] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2003/DataFiles/DEMO_C.xpt -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/NHANES/276ab06e53c18a42_DEMO_C.xpt
-[2026-07-16 17:54:54] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2005/DataFiles/DEMO_D.xpt -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/NHANES/8fa587043fb2f50e_DEMO_D.xpt
-[2026-07-16 17:54:55] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2007/DataFiles/DEMO_E.xpt -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/NHANES/61bbee3ba3e07f6d_DEMO_E.xpt
-[2026-07-16 17:54:55] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2009/DataFiles/DEMO_F.xpt -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/NHANES/f6069db3783275be_DEMO_F.xpt
-[2026-07-16 17:54:55] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2011/DataFiles/DEMO_G.xpt -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/NHANES/5f73d0f4631feb18_DEMO_G.xpt
-[2026-07-16 17:54:55] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2013/DataFiles/DEMO_H.xpt -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/NHANES/19f42b05512aa075_DEMO_H.xpt
-[2026-07-16 17:54:55] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2015/DataFiles/DEMO_I.xpt -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/NHANES/28ef044e03ac5f2e_DEMO_I.xpt
-[2026-07-16 17:54:55] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2017/DataFiles/DEMO_J.xpt -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/NHANES/8674bab402643383_DEMO_J.xpt
-[2026-07-16 17:54:55] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2017/DataFiles/P_DEMO.xpt -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/NHANES/e0c2c6e5f3e48ca5_P_DEMO.xpt
-[2026-07-16 17:54:55] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2021/DataFiles/DEMO_L.xpt -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/NHANES/cf982db3bb1801b1_DEMO_L.xpt
-[2026-07-16 17:54:56] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://archive.ics.uci.edu/static/public/17/breast%2Bcancer%2Bwisconsin%2Bdiagnostic.zip -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/UCI_BREAST_CANCER/9d93d12b9103c2ef_wdbc.data
-[2026-07-16 17:54:56] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://archive.ics.uci.edu/static/public/296/diabetes%2B130-us%2Bhospitals%2Bfor%2Byears%2B1999-2008.zip -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/UCI_DIABETES/a4b3291052c87ec1_diabetic_data.csv
-[2026-07-16 17:54:56] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://archive.ics.uci.edu/static/public/296/diabetes%2B130-us%2Bhospitals%2Bfor%2Byears%2B1999-2008.zip -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/UCI_DIABETES/a4b3291052c87ec1_admission_type_id.csv
-[2026-07-16 17:54:56] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://archive.ics.uci.edu/static/public/296/diabetes%2B130-us%2Bhospitals%2Bfor%2Byears%2B1999-2008.zip -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/UCI_DIABETES/a4b3291052c87ec1_discharge_disposition_id.csv
-[2026-07-16 17:54:56] [run_id=20260716T175400_26572_230722] [REMOTE CACHED] https://archive.ics.uci.edu/static/public/296/diabetes%2B130-us%2Bhospitals%2Bfor%2Byears%2B1999-2008.zip -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/UCI_DIABETES/a4b3291052c87ec1_admission_source_id.csv
-[2026-07-16 17:54:57] [run_id=20260716T175400_26572_230722] [REMOTE UNCHANGED] https://ftp.ncbi.nlm.nih.gov/pub/clinvar/tab_delimited/gene_specific_summary.txt -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/CLINVAR/d0910dfe92702930_gene_specific_summary.txt
-[2026-07-16 17:55:04] [run_id=20260716T175400_26572_230722] [REMOTE UNCHANGED] https://ftp.ncbi.nlm.nih.gov/pub/clinvar/tab_delimited/variant_summary.txt.gz -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/CLINVAR/e7b9eeee8e626b0d_variant_summary.txt.gz
-[2026-07-16 17:55:05] [LOCK] Released repository lock: X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/.materialize.lock
-[2026-07-16 17:55:05] [run_id=20260716T175400_26572_230722] [SCHEMA PREPARE] Stage 1/3: surveying 528 source(s) in 'adaptive' mode. Completed source evidence is cached for resumable runs.
-[2026-07-16 17:55:24] [run_id=20260716T175400_26572_230722] [SCAN START] repository schema survey: submitting 528 item(s) to 6 worker(s).
-[2026-07-16 18:19:55] [run_id=20260716T175400_26572_230722] [PARALLEL FALLBACK] repository schema survey failed for 1 item(s); retrying those item(s) serially in the main R process.
-[2026-07-16 18:19:55] [run_id=20260716T175400_26572_230722] [PARALLEL FALLBACK] First worker error(s): input string 1 is invalid UTF-8
-[2026-07-16 18:19:55] [run_id=20260716T175400_26572_230722] [SCAN PROGRESS] repository schema survey serial retry: starting serial scan of 1 item(s).
-[2026-07-16 18:19:56] [run_id=20260716T175400_26572_230722] [SCAN PROGRESS] repository schema survey serial retry: 1/1 complete (100.0%); elapsed 1s; ETA 0s.
-[2026-07-16 18:19:57] [run_id=20260716T175400_26572_230722] [SCHEMA SURVEY] 528 source(s), 55948 observation row(s), 1 failed source(s); wrote X:/Brendan/NationalDatabases/formattedDatabases/Schema/SchemaObservations.parquet
-[2026-07-16 18:19:57] [run_id=20260716T175400_26572_230722] [SCHEMA PREPARE] Stage 2/3: deriving type recommendations and compatibility decisions.
-[2026-07-16 18:26:14] [run_id=20260716T175400_26572_230722] [SCHEMA PREPARE] Stage 3/3: writing the schema review workbook.
-[2026-07-16 18:26:20] [SCHEMA PROPOSAL] Wrote X:/Brendan/NationalDatabases/formattedDatabases/Schema/SchemaReview.xlsx (6010 columns; 0 column decision(s), 120 compatibility decision(s), 0 dictionary decision(s), 1 blocking source error(s)).
-[2026-07-16 18:26:20] [SCHEMA READY] Open StartHere in X:/Brendan/NationalDatabases/formattedDatabases/Schema/SchemaReview.xlsx: 0 column decision(s), 120 compatibility decision(s), 0 dictionary decision(s), 1 blocking source error(s).
+[2026-07-17 08:19:28] [SCHEMA REGISTRY] Created default 'hcup' registry: X:/Brendan/NationalDatabases/formattedDatabases/Schema/SchemaRegistry.xlsx
+[2026-07-17 08:19:49] [run_id=20260717T081929_25244_787495] [LOCK] Acquired repository lock: X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/.materialize.lock (PCMC400005437 | 25244 | 2026-07-17 08:19:49 | MaterializeRemoteSources)
+[2026-07-17 08:19:50] [run_id=20260717T081929_25244_787495] [REMOTE DOWNLOADED] https://physionet.org/files/mimiciii-demo/1.4/ADMISSIONS.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/2293a0fd84d8e70d_ADMISSIONS.csv
+[2026-07-17 08:19:50] [run_id=20260717T081929_25244_787495] [REMOTE DOWNLOADED] https://physionet.org/files/mimiciii-demo/1.4/CALLOUT.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/27e6894938a62176_CALLOUT.csv
+[2026-07-17 08:19:52] [run_id=20260717T081929_25244_787495] [REMOTE DOWNLOADED] https://physionet.org/files/mimiciii-demo/1.4/CAREGIVERS.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/b0f95b0264bea851_CAREGIVERS.csv
+[2026-07-17 08:27:32] [run_id=20260717T081929_25244_787495] [REMOTE DOWNLOADED] https://physionet.org/files/mimiciii-demo/1.4/CHARTEVENTS.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/c3e55006c313e1f4_CHARTEVENTS.csv
+[2026-07-17 08:27:33] [run_id=20260717T081929_25244_787495] [REMOTE DOWNLOADED] https://physionet.org/files/mimiciii-demo/1.4/CPTEVENTS.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/528201f66dc640f8_CPTEVENTS.csv
+[2026-07-17 08:27:45] [run_id=20260717T081929_25244_787495] [REMOTE DOWNLOADED] https://physionet.org/files/mimiciii-demo/1.4/DATETIMEEVENTS.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/89d4c7664261bb39_DATETIMEEVENTS.csv
+[2026-07-17 08:27:46] [run_id=20260717T081929_25244_787495] [REMOTE DOWNLOADED] https://physionet.org/files/mimiciii-demo/1.4/DIAGNOSES_ICD.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/495856753bd52f15_DIAGNOSES_ICD.csv
+[2026-07-17 08:27:47] [run_id=20260717T081929_25244_787495] [REMOTE DOWNLOADED] https://physionet.org/files/mimiciii-demo/1.4/DRGCODES.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/46df46b48b299b0c_DRGCODES.csv
+[2026-07-17 08:27:47] [run_id=20260717T081929_25244_787495] [REMOTE DOWNLOADED] https://physionet.org/files/mimiciii-demo/1.4/D_CPT.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/ffc7cbd58e0c8d7d_D_CPT.csv
+[2026-07-17 08:27:54] [run_id=20260717T081929_25244_787495] [REMOTE DOWNLOADED] https://physionet.org/files/mimiciii-demo/1.4/D_ICD_DIAGNOSES.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/25853305f41cde7c_D_ICD_DIAGNOSES.csv
+[2026-07-17 08:27:56] [run_id=20260717T081929_25244_787495] [REMOTE DOWNLOADED] https://physionet.org/files/mimiciii-demo/1.4/D_ICD_PROCEDURES.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/9a9d748c010afda1_D_ICD_PROCEDURES.csv
+[2026-07-17 08:28:00] [run_id=20260717T081929_25244_787495] [REMOTE DOWNLOADED] https://physionet.org/files/mimiciii-demo/1.4/D_ITEMS.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/f88ec40892aaf479_D_ITEMS.csv
+[2026-07-17 08:28:01] [run_id=20260717T081929_25244_787495] [REMOTE DOWNLOADED] https://physionet.org/files/mimiciii-demo/1.4/D_LABITEMS.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/97eede8c07ce1084_D_LABITEMS.csv
+[2026-07-17 08:28:02] [run_id=20260717T081929_25244_787495] [REMOTE DOWNLOADED] https://physionet.org/files/mimiciii-demo/1.4/ICUSTAYS.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/f453f85a57d08010_ICUSTAYS.csv
+[2026-07-17 08:28:25] [run_id=20260717T081929_25244_787495] [REMOTE DOWNLOADED] https://physionet.org/files/mimiciii-demo/1.4/INPUTEVENTS_CV.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/a5027ec912fea44d_INPUTEVENTS_CV.csv
+[2026-07-17 08:28:41] [run_id=20260717T081929_25244_787495] [REMOTE DOWNLOADED] https://physionet.org/files/mimiciii-demo/1.4/INPUTEVENTS_MV.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/75773c6032890de3_INPUTEVENTS_MV.csv
+[2026-07-17 08:29:04] [run_id=20260717T081929_25244_787495] [REMOTE DOWNLOADED] https://physionet.org/files/mimiciii-demo/1.4/LABEVENTS.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/cfb59fcd53ecabac_LABEVENTS.csv
+[2026-07-17 08:29:06] [run_id=20260717T081929_25244_787495] [REMOTE DOWNLOADED] https://physionet.org/files/mimiciii-demo/1.4/MICROBIOLOGYEVENTS.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/3ee501772d95e8eb_MICROBIOLOGYEVENTS.csv
+[2026-07-17 08:29:06] [run_id=20260717T081929_25244_787495] [REMOTE DOWNLOADED] https://physionet.org/files/mimiciii-demo/1.4/NOTEEVENTS.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/d5d8026433bc27c1_NOTEEVENTS.csv
+[2026-07-17 08:29:12] [run_id=20260717T081929_25244_787495] [REMOTE DOWNLOADED] https://physionet.org/files/mimiciii-demo/1.4/OUTPUTEVENTS.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/64257f0fc1e40cdd_OUTPUTEVENTS.csv
+[2026-07-17 08:29:12] [run_id=20260717T081929_25244_787495] [REMOTE DOWNLOADED] https://physionet.org/files/mimiciii-demo/1.4/PATIENTS.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/e2273aaa5fac4d9a_PATIENTS.csv
+[2026-07-17 08:29:22] [run_id=20260717T081929_25244_787495] [REMOTE DOWNLOADED] https://physionet.org/files/mimiciii-demo/1.4/PRESCRIPTIONS.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/4680036ca628a3e5_PRESCRIPTIONS.csv
+[2026-07-17 08:29:23] [run_id=20260717T081929_25244_787495] [REMOTE DOWNLOADED] https://physionet.org/files/mimiciii-demo/1.4/PROCEDUREEVENTS_MV.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/81860c220211ef14_PROCEDUREEVENTS_MV.csv
+[2026-07-17 08:29:23] [run_id=20260717T081929_25244_787495] [REMOTE DOWNLOADED] https://physionet.org/files/mimiciii-demo/1.4/PROCEDURES_ICD.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/4a729aec2ecc0e3a_PROCEDURES_ICD.csv
+[2026-07-17 08:29:24] [run_id=20260717T081929_25244_787495] [REMOTE DOWNLOADED] https://physionet.org/files/mimiciii-demo/1.4/SERVICES.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/3fd9ec5f886d223d_SERVICES.csv
+[2026-07-17 08:29:25] [run_id=20260717T081929_25244_787495] [REMOTE DOWNLOADED] https://physionet.org/files/mimiciii-demo/1.4/TRANSFERS.csv?download= -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/MIMICIII_DEMO/e317bdbe4da69d3e_TRANSFERS.csv
+[2026-07-17 08:29:28] [run_id=20260717T081929_25244_787495] [REMOTE DOWNLOADED] https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/1999/DataFiles/DEMO.xpt -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/NHANES/2b341c6164294fd3_DEMO.xpt
+[2026-07-17 08:29:29] [run_id=20260717T081929_25244_787495] [REMOTE DOWNLOADED] https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2001/DataFiles/DEMO_B.xpt -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/NHANES/0d909bb8edb4cd15_DEMO_B.xpt
+[2026-07-17 08:29:30] [run_id=20260717T081929_25244_787495] [REMOTE DOWNLOADED] https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2003/DataFiles/DEMO_C.xpt -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/NHANES/276ab06e53c18a42_DEMO_C.xpt
+[2026-07-17 08:29:31] [run_id=20260717T081929_25244_787495] [REMOTE DOWNLOADED] https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2005/DataFiles/DEMO_D.xpt -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/NHANES/8fa587043fb2f50e_DEMO_D.xpt
+[2026-07-17 08:29:32] [run_id=20260717T081929_25244_787495] [REMOTE DOWNLOADED] https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2007/DataFiles/DEMO_E.xpt -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/NHANES/61bbee3ba3e07f6d_DEMO_E.xpt
+[2026-07-17 08:29:33] [run_id=20260717T081929_25244_787495] [REMOTE DOWNLOADED] https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2009/DataFiles/DEMO_F.xpt -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/NHANES/f6069db3783275be_DEMO_F.xpt
+[2026-07-17 08:29:34] [run_id=20260717T081929_25244_787495] [REMOTE DOWNLOADED] https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2011/DataFiles/DEMO_G.xpt -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/NHANES/5f73d0f4631feb18_DEMO_G.xpt
+[2026-07-17 08:29:36] [run_id=20260717T081929_25244_787495] [REMOTE DOWNLOADED] https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2013/DataFiles/DEMO_H.xpt -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/NHANES/19f42b05512aa075_DEMO_H.xpt
+[2026-07-17 08:29:37] [run_id=20260717T081929_25244_787495] [REMOTE DOWNLOADED] https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2015/DataFiles/DEMO_I.xpt -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/NHANES/28ef044e03ac5f2e_DEMO_I.xpt
+[2026-07-17 08:29:38] [run_id=20260717T081929_25244_787495] [REMOTE DOWNLOADED] https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2017/DataFiles/DEMO_J.xpt -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/NHANES/8674bab402643383_DEMO_J.xpt
+[2026-07-17 08:29:39] [run_id=20260717T081929_25244_787495] [REMOTE DOWNLOADED] https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2017/DataFiles/P_DEMO.xpt -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/NHANES/e0c2c6e5f3e48ca5_P_DEMO.xpt
+[2026-07-17 08:29:40] [run_id=20260717T081929_25244_787495] [REMOTE DOWNLOADED_EXTRACTED] https://archive.ics.uci.edu/static/public/17/breast%2Bcancer%2Bwisconsin%2Bdiagnostic.zip -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/UCI_BREAST_CANCER/9d93d12b9103c2ef_wdbc.data
+[2026-07-17 08:29:47] [run_id=20260717T081929_25244_787495] [REMOTE DOWNLOADED_EXTRACTED] https://archive.ics.uci.edu/static/public/296/diabetes%2B130-us%2Bhospitals%2Bfor%2Byears%2B1999-2008.zip -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/UCI_DIABETES/a4b3291052c87ec1_diabetic_data.csv
+[2026-07-17 08:29:47] [run_id=20260717T081929_25244_787495] [REMOTE CACHED_EXTRACTED] https://archive.ics.uci.edu/static/public/296/diabetes%2B130-us%2Bhospitals%2Bfor%2Byears%2B1999-2008.zip -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/UCI_DIABETES/a4b3291052c87ec1_admission_type_id.csv
+[2026-07-17 08:29:48] [run_id=20260717T081929_25244_787495] [REMOTE CACHED_EXTRACTED] https://archive.ics.uci.edu/static/public/296/diabetes%2B130-us%2Bhospitals%2Bfor%2Byears%2B1999-2008.zip -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/UCI_DIABETES/a4b3291052c87ec1_discharge_disposition_id.csv
+[2026-07-17 08:29:48] [run_id=20260717T081929_25244_787495] [REMOTE CACHED_EXTRACTED] https://archive.ics.uci.edu/static/public/296/diabetes%2B130-us%2Bhospitals%2Bfor%2Byears%2B1999-2008.zip -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/UCI_DIABETES/a4b3291052c87ec1_admission_source_id.csv
+[2026-07-17 08:29:49] [run_id=20260717T081929_25244_787495] [REMOTE DOWNLOADED] https://ftp.ncbi.nlm.nih.gov/pub/clinvar/tab_delimited/gene_specific_summary.txt -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/CLINVAR/d0910dfe92702930_gene_specific_summary.txt
+[2026-07-17 08:31:17] [run_id=20260717T081929_25244_787495] [REMOTE DOWNLOADED] https://ftp.ncbi.nlm.nih.gov/pub/clinvar/tab_delimited/variant_summary.txt.gz -> X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/CLINVAR/e7b9eeee8e626b0d_variant_summary.txt.gz
+[2026-07-17 08:31:17] [LOCK] Released repository lock: X:/Brendan/NationalDatabases/formattedDatabases/SourceCache/.materialize.lock
+[2026-07-17 08:31:18] [run_id=20260717T081929_25244_787495] [SCHEMA PREPARE] Stage 1/3: surveying 527 source(s) in 'adaptive' mode. Completed source evidence is cached for resumable runs.
+[2026-07-17 08:31:35] [run_id=20260717T081929_25244_787495] [SCAN START] repository schema survey: submitting 527 item(s) to 6 worker(s).
+[2026-07-17 08:55:33] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] repository schema survey: 527/527 item(s) completed in parallel.
+[2026-07-17 08:55:34] [run_id=20260717T081929_25244_787495] [SCHEMA SURVEY] 527 source(s), 55947 observation row(s), 0 failed source(s); wrote X:/Brendan/NationalDatabases/formattedDatabases/Schema/SchemaObservations.parquet
+[2026-07-17 08:55:34] [run_id=20260717T081929_25244_787495] [SCHEMA PREPARE] Stage 2/3: deriving type recommendations and compatibility decisions.
+[2026-07-17 09:01:52] [run_id=20260717T081929_25244_787495] [SCHEMA PREPARE] Stage 3/3: writing the schema review workbook.
+[2026-07-17 09:01:57] [SCHEMA PROPOSAL] Wrote X:/Brendan/NationalDatabases/formattedDatabases/Schema/SchemaReview.xlsx (6010 columns; 0 column decision(s), 120 compatibility decision(s), 0 dictionary decision(s), 0 blocking source error(s)).
+[2026-07-17 09:01:57] [SCHEMA READY] Open StartHere in X:/Brendan/NationalDatabases/formattedDatabases/Schema/SchemaReview.xlsx: 0 column decision(s), 120 compatibility decision(s), 0 dictionary decision(s), 0 blocking source error(s).
+[2026-07-17 09:10:41] [run_id=20260717T081929_25244_787495] Parallel workers available: 15 (scoped per scan)
+[2026-07-17 09:10:41] [run_id=20260717T081929_25244_787495] [PREFLIGHT] Skipped inside loader (RunPreflight = FALSE) -- caller is responsible for having run ValidateMDTPreflight.
+[2026-07-17 09:10:41] [run_id=20260717T081929_25244_787495] [LOCK] Acquired repository lock: X:/Brendan/NationalDatabases/formattedDatabases/.repository.lock (PCMC400005437 | 25244 | 2026-07-17 09:10:41 | ParquetBackEndCreate)
+[2026-07-17 09:10:41] [run_id=20260717T081929_25244_787495] [SNAPSHOT] Saved 2/2 state file(s) to X:/Brendan/NationalDatabases/formattedDatabases/StateBackups/20260717_091041
+[2026-07-17 09:10:45] [run_id=20260717T081929_25244_787495] [SCHEMA CATALOG] Using reviewed column types from X:/Brendan/NationalDatabases/formattedDatabases/Schema/TableSchemas.xlsx.
+[2026-07-17 09:10:45] [run_id=20260717T081929_25244_787495] === Building schema: CLINVAR ===
+[2026-07-17 09:10:45] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:10:51] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:10:51] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:11:21] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:11:22] [run_id=20260717T081929_25244_787495] === Building schema: MIMICIII_DEMO ===
+[2026-07-17 09:11:22] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:11:28] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:11:28] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:11:34] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:11:34] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:11:40] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:11:40] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:11:48] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:11:48] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:11:54] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:11:54] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:12:00] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:12:00] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:12:08] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:12:08] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:12:15] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:12:15] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:12:21] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:12:21] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:12:27] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:12:27] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:12:33] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:12:34] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:12:39] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:12:39] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:12:46] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:12:46] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:12:51] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:12:52] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:12:57] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:12:58] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:13:04] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:13:04] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:13:10] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:13:11] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:13:16] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:13:17] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:13:23] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:13:23] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:13:30] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:13:30] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:13:36] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:13:36] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:13:43] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:13:43] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:13:49] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:13:50] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:13:56] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:13:56] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:14:03] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:14:03] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:14:09] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:14:09] [run_id=20260717T081929_25244_787495] === Building schema: NEDS ===
+[2026-07-17 09:14:10] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 5 item(s) to 15 worker(s).
+[2026-07-17 09:14:18] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 5/5 item(s) completed in parallel.
+[2026-07-17 09:14:18] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 7 item(s) to 15 worker(s).
+[2026-07-17 09:14:26] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-17 09:14:27] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 5 item(s) to 15 worker(s).
+[2026-07-17 09:14:35] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 5/5 item(s) completed in parallel.
+[2026-07-17 09:14:36] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 5 item(s) to 15 worker(s).
+[2026-07-17 09:14:42] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 5/5 item(s) completed in parallel.
+[2026-07-17 09:14:42] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 4 item(s) to 15 worker(s).
+[2026-07-17 09:14:50] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 4/4 item(s) completed in parallel.
+[2026-07-17 09:14:50] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 4 item(s) to 15 worker(s).
+[2026-07-17 09:14:57] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 4/4 item(s) completed in parallel.
+[2026-07-17 09:14:58] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 5 item(s) to 15 worker(s).
+[2026-07-17 09:15:06] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 5/5 item(s) completed in parallel.
+[2026-07-17 09:15:06] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 6 item(s) to 15 worker(s).
+[2026-07-17 09:15:15] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 6/6 item(s) completed in parallel.
+[2026-07-17 09:15:15] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:15:21] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:15:21] [run_id=20260717T081929_25244_787495] === Building schema: NHANES ===
+[2026-07-17 09:15:22] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 11 item(s) to 15 worker(s).
+[2026-07-17 09:15:31] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 11/11 item(s) completed in parallel.
+[2026-07-17 09:15:33] [run_id=20260717T081929_25244_787495] === Building schema: NIS ===
+[2026-07-17 09:15:33] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 13 item(s) to 15 worker(s).
+[2026-07-17 09:15:46] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 13/13 item(s) completed in parallel.
+[2026-07-17 09:15:48] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:15:54] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:15:54] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 11 item(s) to 15 worker(s).
+[2026-07-17 09:16:07] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 11/11 item(s) completed in parallel.
+[2026-07-17 09:16:16] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 12 item(s) to 15 worker(s).
+[2026-07-17 09:16:26] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 12/12 item(s) completed in parallel.
+[2026-07-17 09:16:27] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 3 item(s) to 15 worker(s).
+[2026-07-17 09:16:33] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 3/3 item(s) completed in parallel.
+[2026-07-17 09:16:34] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 12 item(s) to 15 worker(s).
+[2026-07-17 09:16:45] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 12/12 item(s) completed in parallel.
+[2026-07-17 09:16:46] [run_id=20260717T081929_25244_787495] === Building schema: NISBishoy ===
+[2026-07-17 09:16:46] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:16:52] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:16:53] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:17:00] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:17:01] [run_id=20260717T081929_25244_787495] === Building schema: NRD ===
+[2026-07-17 09:17:01] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 11 item(s) to 15 worker(s).
+[2026-07-17 09:17:12] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 11/11 item(s) completed in parallel.
+[2026-07-17 09:17:14] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 3 item(s) to 15 worker(s).
+[2026-07-17 09:17:21] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 3/3 item(s) completed in parallel.
+[2026-07-17 09:17:21] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 6 item(s) to 15 worker(s).
+[2026-07-17 09:17:28] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 6/6 item(s) completed in parallel.
+[2026-07-17 09:17:28] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 3 item(s) to 15 worker(s).
+[2026-07-17 09:17:35] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 3/3 item(s) completed in parallel.
+[2026-07-17 09:17:37] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 4 item(s) to 15 worker(s).
+[2026-07-17 09:17:46] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 4/4 item(s) completed in parallel.
+[2026-07-17 09:17:51] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 9 item(s) to 15 worker(s).
+[2026-07-17 09:18:01] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 9/9 item(s) completed in parallel.
+[2026-07-17 09:18:01] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:18:07] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:18:07] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:18:13] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:18:13] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 6 item(s) to 15 worker(s).
+[2026-07-17 09:18:22] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 6/6 item(s) completed in parallel.
+[2026-07-17 09:18:23] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:18:29] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:18:33] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 9 item(s) to 15 worker(s).
+[2026-07-17 09:18:44] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 9/9 item(s) completed in parallel.
+[2026-07-17 09:18:45] [run_id=20260717T081929_25244_787495] === Building schema: NSQIP ===
+[2026-07-17 09:18:45] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 14 item(s) to 15 worker(s).
+[2026-07-17 09:18:57] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 14/14 item(s) completed in parallel.
+[2026-07-17 09:19:00] [run_id=20260717T081929_25244_787495] === Building schema: NTDB ===
+[2026-07-17 09:19:00] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 6 item(s) to 15 worker(s).
+[2026-07-17 09:19:09] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 6/6 item(s) completed in parallel.
+[2026-07-17 09:19:09] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 6 item(s) to 15 worker(s).
+[2026-07-17 09:19:17] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 6/6 item(s) completed in parallel.
+[2026-07-17 09:19:17] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 2 item(s) to 15 worker(s).
+[2026-07-17 09:19:23] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 09:19:23] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 4 item(s) to 15 worker(s).
+[2026-07-17 09:19:31] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 4/4 item(s) completed in parallel.
+[2026-07-17 09:19:31] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 7 item(s) to 15 worker(s).
+[2026-07-17 09:19:39] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-17 09:19:39] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:19:46] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:19:46] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 3 item(s) to 15 worker(s).
+[2026-07-17 09:19:53] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 3/3 item(s) completed in parallel.
+[2026-07-17 09:19:53] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 7 item(s) to 15 worker(s).
+[2026-07-17 09:20:03] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-17 09:20:03] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 7 item(s) to 15 worker(s).
+[2026-07-17 09:20:12] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-17 09:20:12] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 7 item(s) to 15 worker(s).
+[2026-07-17 09:20:21] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-17 09:20:21] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 7 item(s) to 15 worker(s).
+[2026-07-17 09:20:28] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-17 09:20:29] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 7 item(s) to 15 worker(s).
+[2026-07-17 09:20:37] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-17 09:20:37] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 7 item(s) to 15 worker(s).
+[2026-07-17 09:20:45] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-17 09:20:45] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 7 item(s) to 15 worker(s).
+[2026-07-17 09:20:54] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-17 09:20:54] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 7 item(s) to 15 worker(s).
+[2026-07-17 09:21:04] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-17 09:21:04] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 7 item(s) to 15 worker(s).
+[2026-07-17 09:21:14] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-17 09:21:14] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 4 item(s) to 15 worker(s).
+[2026-07-17 09:21:21] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 4/4 item(s) completed in parallel.
+[2026-07-17 09:21:22] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 4 item(s) to 15 worker(s).
+[2026-07-17 09:21:28] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 4/4 item(s) completed in parallel.
+[2026-07-17 09:21:28] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 2 item(s) to 15 worker(s).
+[2026-07-17 09:21:35] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 09:21:35] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 2 item(s) to 15 worker(s).
+[2026-07-17 09:21:42] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 09:21:42] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 2 item(s) to 15 worker(s).
+[2026-07-17 09:21:48] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 09:21:48] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 2 item(s) to 15 worker(s).
+[2026-07-17 09:21:55] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 09:21:55] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 2 item(s) to 15 worker(s).
+[2026-07-17 09:22:01] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 09:22:01] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 2 item(s) to 15 worker(s).
+[2026-07-17 09:22:08] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 09:22:08] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 2 item(s) to 15 worker(s).
+[2026-07-17 09:22:15] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 09:22:15] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 7 item(s) to 15 worker(s).
+[2026-07-17 09:22:26] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-17 09:22:26] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 7 item(s) to 15 worker(s).
+[2026-07-17 09:22:36] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-17 09:22:36] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 4 item(s) to 15 worker(s).
+[2026-07-17 09:22:46] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 4/4 item(s) completed in parallel.
+[2026-07-17 09:22:47] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 7 item(s) to 15 worker(s).
+[2026-07-17 09:22:54] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-17 09:22:55] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 7 item(s) to 15 worker(s).
+[2026-07-17 09:23:05] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-17 09:23:06] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 7 item(s) to 15 worker(s).
+[2026-07-17 09:23:13] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-17 09:23:13] [run_id=20260717T081929_25244_787495] === Building schema: TQP ===
+[2026-07-17 09:23:14] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 4 item(s) to 15 worker(s).
+[2026-07-17 09:23:22] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 4/4 item(s) completed in parallel.
+[2026-07-17 09:23:22] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 5 item(s) to 15 worker(s).
+[2026-07-17 09:23:31] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 5/5 item(s) completed in parallel.
+[2026-07-17 09:23:31] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:23:37] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:23:37] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:23:43] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:23:43] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:23:50] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:23:50] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 8 item(s) to 15 worker(s).
+[2026-07-17 09:24:00] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 8/8 item(s) completed in parallel.
+[2026-07-17 09:24:00] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 8 item(s) to 15 worker(s).
+[2026-07-17 09:24:08] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 8/8 item(s) completed in parallel.
+[2026-07-17 09:24:08] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:24:14] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:24:15] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 2 item(s) to 15 worker(s).
+[2026-07-17 09:24:22] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 09:24:22] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 2 item(s) to 15 worker(s).
+[2026-07-17 09:24:29] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 09:24:29] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 2 item(s) to 15 worker(s).
+[2026-07-17 09:24:36] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 09:24:36] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 2 item(s) to 15 worker(s).
+[2026-07-17 09:24:43] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 09:24:43] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 2 item(s) to 15 worker(s).
+[2026-07-17 09:24:49] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 09:24:49] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 2 item(s) to 15 worker(s).
+[2026-07-17 09:24:56] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 09:24:56] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 2 item(s) to 15 worker(s).
+[2026-07-17 09:25:04] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 09:25:05] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 2 item(s) to 15 worker(s).
+[2026-07-17 09:25:12] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 09:25:12] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 8 item(s) to 15 worker(s).
+[2026-07-17 09:25:21] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 8/8 item(s) completed in parallel.
+[2026-07-17 09:25:21] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 2 item(s) to 15 worker(s).
+[2026-07-17 09:25:29] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 09:25:29] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 2 item(s) to 15 worker(s).
+[2026-07-17 09:25:35] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 09:25:36] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 8 item(s) to 15 worker(s).
+[2026-07-17 09:25:43] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 8/8 item(s) completed in parallel.
+[2026-07-17 09:25:43] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 6 item(s) to 15 worker(s).
+[2026-07-17 09:25:51] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 6/6 item(s) completed in parallel.
+[2026-07-17 09:25:51] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 2 item(s) to 15 worker(s).
+[2026-07-17 09:25:58] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 09:25:58] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 2 item(s) to 15 worker(s).
+[2026-07-17 09:26:04] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 09:26:04] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 2 item(s) to 15 worker(s).
+[2026-07-17 09:26:12] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 09:26:12] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 2 item(s) to 15 worker(s).
+[2026-07-17 09:26:18] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 09:26:18] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 2 item(s) to 15 worker(s).
+[2026-07-17 09:26:25] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 09:26:25] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 2 item(s) to 15 worker(s).
+[2026-07-17 09:26:32] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 09:26:32] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 2 item(s) to 15 worker(s).
+[2026-07-17 09:26:39] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 09:26:39] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 8 item(s) to 15 worker(s).
+[2026-07-17 09:26:50] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 8/8 item(s) completed in parallel.
+[2026-07-17 09:26:51] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 8 item(s) to 15 worker(s).
+[2026-07-17 09:27:04] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 8/8 item(s) completed in parallel.
+[2026-07-17 09:27:04] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 8 item(s) to 15 worker(s).
+[2026-07-17 09:27:13] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 8/8 item(s) completed in parallel.
+[2026-07-17 09:27:13] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 8 item(s) to 15 worker(s).
+[2026-07-17 09:27:23] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 8/8 item(s) completed in parallel.
+[2026-07-17 09:27:23] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 10 item(s) to 15 worker(s).
+[2026-07-17 09:27:33] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 10/10 item(s) completed in parallel.
+[2026-07-17 09:27:33] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 2 item(s) to 15 worker(s).
+[2026-07-17 09:27:40] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 09:27:40] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 2 item(s) to 15 worker(s).
+[2026-07-17 09:27:46] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 09:27:46] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:27:54] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:27:54] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:28:01] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:28:02] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 2 item(s) to 15 worker(s).
+[2026-07-17 09:28:08] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 09:28:08] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 2 item(s) to 15 worker(s).
+[2026-07-17 09:28:14] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 09:28:14] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 2 item(s) to 15 worker(s).
+[2026-07-17 09:28:21] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 09:28:21] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 6 item(s) to 15 worker(s).
+[2026-07-17 09:28:31] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 6/6 item(s) completed in parallel.
+[2026-07-17 09:28:31] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 2 item(s) to 15 worker(s).
+[2026-07-17 09:28:37] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 09:28:37] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:28:44] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:28:44] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 2 item(s) to 15 worker(s).
+[2026-07-17 09:28:50] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 09:28:50] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 8 item(s) to 15 worker(s).
+[2026-07-17 09:29:02] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 8/8 item(s) completed in parallel.
+[2026-07-17 09:29:05] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 6 item(s) to 15 worker(s).
+[2026-07-17 09:29:15] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 6/6 item(s) completed in parallel.
+[2026-07-17 09:29:15] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 2 item(s) to 15 worker(s).
+[2026-07-17 09:29:22] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 09:29:22] [run_id=20260717T081929_25244_787495] === Building schema: UCI_BREAST_CANCER ===
+[2026-07-17 09:29:22] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:29:30] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:29:30] [run_id=20260717T081929_25244_787495] === Building schema: UCI_DIABETES ===
+[2026-07-17 09:29:30] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:29:36] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:29:36] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:29:42] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:29:42] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:29:48] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:29:48] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:29:55] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:29:58] [run_id=20260717T081929_25244_787495] === Loading CLINVAR ===
+[2026-07-17 09:30:00] [run_id=20260717T081929_25244_787495] [LOAD CHECK COMPLETE] d0910dfe92702930_gene_specific_summary.txt -> direct reader
+[2026-07-17 09:30:00] [run_id=20260717T081929_25244_787495] [READ] d0910dfe92702930_gene_specific_summary.txt: 92,795 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 09:30:03] [run_id=20260717T081929_25244_787495] [OK] 1/2  gene_specific_summary.txt -> CLINVAR_GeneSpecificSummary (release=current)
+[2026-07-17 09:30:04] [run_id=20260717T081929_25244_787495] [ERROR] CLINVAR failed during loading: `params` must not be named
+[2026-07-17 09:30:04] [run_id=20260717T081929_25244_787495] [ERROR] Call: dbBind(res, params)
+[2026-07-17 09:30:04] [run_id=20260717T081929_25244_787495] [ERROR] Checkpoint on disk: 0 files. Continuing to next database.
+[2026-07-17 09:30:04] [run_id=20260717T081929_25244_787495] === Loading MIMICIII_DEMO ===
+[2026-07-17 09:30:05] [run_id=20260717T081929_25244_787495] [LOAD CHECK COMPLETE] 2293a0fd84d8e70d_ADMISSIONS.csv -> direct reader
+[2026-07-17 09:30:05] [run_id=20260717T081929_25244_787495] [READ] 2293a0fd84d8e70d_ADMISSIONS.csv: 129 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 09:30:08] [run_id=20260717T081929_25244_787495] [OK] 1/26  ADMISSIONS.csv -> MIMICIII_DEMO_ADMISSIONS (release=1.4)
+[2026-07-17 09:30:09] [run_id=20260717T081929_25244_787495] [ERROR] MIMICIII_DEMO failed during loading: `params` must not be named
+[2026-07-17 09:30:09] [run_id=20260717T081929_25244_787495] [ERROR] Call: dbBind(res, params)
+[2026-07-17 09:30:09] [run_id=20260717T081929_25244_787495] [ERROR] Checkpoint on disk: 0 files. Continuing to next database.
+[2026-07-17 09:30:09] [run_id=20260717T081929_25244_787495] === Loading NEDS ===
+[2026-07-17 09:32:22] [run_id=20260717T081929_25244_787495] [LOAD CHECK COMPLETE] NEDS_2010_Comorbidities.SAV -> direct reader
+[2026-07-17 09:32:22] [run_id=20260717T081929_25244_787495] [READ] NEDS_2010_Comorbidities.SAV: 28,579,375 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 09:34:18] [run_id=20260717T081929_25244_787495] [OK] 1/42  NEDS_2010_Comorbidities.SAV -> NEDS_Comorbidities (year=2010)
+[2026-07-17 09:34:18] [run_id=20260717T081929_25244_787495] [CHECKPOINT] NEDS||Comorbidities||YEAR=2010||NEDS_Data||NEDS_2010_Comorbidities.SAV||SOURCE=meta:771644974:2021-11-02T16:59:16.000000Z: NEDS_Comorbidities
+[2026-07-17 09:46:51] [LOCK] Released repository lock: X:/Brendan/NationalDatabases/formattedDatabases/.repository.lock
+[2026-07-17 09:50:15] [run_id=20260717T081929_25244_787495] Parallel workers available: 15 (scoped per scan)
+[2026-07-17 09:50:15] [run_id=20260717T081929_25244_787495] [PREFLIGHT] Skipped inside loader (RunPreflight = FALSE) -- caller is responsible for having run ValidateMDTPreflight.
+[2026-07-17 09:50:15] [run_id=20260717T081929_25244_787495] [LOCK] Acquired repository lock: X:/Brendan/NationalDatabases/formattedDatabases/.repository.lock (PCMC400005437 | 25244 | 2026-07-17 09:50:15 | ParquetBackEndCreate)
+[2026-07-17 09:50:27] [run_id=20260717T081929_25244_787495] [SNAPSHOT] Saved 4/4 state file(s) to X:/Brendan/NationalDatabases/formattedDatabases/StateBackups/20260717_095027
+[2026-07-17 09:50:31] [run_id=20260717T081929_25244_787495] [SCHEMA CATALOG] Using reviewed column types from X:/Brendan/NationalDatabases/formattedDatabases/Schema/TableSchemas.xlsx.
+[2026-07-17 09:50:31] [run_id=20260717T081929_25244_787495] === Building schema: NHANES ===
+[2026-07-17 09:50:31] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 11 item(s) to 15 worker(s).
+[2026-07-17 09:50:41] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 11/11 item(s) completed in parallel.
+[2026-07-17 09:50:43] [run_id=20260717T081929_25244_787495] === Building schema: CLINVAR ===
+[2026-07-17 09:50:43] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:50:49] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:50:49] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:51:19] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:51:19] [run_id=20260717T081929_25244_787495] === Building schema: MIMICIII_DEMO ===
+[2026-07-17 09:51:19] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:51:26] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:51:26] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:51:32] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:51:32] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:51:39] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:51:39] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:51:46] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:51:46] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:51:53] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:51:53] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:52:00] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:52:00] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:52:06] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:52:06] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:52:12] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:52:12] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:52:18] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:52:18] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:52:25] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:52:25] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:52:31] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:52:31] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:52:37] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:52:37] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:52:45] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:52:46] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:52:52] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:52:52] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:52:59] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:52:59] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:53:06] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:53:06] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:53:13] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:53:13] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:53:19] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:53:19] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:53:26] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:53:26] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:53:32] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:53:32] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:53:38] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:53:38] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:53:44] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:53:45] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:53:51] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:53:51] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:53:58] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:53:58] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:54:04] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:54:04] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:54:10] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:54:10] [run_id=20260717T081929_25244_787495] === Building schema: UCI_BREAST_CANCER ===
+[2026-07-17 09:54:10] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:54:17] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:54:17] [run_id=20260717T081929_25244_787495] === Building schema: UCI_DIABETES ===
+[2026-07-17 09:54:17] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:54:23] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:54:23] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:54:29] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:54:30] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:54:36] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:54:36] [run_id=20260717T081929_25244_787495] [SCAN START] schema header inference: submitting 1 item(s) to 15 worker(s).
+[2026-07-17 09:54:42] [run_id=20260717T081929_25244_787495] [SCAN COMPLETE] schema header inference: 1/1 item(s) completed in parallel.
+[2026-07-17 09:54:46] [run_id=20260717T081929_25244_787495] === Loading NHANES ===
+[2026-07-17 09:54:51] [run_id=20260717T081929_25244_787495] [OK] 1/11  DEMO.xpt -> NHANES_Demographics (survey_cycle=1999-2000)
+[2026-07-17 09:54:52] [run_id=20260717T081929_25244_787495] [ERROR] NHANES failed during loading: `params` must not be named
+[2026-07-17 09:54:52] [run_id=20260717T081929_25244_787495] [ERROR] Call: dbBind(res, params)
+[2026-07-17 09:54:52] [run_id=20260717T081929_25244_787495] [ERROR] Checkpoint on disk: 1 files. Continuing to next database.
+[2026-07-17 09:54:52] [run_id=20260717T081929_25244_787495] === Loading CLINVAR ===
+[2026-07-17 09:54:53] [run_id=20260717T081929_25244_787495] [LOAD CHECK COMPLETE] d0910dfe92702930_gene_specific_summary.txt -> direct reader
+[2026-07-17 09:54:53] [run_id=20260717T081929_25244_787495] [READ] d0910dfe92702930_gene_specific_summary.txt: 92,795 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 09:54:56] [run_id=20260717T081929_25244_787495] [OK] 1/2  gene_specific_summary.txt -> CLINVAR_GeneSpecificSummary (release=current)
+[2026-07-17 09:54:57] [run_id=20260717T081929_25244_787495] [ERROR] CLINVAR failed during loading: `params` must not be named
+[2026-07-17 09:54:57] [run_id=20260717T081929_25244_787495] [ERROR] Call: dbBind(res, params)
+[2026-07-17 09:54:57] [run_id=20260717T081929_25244_787495] [ERROR] Checkpoint on disk: 1 files. Continuing to next database.
+[2026-07-17 09:54:57] [run_id=20260717T081929_25244_787495] === Loading MIMICIII_DEMO ===
+[2026-07-17 09:54:59] [run_id=20260717T081929_25244_787495] [LOAD CHECK COMPLETE] 2293a0fd84d8e70d_ADMISSIONS.csv -> direct reader
+[2026-07-17 09:54:59] [run_id=20260717T081929_25244_787495] [READ] 2293a0fd84d8e70d_ADMISSIONS.csv: 129 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 09:55:02] [run_id=20260717T081929_25244_787495] [OK] 1/26  ADMISSIONS.csv -> MIMICIII_DEMO_ADMISSIONS (release=1.4)
+[2026-07-17 09:55:03] [run_id=20260717T081929_25244_787495] [ERROR] MIMICIII_DEMO failed during loading: `params` must not be named
+[2026-07-17 09:55:03] [run_id=20260717T081929_25244_787495] [ERROR] Call: dbBind(res, params)
+[2026-07-17 09:55:03] [run_id=20260717T081929_25244_787495] [ERROR] Checkpoint on disk: 1 files. Continuing to next database.
+[2026-07-17 09:55:03] [run_id=20260717T081929_25244_787495] === Loading UCI_BREAST_CANCER ===
+[2026-07-17 09:55:03] [run_id=20260717T081929_25244_787495] [LOAD CHECK COMPLETE] 9d93d12b9103c2ef_wdbc.data -> direct reader
+[2026-07-17 09:55:03] [run_id=20260717T081929_25244_787495] [READ] 9d93d12b9103c2ef_wdbc.data: unknown rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 09:55:06] [run_id=20260717T081929_25244_787495] [OK] 1/1  wdbc.data -> UCI_BREAST_CANCER_Diagnostic (release=1995)
+[2026-07-17 09:55:07] [run_id=20260717T081929_25244_787495] [ERROR] UCI_BREAST_CANCER failed during loading: `params` must not be named
+[2026-07-17 09:55:07] [run_id=20260717T081929_25244_787495] [ERROR] Call: dbBind(res, params)
+[2026-07-17 09:55:07] [run_id=20260717T081929_25244_787495] [ERROR] Checkpoint on disk: 1 files. Continuing to next database.
+[2026-07-17 09:55:07] [run_id=20260717T081929_25244_787495] === Loading UCI_DIABETES ===
+[2026-07-17 09:55:10] [run_id=20260717T081929_25244_787495] [LOAD CHECK COMPLETE] Direct read unsuccessful for a4b3291052c87ec1_diabetic_data.csv: Column AGE: coercing character -> numeric destroyed 100.0% of present values (101766 of 101766), which exceeds the coercion NA threshold (25.0%). Fix the column's type in the schema registry/catalog, or raise MaxCoerceNAPct. -- using chunked reader
+[2026-07-17 09:55:10] [run_id=20260717T081929_25244_787495] [LOAD CHECK COMPLETE] a4b3291052c87ec1_diabetic_data.csv -> chunked reader
+[2026-07-17 09:55:10] [run_id=20260717T081929_25244_787495] [READ] a4b3291052c87ec1_diabetic_data.csv: 101,766 rows -> chunked reader (PartitionBy=FAIL)
+[2026-07-17 09:55:11] [run_id=20260717T081929_25244_787495] [CHUNKED-DELIM] a4b3291052c87ec1_diabetic_data.csv: 101,766 rows (chunk_size=4000000)
+[2026-07-17 09:55:15] [run_id=20260717T081929_25244_787495] [ERROR] 1/4  diabetic_data.csv: Column AGE: coercing character -> numeric destroyed 100.0% of present values (101766 of 101766), which exceeds the coercion NA threshold (25.0%). Fix the column's type in the schema registry/catalog, or raise MaxCoerceNAPct.
+[2026-07-17 09:55:16] [run_id=20260717T081929_25244_787495] [LOAD CHECK COMPLETE] a4b3291052c87ec1_admission_type_id.csv -> direct reader
+[2026-07-17 09:55:16] [run_id=20260717T081929_25244_787495] [READ] a4b3291052c87ec1_admission_type_id.csv: 67 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 09:55:19] [run_id=20260717T081929_25244_787495] [OK] 2/4  admission_type_id.csv -> UCI_DIABETES_AdmissionType (release=2014)
+[2026-07-17 09:55:20] [run_id=20260717T081929_25244_787495] [ERROR] UCI_DIABETES failed during loading: `params` must not be named
+[2026-07-17 09:55:20] [run_id=20260717T081929_25244_787495] [ERROR] Call: dbBind(res, params)
+[2026-07-17 09:55:20] [run_id=20260717T081929_25244_787495] [ERROR] Checkpoint on disk: 1 files. Continuing to next database.
+[2026-07-17 09:55:27] [run_id=20260717T081929_25244_787495] [SCHEMA CATALOG] Wrote table schema catalog: X:/Brendan/NationalDatabases/formattedDatabases/Schema/TableSchemas.xlsx
+[2026-07-17 09:55:28] [run_id=20260717T081929_25244_787495] [METADATA EXPORT] Wrote 12 manifest row(s) to X:/Brendan/NationalDatabases/formattedDatabases/Manifest/RepositoryMetadata.xlsx.
+[2026-07-17 09:55:28] [run_id=20260717T081929_25244_787495] [RUN FAILED] 5 database phase(s) failed: NHANES: `params` must not be named | CLINVAR: `params` must not be named | MIMICIII_DEMO: `params` must not be named | UCI_BREAST_CANCER: `params` must not be named | UCI_DIABETES: `params` must not be named
+[2026-07-17 09:55:28] [run_id=20260717T081929_25244_787495] [COERCE REPORT] 1 column(s) had values destroyed by type coercion this run -- details: X:/Brendan/NationalDatabases/formattedDatabases/Manifest/CoercionReport.csv
+[2026-07-17 09:55:29] [run_id=20260717T081929_25244_787495] ParquetBackEndCreate function complete. Final checkpoint size: 1
+[2026-07-17 09:55:29] [run_id=20260717T081929_25244_787495] [CLEANUP PHASE] Starting cleanup of temporary Parquet files after write operations
+[2026-07-17 09:55:29] [run_id=20260717T081929_25244_787495] [CLEANUP INFO] No temporary files found in X:/Brendan/NationalDatabases/formattedDatabases/parquet
+[2026-07-17 09:55:29] [run_id=20260717T081929_25244_787495] [CLEANUP COMPLETE] Cleanup completed: 0 files scanned, 0 files removed
+[2026-07-17 09:55:29] [LOCK] Released repository lock: X:/Brendan/NationalDatabases/formattedDatabases/.repository.lock
