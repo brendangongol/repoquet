@@ -3045,10 +3045,16 @@ align_columns <- function(df, all_cols, comprehensive_sample = NULL, max_coerce_
 
   retry_indices <- which(failed)
   failure_messages <- unique(vapply(results[retry_indices], function(result) {
-    if (is.list(result) && !is.null(result$error) && length(result$error) > 0L) {
+    message <- if (is.list(result) && !is.null(result$error) && length(result$error) > 0L) {
       as.character(result$error[1])
     } else {
       "unknown worker failure"
+    }
+    if (is.list(result) && !is.null(result$path) && length(result$path) > 0L &&
+        nzchar(as.character(result$path[1]))) {
+      sprintf("%s: %s", basename(as.character(result$path[1])), message)
+    } else {
+      message
     }
   }, character(1)))
   log_msg(sprintf("[PARALLEL FALLBACK] %s failed for %d item(s); retrying those item(s) serially in the main R process.",
@@ -7006,10 +7012,20 @@ real_world_source_catalog <- function(
   }
   read_packaged_catalog <- function(file) {
     installed <- system.file("extdata", file, package = "repoquet")
-    candidates <- unique(c(installed,
-      file.path(getwd(), "inst", "extdata", file),
-      file.path("inst", "extdata", file)))
-    candidates <- candidates[nzchar(candidates) & file.exists(candidates)]
+    #### Not-yet-installed dev checkouts (e.g. testthat, which runs each test ####
+    #### file with the working directory set to tests/testthat) may start   ####
+    #### below the repo root, so walk upward looking for inst/extdata/.     ####
+    dev_candidate <- NA_character_
+    d <- normalizePath(getwd(), winslash = "/", mustWork = FALSE)
+    for (i in 1:8) {
+      candidate <- file.path(d, "inst", "extdata", file)
+      if (file.exists(candidate)) { dev_candidate <- candidate; break }
+      parent <- dirname(d)
+      if (identical(parent, d)) break
+      d <- parent
+    }
+    candidates <- unique(c(installed, dev_candidate))
+    candidates <- candidates[!is.na(candidates) & nzchar(candidates) & file.exists(candidates)]
     if (!length(candidates)) {
       stop(sprintf("Packaged source catalog is unavailable: %s", file))
     }

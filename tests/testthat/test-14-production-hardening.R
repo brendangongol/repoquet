@@ -232,3 +232,20 @@ test_that("parallel metadata scans retry worker-only failures serially", {
   expect_true(all(vapply(results, function(x) isTRUE(x$ok), logical(1))))
   expect_equal(vapply(results, `[[`, integer(1), "value"), 1:2)
 })
+
+test_that("a genuinely unrecoverable item names its source file in the fallback log", {
+  runner <- get(".parallel_scan_with_serial_retry",
+                envir = environment(build_col_classes))
+  scan_one <- function(item) {
+    if (identical(item$path, "bad.csv")) {
+      return(list(ok = FALSE, path = item$path, error = "input string 1 is invalid UTF-8"))
+    }
+    list(ok = TRUE, path = item$path, error = NA_character_)
+  }
+  items <- list(list(path = "good.csv"), list(path = "bad.csv"))
+  out <- utils::capture.output(
+    results <- runner(items, scan_one, n_workers = 2, future_packages = character(),
+                      is_failure = function(x) !isTRUE(x$ok), context = "test metadata scan"))
+  expect_true(any(grepl("bad.csv: input string 1 is invalid UTF-8", out, fixed = TRUE)))
+  expect_false(isTRUE(results[[2]]$ok))
+})
