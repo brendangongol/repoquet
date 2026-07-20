@@ -271,3 +271,30 @@ test_that("ParquetBackEndCreate defaults fread to non-mmap reads without leaking
   expect_identical(Sys.getenv("R_DATATABLE_NOMMAP", unset = NA), "false")
   Sys.unsetenv("R_DATATABLE_NOMMAP")
 })
+
+test_that("reset_table_for_reload logs to an explicit LogPath even when called standalone", {
+  fx <- new_repo_fixture(); on.exit(unlink(fx$root, recursive = TRUE))
+  data.table::fwrite(data.table::data.table(AGE = c(1, 2)), file.path(fx$src, "a.csv"))
+  M <- data.frame(Database = "REG", MDBDir = "REG", TableName = "T",
+                  Path = "a.csv", FileType = "csv", PartitionKey = "year", PartitionValue = "2020")
+  run_loader(fx, M, "REG")
+  expect_true(dir.exists(file.path(fx$pq, "REG_T", "year=2020")))
+
+  #### Simulate calling reset_table_for_reload() standalone (e.g. a fresh   ####
+  #### interactive session after a crash) -- no LogPath in scope anywhere   ####
+  #### the way there would be inside a ParquetBackEndCreate() run.          ####
+  standalone_log <- file.path(fx$root, "standalone.log")
+  expect_false(file.exists(standalone_log))
+  out <- utils::capture.output(
+    result <- reset_table_for_reload(M, Database = "REG", TableName = "T",
+                                     ParquetBasePath = fx$pq, CheckpointPath = fx$cp,
+                                     ManifestPath = fx$mf, DryRun = FALSE,
+                                     LogPath = standalone_log))
+  expect_false(dir.exists(file.path(fx$pq, "REG_T", "year=2020")))
+  expect_true(file.exists(standalone_log))
+  lines <- readLines(standalone_log)
+  expect_true(any(grepl("\\[RESET\\].*removing", lines)))
+  expect_true(any(grepl("\\[RESET\\].*cleared", lines)))
+  expect_true(any(grepl("\\[LOCK\\] Acquired", lines)))
+  expect_true(any(grepl("\\[LOCK\\] Released", lines)))
+})

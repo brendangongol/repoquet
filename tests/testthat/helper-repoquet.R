@@ -69,7 +69,8 @@ new_repo_fixture <- function() {
 }
 
 #### Run ParquetBackEndCreate with fixture defaults, quietly.                ####
-run_loader <- function(fx, MDT, DBLoad, completed = character(0), PartitionBy = "NRows", ...) {
+run_loader <- function(fx, MDT, DBLoad, completed = character(0), PartitionBy = "NRows",
+                       UseSchemaCatalog = FALSE, ...) {
   out <- utils::capture.output(
     ck <- ParquetBackEndCreate(MDT = MDT, DBLoad = DBLoad, MasterDBPath = fx$root,
                                completed_checkpoint = completed,
@@ -80,6 +81,6 @@ run_loader <- function(fx, MDT, DBLoad, completed = character(0), PartitionBy = 
                                SchemaRegistryPath = fx$reg, TableSchemaPath = fx$ts,
                                ManifestPath = fx$mf, StrictPreflight = FALSE,
                                StopOnFileError = FALSE, SourceFingerprintMode = "none",
-                               UseSchemaCatalog = FALSE, ...))
+                               UseSchemaCatalog = UseSchemaCatalog, ...))
   list(checkpoint = ck, output = out)
 }

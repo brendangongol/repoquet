@@ -4036,11 +4036,16 @@ repository_lock_path_default <- function(ParquetBasePath) {
 #'   The loader heartbeats after every completed file, so set this comfortably
 #'   above the longest single-file load you expect. Default 720 (12 h).
 #' @param owner_note Optional free text recorded in the owner file.
+#' @param LogPath Character (optional). Log file to write to. Without it,
+#'   \code{log_msg()} falls back to whatever \code{LogPath} (if any) happens
+#'   to be in scope in the caller, which is unset when this is called
+#'   standalone (e.g. interactively, outside a \code{ParquetBackEndCreate()}
+#'   run) -- pass it explicitly to log deterministically.
 #' @return A \code{repository_lock} object to pass to
 #'   \code{\link{release_repository_lock}}. Stops if another live run holds
 #'   the lock.
 #' @export
-acquire_repository_lock <- function(LockPath, stale_minutes = 720, owner_note = "") {
+acquire_repository_lock <- function(LockPath, stale_minutes = 720, owner_note = "", LogPath = NULL) {
   dir.create(dirname(LockPath), recursive = TRUE, showWarnings = FALSE)
   token <- paste(Sys.info()[["nodename"]], Sys.getpid(),
                  format(Sys.time(), "%Y-%m-%d %H:%M:%S"), owner_note, sep = " | ")
@@ -4051,7 +4056,7 @@ acquire_repository_lock <- function(LockPath, stale_minutes = 720, owner_note = 
     TRUE
   }
   if (attempt()) {
-    log_msg(sprintf("[LOCK] Acquired repository lock: %s (%s)", LockPath, token))
+    log_msg(sprintf("[LOCK] Acquired repository lock: %s (%s)", LockPath, token), log_path = LogPath)
     return(invisible(structure(list(path = LockPath, token = token), class = "repository_lock")))
   }
   hb <- file.mtime(owner_file)
@@ -4061,11 +4066,11 @@ acquire_repository_lock <- function(LockPath, stale_minutes = 720, owner_note = 
                      error = function(e) "<unreadable>")
   if (!is.na(age_min) && age_min > stale_minutes) {
     quarantine <- paste0(LockPath, ".stale_", Sys.getpid(), "_", format(Sys.time(), "%Y%m%d%H%M%S"))
-    log_msg(sprintf("[LOCK] Stale lock detected (heartbeat %.0f min old, holder: %s) -- claiming it for takeover.", age_min, holder))
+    log_msg(sprintf("[LOCK] Stale lock detected (heartbeat %.0f min old, holder: %s) -- claiming it for takeover.", age_min, holder), log_path = LogPath)
     claimed <- file.rename(LockPath, quarantine)
     if (isTRUE(claimed) && attempt()) {
       unlink(quarantine, recursive = TRUE)
-      log_msg(sprintf("[LOCK] Acquired repository lock after stale takeover: %s (%s)", LockPath, token))
+      log_msg(sprintf("[LOCK] Acquired repository lock after stale takeover: %s (%s)", LockPath, token), log_path = LogPath)
       return(invisible(structure(list(path = LockPath, token = token), class = "repository_lock")))
     }
     if (isTRUE(claimed) && dir.exists(quarantine) && !dir.exists(LockPath)) file.rename(quarantine, LockPath)
@@ -4089,8 +4094,11 @@ touch_repository_lock <- function(lock) {
 #' Pass the object returned by \code{\link{acquire_repository_lock}} (only the
 #' owning run's token releases), or a path with \code{force = TRUE} to remove
 #' an abandoned lock by hand.
+#' @param LogPath Character (optional). Log file to write to. See
+#'   \code{\link{acquire_repository_lock}} for why this matters when calling
+#'   standalone.
 #' @export
-release_repository_lock <- function(lock, force = FALSE) {
+release_repository_lock <- function(lock, force = FALSE, LogPath = NULL) {
   path <- if (inherits(lock, "repository_lock")) lock$path else as.character(lock)
   if (!dir.exists(path)) return(invisible(TRUE))
   if (!isTRUE(force)) {
@@ -4099,12 +4107,12 @@ release_repository_lock <- function(lock, force = FALSE) {
     }
     current <- tryCatch(readLines(file.path(path, "owner.txt"), warn = FALSE)[1], error = function(e) NA_character_)
     if (!identical(current, lock$token)) {
-      log_msg(sprintf("[LOCK] Not releasing %s: it is now held by a different run (%s).", path, current))
+      log_msg(sprintf("[LOCK] Not releasing %s: it is now held by a different run (%s).", path, current), log_path = LogPath)
       return(invisible(FALSE))
     }
   }
   unlink(path, recursive = TRUE)
-  log_msg(sprintf("[LOCK] Released repository lock: %s", path))
+  log_msg(sprintf("[LOCK] Released repository lock: %s", path), log_path = LogPath)
   invisible(TRUE)
 }
 
@@ -4269,15 +4277,21 @@ rename_checkpoint_table <- function(CheckpointPath, MDT, Database, OldTableName,
 #'   this table are removed when provided.
 #' @param DryRun Logical. If \code{TRUE} (default), only reports what would be
 #'   deleted. Pass \code{FALSE} to actually delete.
+#' @param LogPath Character (optional). Log file to write to. Without it,
+#'   \code{log_msg()} falls back to whatever \code{LogPath} (if any) happens
+#'   to be in scope in the caller, which is unset when this is called
+#'   standalone (e.g. interactively, outside a \code{ParquetBackEndCreate()}
+#'   run) -- pass it explicitly to log deterministically.
 #' @return Invisibly, a list with \code{parquet_dir}, \code{n_checkpoint_removed},
 #'   and \code{n_manifest_removed}.
 #' @seealso \code{\link{load_schema_registry}}, \code{\link{ParquetBackEndCreate}}
 #' @export
 reset_table_for_reload <- function(MDT, Database, TableName, ParquetBasePath,
-                                   CheckpointPath, ManifestPath = NULL, DryRun = TRUE) {
+                                   CheckpointPath, ManifestPath = NULL, DryRun = TRUE,
+                                   LogPath = NULL) {
   rows <- MDT[MDT$Database == Database & MDT$TableName == TableName, , drop = FALSE]
   if (nrow(rows) == 0L) {
-    log_msg(sprintf("[RESET] No MDT rows match %s/%s -- nothing to reset.", Database, TableName))
+    log_msg(sprintf("[RESET] No MDT rows match %s/%s -- nothing to reset.", Database, TableName), log_path = LogPath)
     return(invisible(list(parquet_dir = NA_character_, n_checkpoint_removed = 0L, n_manifest_removed = 0L)))
   }
   table_name <- repository_table_name_for_row(rows[1, , drop = FALSE])
@@ -4292,18 +4306,19 @@ reset_table_for_reload <- function(MDT, Database, TableName, ParquetBasePath,
   log_msg(sprintf("[RESET]%s %s: %s parquet dir %s, %d checkpoint entrie(s), %d manifest row(s)",
                   if (DryRun) " (dry run)" else "", table_name,
                   if (DryRun) "would remove" else "removing",
-                  parquet_dir, sum(stale), sum(stale_manifest)))
+                  parquet_dir, sum(stale), sum(stale_manifest)), log_path = LogPath)
   if (!DryRun) {
     reset_lock <- acquire_repository_lock(repository_lock_path_default(ParquetBasePath),
-                                          owner_note = sprintf("reset_table_for_reload %s", table_name))
-    on.exit(release_repository_lock(reset_lock), add = TRUE)
+                                          owner_note = sprintf("reset_table_for_reload %s", table_name),
+                                          LogPath = LogPath)
+    on.exit(release_repository_lock(reset_lock, LogPath = LogPath), add = TRUE)
     if (dir.exists(parquet_dir)) unlink(parquet_dir, recursive = TRUE)
     if (any(stale)) save_checkpoint(checkpoint[!stale], CheckpointPath)
     if (any(stale_manifest)) {
       remove_parquet_manifest_rows(ManifestPath, Database = Database, TableName = TableName)
     }
     log_msg(sprintf("[RESET] %s cleared. Re-run ParquetBackEndCreate with DBLoad = \"%s\" to rebuild it.",
-                    table_name, Database))
+                    table_name, Database), log_path = LogPath)
   }
   invisible(list(parquet_dir = parquet_dir,
                  n_checkpoint_removed = sum(stale),

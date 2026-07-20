@@ -95,22 +95,26 @@ test_that("legacy manifests without PartitionValue still dedupe by Year", {
 
 test_that("coercion damage beyond the threshold fails the file; report is written", {
   fx <- new_repo_fixture(); on.exit(unlink(fx$root, recursive = TRUE))
-  #### An explicit user policy pins DIED to integer; half its values are   ####
-  #### text. Generic mode deliberately has no implicit healthcare policy.  ####
-  write_schema_registry(data.table::data.table(
-    Profile = "generic", ColumnPattern = "^DIED$", CanonicalType = "integer",
-    Role = "analytic", AppliesTo = "REG", Notes = "Test coercion policy."), fx$reg)
+  #### DIED is pinned to integer via a finalized table schema catalog --    ####
+  #### i.e. what a human's Decision=Override produces in the reviewed      ####
+  #### workflow -- not a blind SchemaRegistry.xlsx pattern. apply_schema_  ####
+  #### registry() deliberately never narrows an inferred character column  ####
+  #### (see "registry policies do not narrow inferred character columns"  ####
+  #### in test-17), so forcing a narrowing type requires going through the ####
+  #### reviewed catalog, same as a real user must.                         ####
+  data.table::fwrite(data.table::data.table(
+    Database = "REG", TableName = "T", Column = "DIED", CanonicalType = "integer"), fx$ts)
   data.table::fwrite(data.table::data.table(DIED = c("0", "1", "UNKNOWN", "MISSING"), AGE = c(1, 2, 3, 4)),
                      file.path(fx$src, "dmg_2019.csv"))
   M <- data.frame(Database = "REG", MDBDir = "REG", TableName = "T", Path = "dmg_2019.csv",
                   FileType = "csv", PartitionKey = "year", PartitionValue = "2019")
   # base R's "NAs introduced by coercion" warning is the behavior under test
-  r_strict <- suppressWarnings(run_loader(fx, M, "REG", MaxCoerceNAPct = 25))
+  r_strict <- suppressWarnings(run_loader(fx, M, "REG", MaxCoerceNAPct = 25, UseSchemaCatalog = TRUE))
   expect_length(r_strict$checkpoint, 0L)
   expect_true(any(grepl("exceeds the coercion NA threshold", r_strict$output)))
   #### Without a threshold the file loads (warn-only), and the run report   ####
   #### aggregates the damage next to the manifest.                          ####
-  r_lax <- suppressWarnings(run_loader(fx, M, "REG"))
+  r_lax <- suppressWarnings(run_loader(fx, M, "REG", UseSchemaCatalog = TRUE))
   expect_length(r_lax$checkpoint, 1L)
   rep_path <- file.path(dirname(fx$mf), "CoercionReport.csv")
   expect_true(file.exists(rep_path))
