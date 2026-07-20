@@ -124,7 +124,7 @@ repository_catalog <- FinalizeSchemaRegistry(SchemaReviewPath = RepositoryPaths$
                                              TableSchemaPath = RepositoryPaths$TableSchemaPath, strict = TRUE)
 
 ################################################################################
-#### 5. Load reviewed schemas to partitioned Parquet ##########################
+#### 5. Load reviewed schemas to partitioned Parquet ###########################
 ################################################################################
 run_result <- ParquetBackEndCreate(MDT = MDT,
                                    DBLoad = DBLoad,
@@ -234,26 +234,28 @@ repo_audit$issues
 ################################################################################
 #### HCUP-specific post-load capabilities ######################################
 ################################################################################
-#### The canonical seven-stage repository build is complete above. The       ####
-#### remaining examples demonstrate healthcare dictionaries, survey-weighted ####
-#### estimates, repository summaries, and HCUP-oriented analytical queries.   ####
+#### The canonical seven-stage repository build is complete above. The #########
+#### remaining examples demonstrate healthcare dictionaries, survey-weighted ###
+#### estimates, repository summaries, and HCUP-oriented analytical queries. ####
+################################################################################
 
-###############################################################################
-#### Data dictionary: find variables and validate content against it #########
-###############################################################################
-#### Schema discovery harvests available variable and value labels from       ####
-#### labeled sources. Finalization writes approved mappings to                ####
-#### TableSchemas.xlsx for search, decoding, and content validation.          ####
-# search_labels("payer", TableSchemaPath = RepositoryPaths$TableSchemaPath,
-#               ParquetBasePath = ParquetBasePath)
-# search_labels("^DIED$", TableSchemaPath = RepositoryPaths$TableSchemaPath,
-#               search_in = "column")
-#### validate_against_dictionary() checks stored values against each         ####
-#### labeled column's code domain (e.g. DIED must be 0/1) and reports the    ####
-#### out-of-domain share per column -- content integrity, worst-first.       ####
-#### Caveat: continuous HCUP variables often label only special codes        ####
-#### (e.g. 999 = missing), so interpret high percentages with the            ####
-#### DomainSize column in view rather than as automatic errors.              ####
+################################################################################
+#### Data dictionary: find variables and validate content against it ###########
+################################################################################
+#### Schema discovery harvests available variable and value labels from ########
+#### labeled sources. Finalization writes approved mappings to #################
+#### TableSchemas.xlsx for search, decoding, and content validation. ###########
+# search_labels("payer", TableSchemaPath = RepositoryPaths$TableSchemaPath, ####
+#               ParquetBasePath = ParquetBasePath) #############################
+# search_labels("^DIED$", TableSchemaPath = RepositoryPaths$TableSchemaPath, ###
+#               search_in = "column") ##########################################
+#### validate_against_dictionary() checks stored values against each ###########
+#### labeled column's code domain (e.g. DIED must be 0/1) and reports the ######
+#### out-of-domain share per column -- content integrity, worst-first. #########
+#### Caveat: continuous HCUP variables often label only special codes ##########
+#### (e.g. 999 = missing), so interpret high percentages with the ##############
+#### DomainSize column in view rather than as automatic errors. ################
+################################################################################
 # dict_check <- validate_against_dictionary(con, TableSchemaPath = RepositoryPaths$TableSchemaPath,
 #                                           tables = c("NIS_Core"))
 # head(dict_check, 25)
@@ -261,10 +263,11 @@ repo_audit$issues
 ###############################################################################
 #### Survey-weighted national estimates #######################################
 ###############################################################################
-#### HCUP records are a sample; national estimates need the survey weight    ####
-#### (DISCWT). These helpers handle missing weights/values correctly and     ####
-#### return point estimates. For standard errors use the survey package      ####
-#### with the full design (NIS_STRATUM strata, HOSP_NIS clusters).           ####
+#### HCUP records are a sample; national estimates need the survey weight  ####
+#### (DISCWT). These helpers handle missing weights/values correctly and   ####
+#### return point estimates. For standard errors use the survey package    ####
+#### with the full design (NIS_STRATUM strata, HOSP_NIS clusters).         ####
+###############################################################################
 # hcup_weighted_count(con, "NIS_Core", by = "YEAR")
 # hcup_weighted_mean(con, "NIS_Core", value_col = "LOS", by = "YEAR", where = "AGE >= 65")
 

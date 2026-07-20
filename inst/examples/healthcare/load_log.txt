@@ -1,0 +1,940 @@
+[2026-07-17 10:20:28] [SCHEMA REGISTRY] Created default 'generic' registry: X:/Brendan/NationalDatabases/formattedDatabases/Schema/SchemaRegistry.xlsx
+[2026-07-17 10:21:12] [run_id=20260717T102031_1996_807598] [SCHEMA PREPARE] Stage 1/3: surveying 483 source(s) in 'adaptive' mode. Completed source evidence is cached for resumable runs.
+[2026-07-17 10:21:27] [run_id=20260717T102031_1996_807598] [SCAN START] repository schema survey: submitting 483 item(s) to 6 worker(s).
+[2026-07-17 10:44:07] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] repository schema survey: 483/483 item(s) completed in parallel.
+[2026-07-17 10:44:08] [run_id=20260717T102031_1996_807598] [SCHEMA SURVEY] 483 source(s), 53631 observation row(s), 0 failed source(s); wrote X:/Brendan/NationalDatabases/formattedDatabases/Schema/SchemaObservations.parquet
+[2026-07-17 10:44:08] [run_id=20260717T102031_1996_807598] [SCHEMA PREPARE] Stage 2/3: deriving type recommendations and compatibility decisions.
+[2026-07-17 10:49:08] [run_id=20260717T102031_1996_807598] [SCHEMA PREPARE] Stage 3/3: writing the schema review workbook.
+[2026-07-17 10:49:14] [SCHEMA PROPOSAL] Wrote X:/Brendan/NationalDatabases/formattedDatabases/Schema/SchemaReview.xlsx (5334 columns; 0 column decision(s), 120 compatibility decision(s), 0 dictionary decision(s), 0 blocking source error(s)).
+[2026-07-17 10:49:14] [SCHEMA READY] Open StartHere in X:/Brendan/NationalDatabases/formattedDatabases/Schema/SchemaReview.xlsx: 0 column decision(s), 120 compatibility decision(s), 0 dictionary decision(s), 0 blocking source error(s).
+[2026-07-17 11:13:43] [run_id=20260717T102031_1996_807598] Parallel workers available: 15 (scoped per scan)
+[2026-07-17 11:13:43] [run_id=20260717T102031_1996_807598] [PREFLIGHT] Skipped inside loader (RunPreflight = FALSE) -- caller is responsible for having run ValidateMDTPreflight.
+[2026-07-17 11:13:43] [run_id=20260717T102031_1996_807598] [LOCK] Acquired repository lock: X:/Brendan/NationalDatabases/formattedDatabases/.repository.lock (PCMC400005437 | 1996 | 2026-07-17 11:13:43 | ParquetBackEndCreate)
+[2026-07-17 11:13:44] [run_id=20260717T102031_1996_807598] [SNAPSHOT] Saved 2/2 state file(s) to X:/Brendan/NationalDatabases/formattedDatabases/StateBackups/20260717_111343
+[2026-07-17 11:13:47] [run_id=20260717T102031_1996_807598] [SCHEMA CATALOG] Using reviewed column types from X:/Brendan/NationalDatabases/formattedDatabases/Schema/TableSchemas.xlsx.
+[2026-07-17 11:13:47] [run_id=20260717T102031_1996_807598] === Building schema: NEDS ===
+[2026-07-17 11:13:47] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 5 item(s) to 5 worker(s).
+[2026-07-17 11:13:54] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 5/5 item(s) completed in parallel.
+[2026-07-17 11:13:54] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 7 item(s) to 7 worker(s).
+[2026-07-17 11:14:02] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-17 11:14:02] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 5 item(s) to 5 worker(s).
+[2026-07-17 11:14:10] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 5/5 item(s) completed in parallel.
+[2026-07-17 11:14:10] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 5 item(s) to 5 worker(s).
+[2026-07-17 11:14:16] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 5/5 item(s) completed in parallel.
+[2026-07-17 11:14:16] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 4 item(s) to 4 worker(s).
+[2026-07-17 11:14:22] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 4/4 item(s) completed in parallel.
+[2026-07-17 11:14:22] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 4 item(s) to 4 worker(s).
+[2026-07-17 11:14:28] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 4/4 item(s) completed in parallel.
+[2026-07-17 11:14:29] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 5 item(s) to 5 worker(s).
+[2026-07-17 11:14:35] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 5/5 item(s) completed in parallel.
+[2026-07-17 11:14:35] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 6 item(s) to 6 worker(s).
+[2026-07-17 11:14:43] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 6/6 item(s) completed in parallel.
+[2026-07-17 11:14:43] [run_id=20260717T102031_1996_807598] [SCAN PROGRESS] schema header inference: starting serial scan of 1 item(s).
+[2026-07-17 11:14:43] [run_id=20260717T102031_1996_807598] [SCAN PROGRESS] schema header inference: 1/1 complete (100.0%); elapsed 0s; ETA 0s.
+[2026-07-17 11:14:43] [run_id=20260717T102031_1996_807598] === Building schema: NIS ===
+[2026-07-17 11:14:43] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 13 item(s) to 13 worker(s).
+[2026-07-17 11:14:55] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 13/13 item(s) completed in parallel.
+[2026-07-17 11:14:55] [run_id=20260717T102031_1996_807598] [SCAN PROGRESS] schema header inference: starting serial scan of 1 item(s).
+[2026-07-17 11:14:55] [run_id=20260717T102031_1996_807598] [SCAN PROGRESS] schema header inference: 1/1 complete (100.0%); elapsed 0s; ETA 0s.
+[2026-07-17 11:14:55] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 11 item(s) to 11 worker(s).
+[2026-07-17 11:15:04] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 11/11 item(s) completed in parallel.
+[2026-07-17 11:15:04] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 12 item(s) to 12 worker(s).
+[2026-07-17 11:15:18] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 12/12 item(s) completed in parallel.
+[2026-07-17 11:15:18] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 3 item(s) to 3 worker(s).
+[2026-07-17 11:15:25] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 3/3 item(s) completed in parallel.
+[2026-07-17 11:15:25] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 12 item(s) to 12 worker(s).
+[2026-07-17 11:15:38] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 12/12 item(s) completed in parallel.
+[2026-07-17 11:15:38] [run_id=20260717T102031_1996_807598] === Building schema: NISBishoy ===
+[2026-07-17 11:15:38] [run_id=20260717T102031_1996_807598] [SCAN PROGRESS] schema header inference: starting serial scan of 1 item(s).
+[2026-07-17 11:15:38] [run_id=20260717T102031_1996_807598] [SCAN PROGRESS] schema header inference: 1/1 complete (100.0%); elapsed 1s; ETA 0s.
+[2026-07-17 11:15:39] [run_id=20260717T102031_1996_807598] [SCAN PROGRESS] schema header inference: starting serial scan of 1 item(s).
+[2026-07-17 11:15:40] [run_id=20260717T102031_1996_807598] [SCAN PROGRESS] schema header inference: 1/1 complete (100.0%); elapsed 2s; ETA 0s.
+[2026-07-17 11:15:40] [run_id=20260717T102031_1996_807598] === Building schema: NRD ===
+[2026-07-17 11:15:40] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 11 item(s) to 11 worker(s).
+[2026-07-17 11:15:52] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 11/11 item(s) completed in parallel.
+[2026-07-17 11:15:52] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 3 item(s) to 3 worker(s).
+[2026-07-17 11:15:59] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 3/3 item(s) completed in parallel.
+[2026-07-17 11:15:59] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 6 item(s) to 6 worker(s).
+[2026-07-17 11:16:06] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 6/6 item(s) completed in parallel.
+[2026-07-17 11:16:06] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 3 item(s) to 3 worker(s).
+[2026-07-17 11:16:12] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 3/3 item(s) completed in parallel.
+[2026-07-17 11:16:12] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 4 item(s) to 4 worker(s).
+[2026-07-17 11:16:20] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 4/4 item(s) completed in parallel.
+[2026-07-17 11:16:20] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 9 item(s) to 9 worker(s).
+[2026-07-17 11:16:29] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 9/9 item(s) completed in parallel.
+[2026-07-17 11:16:29] [run_id=20260717T102031_1996_807598] [SCAN PROGRESS] schema header inference: starting serial scan of 1 item(s).
+[2026-07-17 11:16:29] [run_id=20260717T102031_1996_807598] [SCAN PROGRESS] schema header inference: 1/1 complete (100.0%); elapsed 0s; ETA 0s.
+[2026-07-17 11:16:29] [run_id=20260717T102031_1996_807598] [SCAN PROGRESS] schema header inference: starting serial scan of 1 item(s).
+[2026-07-17 11:16:29] [run_id=20260717T102031_1996_807598] [SCAN PROGRESS] schema header inference: 1/1 complete (100.0%); elapsed 0s; ETA 0s.
+[2026-07-17 11:16:29] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 6 item(s) to 6 worker(s).
+[2026-07-17 11:16:39] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 6/6 item(s) completed in parallel.
+[2026-07-17 11:16:39] [run_id=20260717T102031_1996_807598] [SCAN PROGRESS] schema header inference: starting serial scan of 1 item(s).
+[2026-07-17 11:16:39] [run_id=20260717T102031_1996_807598] [SCAN PROGRESS] schema header inference: 1/1 complete (100.0%); elapsed 0s; ETA 0s.
+[2026-07-17 11:16:39] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 9 item(s) to 9 worker(s).
+[2026-07-17 11:16:46] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 9/9 item(s) completed in parallel.
+[2026-07-17 11:16:46] [run_id=20260717T102031_1996_807598] === Building schema: NSQIP ===
+[2026-07-17 11:16:46] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 14 item(s) to 14 worker(s).
+[2026-07-17 11:16:59] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 14/14 item(s) completed in parallel.
+[2026-07-17 11:16:59] [run_id=20260717T102031_1996_807598] === Building schema: NTDB ===
+[2026-07-17 11:16:59] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 6 item(s) to 6 worker(s).
+[2026-07-17 11:17:08] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 6/6 item(s) completed in parallel.
+[2026-07-17 11:17:08] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 6 item(s) to 6 worker(s).
+[2026-07-17 11:17:15] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 6/6 item(s) completed in parallel.
+[2026-07-17 11:17:15] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-17 11:17:22] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 11:17:22] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 4 item(s) to 4 worker(s).
+[2026-07-17 11:17:30] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 4/4 item(s) completed in parallel.
+[2026-07-17 11:17:30] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 7 item(s) to 7 worker(s).
+[2026-07-17 11:17:40] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-17 11:17:40] [run_id=20260717T102031_1996_807598] [SCAN PROGRESS] schema header inference: starting serial scan of 1 item(s).
+[2026-07-17 11:17:40] [run_id=20260717T102031_1996_807598] [SCAN PROGRESS] schema header inference: 1/1 complete (100.0%); elapsed 0s; ETA 0s.
+[2026-07-17 11:17:40] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 3 item(s) to 3 worker(s).
+[2026-07-17 11:17:48] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 3/3 item(s) completed in parallel.
+[2026-07-17 11:17:48] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 7 item(s) to 7 worker(s).
+[2026-07-17 11:17:57] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-17 11:17:57] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 7 item(s) to 7 worker(s).
+[2026-07-17 11:18:05] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-17 11:18:05] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 7 item(s) to 7 worker(s).
+[2026-07-17 11:18:15] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-17 11:18:15] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 7 item(s) to 7 worker(s).
+[2026-07-17 11:18:22] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-17 11:18:22] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 7 item(s) to 7 worker(s).
+[2026-07-17 11:18:30] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-17 11:18:31] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 7 item(s) to 7 worker(s).
+[2026-07-17 11:18:38] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-17 11:18:38] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 7 item(s) to 7 worker(s).
+[2026-07-17 11:18:47] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-17 11:18:47] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 7 item(s) to 7 worker(s).
+[2026-07-17 11:18:53] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-17 11:18:53] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 7 item(s) to 7 worker(s).
+[2026-07-17 11:19:01] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-17 11:19:01] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 4 item(s) to 4 worker(s).
+[2026-07-17 11:19:09] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 4/4 item(s) completed in parallel.
+[2026-07-17 11:19:10] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 4 item(s) to 4 worker(s).
+[2026-07-17 11:19:18] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 4/4 item(s) completed in parallel.
+[2026-07-17 11:19:18] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-17 11:19:24] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 11:19:24] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-17 11:19:30] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 11:19:30] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-17 11:19:36] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 11:19:37] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-17 11:19:43] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 11:19:43] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-17 11:19:49] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 11:19:49] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-17 11:19:55] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 11:19:55] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-17 11:20:02] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 11:20:02] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 7 item(s) to 7 worker(s).
+[2026-07-17 11:20:09] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-17 11:20:09] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 7 item(s) to 7 worker(s).
+[2026-07-17 11:20:18] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-17 11:20:18] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 4 item(s) to 4 worker(s).
+[2026-07-17 11:20:26] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 4/4 item(s) completed in parallel.
+[2026-07-17 11:20:26] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 7 item(s) to 7 worker(s).
+[2026-07-17 11:20:34] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-17 11:20:34] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 7 item(s) to 7 worker(s).
+[2026-07-17 11:20:42] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-17 11:20:42] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 7 item(s) to 7 worker(s).
+[2026-07-17 11:20:49] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-17 11:20:49] [run_id=20260717T102031_1996_807598] === Building schema: TQP ===
+[2026-07-17 11:20:49] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 4 item(s) to 4 worker(s).
+[2026-07-17 11:20:57] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 4/4 item(s) completed in parallel.
+[2026-07-17 11:20:57] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 5 item(s) to 5 worker(s).
+[2026-07-17 11:21:04] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 5/5 item(s) completed in parallel.
+[2026-07-17 11:21:04] [run_id=20260717T102031_1996_807598] [SCAN PROGRESS] schema header inference: starting serial scan of 1 item(s).
+[2026-07-17 11:21:04] [run_id=20260717T102031_1996_807598] [SCAN PROGRESS] schema header inference: 1/1 complete (100.0%); elapsed 0s; ETA 0s.
+[2026-07-17 11:21:04] [run_id=20260717T102031_1996_807598] [SCAN PROGRESS] schema header inference: starting serial scan of 1 item(s).
+[2026-07-17 11:21:05] [run_id=20260717T102031_1996_807598] [SCAN PROGRESS] schema header inference: 1/1 complete (100.0%); elapsed 0s; ETA 0s.
+[2026-07-17 11:21:05] [run_id=20260717T102031_1996_807598] [SCAN PROGRESS] schema header inference: starting serial scan of 1 item(s).
+[2026-07-17 11:21:05] [run_id=20260717T102031_1996_807598] [SCAN PROGRESS] schema header inference: 1/1 complete (100.0%); elapsed 0s; ETA 0s.
+[2026-07-17 11:21:05] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 8 item(s) to 8 worker(s).
+[2026-07-17 11:21:13] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 8/8 item(s) completed in parallel.
+[2026-07-17 11:21:13] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 8 item(s) to 8 worker(s).
+[2026-07-17 11:21:21] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 8/8 item(s) completed in parallel.
+[2026-07-17 11:21:21] [run_id=20260717T102031_1996_807598] [SCAN PROGRESS] schema header inference: starting serial scan of 1 item(s).
+[2026-07-17 11:21:21] [run_id=20260717T102031_1996_807598] [SCAN PROGRESS] schema header inference: 1/1 complete (100.0%); elapsed 0s; ETA 0s.
+[2026-07-17 11:21:22] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-17 11:21:28] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 11:21:28] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-17 11:21:35] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 11:21:35] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-17 11:21:41] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 11:21:41] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-17 11:21:49] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 11:21:49] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-17 11:21:55] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 11:21:56] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-17 11:22:01] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 11:22:02] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-17 11:22:09] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 11:22:09] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-17 11:22:16] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 11:22:16] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 8 item(s) to 8 worker(s).
+[2026-07-17 11:22:25] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 8/8 item(s) completed in parallel.
+[2026-07-17 11:22:25] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-17 11:22:31] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 11:22:31] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-17 11:22:38] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 11:22:38] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 8 item(s) to 8 worker(s).
+[2026-07-17 11:22:46] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 8/8 item(s) completed in parallel.
+[2026-07-17 11:22:46] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 6 item(s) to 6 worker(s).
+[2026-07-17 11:22:55] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 6/6 item(s) completed in parallel.
+[2026-07-17 11:22:55] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-17 11:23:03] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 11:23:03] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-17 11:23:10] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 11:23:11] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-17 11:23:17] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 11:23:17] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-17 11:23:22] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 11:23:22] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-17 11:23:29] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 11:23:29] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-17 11:23:35] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 11:23:35] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-17 11:23:41] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 11:23:41] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 8 item(s) to 8 worker(s).
+[2026-07-17 11:23:53] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 8/8 item(s) completed in parallel.
+[2026-07-17 11:23:53] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 8 item(s) to 8 worker(s).
+[2026-07-17 11:24:05] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 8/8 item(s) completed in parallel.
+[2026-07-17 11:24:05] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 8 item(s) to 8 worker(s).
+[2026-07-17 11:24:14] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 8/8 item(s) completed in parallel.
+[2026-07-17 11:24:14] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 8 item(s) to 8 worker(s).
+[2026-07-17 11:24:25] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 8/8 item(s) completed in parallel.
+[2026-07-17 11:24:25] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 10 item(s) to 10 worker(s).
+[2026-07-17 11:24:35] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 10/10 item(s) completed in parallel.
+[2026-07-17 11:24:35] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-17 11:24:41] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 11:24:42] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-17 11:24:47] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 11:24:47] [run_id=20260717T102031_1996_807598] [SCAN PROGRESS] schema header inference: starting serial scan of 1 item(s).
+[2026-07-17 11:24:48] [run_id=20260717T102031_1996_807598] [SCAN PROGRESS] schema header inference: 1/1 complete (100.0%); elapsed 0s; ETA 0s.
+[2026-07-17 11:24:48] [run_id=20260717T102031_1996_807598] [SCAN PROGRESS] schema header inference: starting serial scan of 1 item(s).
+[2026-07-17 11:24:48] [run_id=20260717T102031_1996_807598] [SCAN PROGRESS] schema header inference: 1/1 complete (100.0%); elapsed 0s; ETA 0s.
+[2026-07-17 11:24:48] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-17 11:24:56] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 11:24:56] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-17 11:25:03] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 11:25:03] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-17 11:25:09] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 11:25:09] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 6 item(s) to 6 worker(s).
+[2026-07-17 11:25:17] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 6/6 item(s) completed in parallel.
+[2026-07-17 11:25:17] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-17 11:25:23] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 11:25:23] [run_id=20260717T102031_1996_807598] [SCAN PROGRESS] schema header inference: starting serial scan of 1 item(s).
+[2026-07-17 11:25:24] [run_id=20260717T102031_1996_807598] [SCAN PROGRESS] schema header inference: 1/1 complete (100.0%); elapsed 0s; ETA 0s.
+[2026-07-17 11:25:24] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-17 11:25:30] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 11:25:30] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 8 item(s) to 8 worker(s).
+[2026-07-17 11:25:41] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 8/8 item(s) completed in parallel.
+[2026-07-17 11:25:41] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 6 item(s) to 6 worker(s).
+[2026-07-17 11:25:50] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 6/6 item(s) completed in parallel.
+[2026-07-17 11:25:50] [run_id=20260717T102031_1996_807598] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-17 11:25:56] [run_id=20260717T102031_1996_807598] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-17 11:26:00] [run_id=20260717T102031_1996_807598] === Loading NEDS ===
+[2026-07-17 11:27:13] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NEDS_2010_Comorbidities.SAV -> direct reader
+[2026-07-17 11:27:13] [run_id=20260717T102031_1996_807598] [READ] NEDS_2010_Comorbidities.SAV: 28,579,375 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 11:28:43] [run_id=20260717T102031_1996_807598] [OK] 1/42  NEDS_2010_Comorbidities.SAV -> NEDS_Comorbidities (year=2010)
+[2026-07-17 11:28:44] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||Comorbidities||YEAR=2010||NEDS_Data||NEDS_2010_Comorbidities.SAV||SOURCE=meta:771644974:2021-11-02T16:59:16.000000Z: NEDS_Comorbidities
+[2026-07-17 11:51:57] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NEDS_2010_Core.SAV -> direct reader
+[2026-07-17 11:51:57] [run_id=20260717T102031_1996_807598] [READ] NEDS_2010_Core.SAV: 28,584,301 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 12:05:23] [run_id=20260717T102031_1996_807598] [OK] 2/42  NEDS_2010_Core.SAV -> NEDS_Core (year=2010)
+[2026-07-17 12:05:24] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||Core||YEAR=2010||NEDS_Data||NEDS_2010_Core.SAV||SOURCE=meta:5687441178:2018-04-26T23:51:43.000000Z: NEDS_Core
+[2026-07-17 12:10:14] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NEDS_2010_Core_DX.SAV -> direct reader
+[2026-07-17 12:10:14] [run_id=20260717T102031_1996_807598] [READ] NEDS_2010_Core_DX.SAV: 106,416,811 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 12:12:42] [run_id=20260717T102031_1996_807598] [OK] 3/42  NEDS_2010_Core_DX.SAV -> NEDS_Core_DX (year=2010)
+[2026-07-17 12:12:43] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||Core_DX||YEAR=2010||NEDS_Data||NEDS_2010_Core_DX.SAV||SOURCE=meta:3393868472:2018-06-19T00:33:37.000000Z: NEDS_Core_DX
+[2026-07-17 12:13:22] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NEDS_2010_Core_ECODE.SAV -> direct reader
+[2026-07-17 12:13:22] [run_id=20260717T102031_1996_807598] [READ] NEDS_2010_Core_ECODE.SAV: 14,257,399 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 12:14:39] [run_id=20260717T102031_1996_807598] [OK] 4/42  NEDS_2010_Core_ECODE.SAV -> NEDS_Core_ECODE (year=2010)
+[2026-07-17 12:14:40] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||Core_ECODE||YEAR=2010||NEDS_Data||NEDS_2010_Core_ECODE.SAV||SOURCE=meta:513261437:2018-06-19T00:25:14.000000Z: NEDS_Core_ECODE
+[2026-07-17 12:20:09] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NEDS_2010_Core_Misc.SAV -> direct reader
+[2026-07-17 12:20:09] [run_id=20260717T102031_1996_807598] [READ] NEDS_2010_Core_Misc.SAV: 28,584,301 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 12:24:34] [run_id=20260717T102031_1996_807598] [OK] 5/42  NEDS_2010_Core_Misc.SAV -> NEDS_Core_Misc (year=2010)
+[2026-07-17 12:24:35] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||Core_Misc||YEAR=2010||NEDS_Data||NEDS_2010_Core_Misc.SAV||SOURCE=meta:2678823717:2020-08-10T21:56:16.000000Z: NEDS_Core_Misc
+[2026-07-17 12:25:44] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NEDS_2011_Comorbidities.SAV -> direct reader
+[2026-07-17 12:25:44] [run_id=20260717T102031_1996_807598] [READ] NEDS_2011_Comorbidities.SAV: 28,778,945 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 12:27:31] [run_id=20260717T102031_1996_807598] [OK] 6/42  NEDS_2011_Comorbidities.SAV -> NEDS_Comorbidities (year=2011)
+[2026-07-17 12:27:32] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||Comorbidities||YEAR=2011||NEDS_Data||NEDS_2011_Comorbidities.SAV||SOURCE=meta:777033366:2021-11-03T17:54:36.247663Z: NEDS_Comorbidities
+[2026-07-17 12:51:48] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NEDS_2011_Core.SAV -> direct reader
+[2026-07-17 12:51:48] [run_id=20260717T102031_1996_807598] [READ] NEDS_2011_Core.SAV: 28,788,399 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 13:05:24] [run_id=20260717T102031_1996_807598] [OK] 7/42  NEDS_2011_Core.SAV -> NEDS_Core (year=2011)
+[2026-07-17 13:05:24] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||Core||YEAR=2011||NEDS_Data||NEDS_2011_Core.SAV||SOURCE=meta:5721352584:2018-04-26T23:28:28.000000Z: NEDS_Core
+[2026-07-17 13:10:22] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NEDS_2011_Core_DX.SAV -> direct reader
+[2026-07-17 13:10:22] [run_id=20260717T102031_1996_807598] [READ] NEDS_2011_Core_DX.SAV: 109,819,467 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 13:12:54] [run_id=20260717T102031_1996_807598] [OK] 8/42  NEDS_2011_Core_DX.SAV -> NEDS_Core_DX (year=2011)
+[2026-07-17 13:12:55] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||Core_DX||YEAR=2011||NEDS_Data||NEDS_2011_Core_DX.SAV||SOURCE=meta:3500402360:2018-06-19T00:17:31.000000Z: NEDS_Core_DX
+[2026-07-17 13:13:35] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NEDS_2011_Core_ECODE.SAV -> direct reader
+[2026-07-17 13:13:35] [run_id=20260717T102031_1996_807598] [READ] NEDS_2011_Core_ECODE.SAV: 13,989,655 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 13:14:49] [run_id=20260717T102031_1996_807598] [OK] 9/42  NEDS_2011_Core_ECODE.SAV -> NEDS_Core_ECODE (year=2011)
+[2026-07-17 13:14:50] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||Core_ECODE||YEAR=2011||NEDS_Data||NEDS_2011_Core_ECODE.SAV||SOURCE=meta:503623949:2018-06-19T00:09:55.000000Z: NEDS_Core_ECODE
+[2026-07-17 13:19:54] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NEDS_2011_Core_MISC.SAV -> direct reader
+[2026-07-17 13:19:54] [run_id=20260717T102031_1996_807598] [READ] NEDS_2011_Core_MISC.SAV: 28,788,399 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 13:24:07] [run_id=20260717T102031_1996_807598] [OK] 10/42  NEDS_2011_Core_MISC.SAV -> NEDS_Core_Misc (year=2011)
+[2026-07-17 13:24:07] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||Core_Misc||YEAR=2011||NEDS_Data||NEDS_2011_Core_MISC.SAV||SOURCE=meta:2667719771:2020-08-10T21:18:02.000000Z: NEDS_Core_Misc
+[2026-07-17 13:25:21] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NEDS_2012_Comorbidities.SAV -> direct reader
+[2026-07-17 13:25:21] [run_id=20260717T102031_1996_807598] [READ] NEDS_2012_Comorbidities.SAV: 31,081,397 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 13:27:09] [run_id=20260717T102031_1996_807598] [OK] 11/42  NEDS_2012_Comorbidities.SAV -> NEDS_Comorbidities (year=2012)
+[2026-07-17 13:27:10] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||Comorbidities||YEAR=2012||NEDS_Data||NEDS_2012_Comorbidities.SAV||SOURCE=meta:839199566:2021-11-03T17:46:40.246747Z: NEDS_Comorbidities
+[2026-07-17 13:53:59] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NEDS_2012_Core.SAV -> direct reader
+[2026-07-17 13:53:59] [run_id=20260717T102031_1996_807598] [READ] NEDS_2012_Core.SAV: 31,091,020 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 14:09:33] [run_id=20260717T102031_1996_807598] [OK] 12/42  NEDS_2012_Core.SAV -> NEDS_Core (year=2012)
+[2026-07-17 14:09:34] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||Core||YEAR=2012||NEDS_Data||NEDS_2012_Core.SAV||SOURCE=meta:6210711568:2018-04-26T23:02:13.000000Z: NEDS_Core
+[2026-07-17 14:15:13] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NEDS_2012_Core_DX.SAV -> direct reader
+[2026-07-17 14:15:13] [run_id=20260717T102031_1996_807598] [READ] NEDS_2012_Core_DX.SAV: 121,096,157 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 14:17:57] [run_id=20260717T102031_1996_807598] [OK] 13/42  NEDS_2012_Core_DX.SAV -> NEDS_Core_DX (year=2012)
+[2026-07-17 14:17:58] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||Core_DX||YEAR=2012||NEDS_Data||NEDS_2012_Core_DX.SAV||SOURCE=meta:3865091840:2018-06-18T23:58:43.000000Z: NEDS_Core_DX
+[2026-07-17 14:21:35] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NEDS_2012_Core_ECODE.SAV -> direct reader
+[2026-07-17 14:21:35] [run_id=20260717T102031_1996_807598] [READ] NEDS_2012_Core_ECODE.SAV: 31,091,020 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 14:24:40] [run_id=20260717T102031_1996_807598] [OK] 14/42  NEDS_2012_Core_ECODE.SAV -> NEDS_Core_ECODE (year=2012)
+[2026-07-17 14:24:41] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||Core_ECODE||YEAR=2012||NEDS_Data||NEDS_2012_Core_ECODE.SAV||SOURCE=meta:1386586464:2019-04-10T20:37:54.000000Z: NEDS_Core_ECODE
+[2026-07-17 14:42:46] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NEDS_2012_ED.SAV -> direct reader
+[2026-07-17 14:42:46] [run_id=20260717T102031_1996_807598] [READ] NEDS_2012_ED.SAV: 26,617,541 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 14:50:51] [run_id=20260717T102031_1996_807598] [OK] 15/42  NEDS_2012_ED.SAV -> NEDS_ED (year=2012)
+[2026-07-17 14:50:52] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||ED||YEAR=2012||NEDS_Data||NEDS_2012_ED.SAV||SOURCE=meta:3844855455:2019-05-06T23:30:28.000000Z: NEDS_ED
+[2026-07-17 14:50:53] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NEDS_2012_Hospital.SAV -> direct reader
+[2026-07-17 14:50:53] [run_id=20260717T102031_1996_807598] [READ] NEDS_2012_Hospital.SAV: 950 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 14:50:56] [run_id=20260717T102031_1996_807598] [OK] 16/42  NEDS_2012_Hospital.SAV -> NEDS_Hospital (year=2012)
+[2026-07-17 14:50:56] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||Hospital||YEAR=2012||NEDS_Data||NEDS_2012_Hospital.SAV||SOURCE=meta:77803:2019-05-06T23:15:01.000000Z: NEDS_Hospital
+[2026-07-17 14:51:42] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NEDS_2012_IP.SAV -> direct reader
+[2026-07-17 14:51:42] [run_id=20260717T102031_1996_807598] [READ] NEDS_2012_IP.SAV: 4,473,479 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 14:52:40] [run_id=20260717T102031_1996_807598] [OK] 17/42  NEDS_2012_IP.SAV -> NEDS_IP (year=2012)
+[2026-07-17 14:52:41] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||IP||YEAR=2012||NEDS_Data||NEDS_2012_IP.SAV||SOURCE=meta:408383713:2019-05-06T23:07:44.000000Z: NEDS_IP
+[2026-07-17 14:57:05] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NEDS_2012_Misc.SAV -> direct reader
+[2026-07-17 14:57:05] [run_id=20260717T102031_1996_807598] [READ] NEDS_2012_Misc.SAV: 31,091,020 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 14:59:31] [run_id=20260717T102031_1996_807598] [OK] 18/42  NEDS_2012_Misc.SAV -> NEDS_Misc (year=2012)
+[2026-07-17 14:59:32] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||Misc||YEAR=2012||NEDS_Data||NEDS_2012_Misc.SAV||SOURCE=meta:2261676372:2019-04-10T21:20:32.000000Z: NEDS_Misc
+[2026-07-17 15:00:41] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NEDS_2013_Comorbidities.SAV -> direct reader
+[2026-07-17 15:00:41] [run_id=20260717T102031_1996_807598] [READ] NEDS_2013_Comorbidities.SAV: 29,566,456 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 15:02:23] [run_id=20260717T102031_1996_807598] [OK] 19/42  NEDS_2013_Comorbidities.SAV -> NEDS_Comorbidities (year=2013)
+[2026-07-17 15:02:24] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||Comorbidities||YEAR=2013||NEDS_Data||NEDS_2013_Comorbidities.SAV||SOURCE=meta:798296158:2021-11-03T17:39:24.808605Z: NEDS_Comorbidities
+[2026-07-17 15:27:54] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NEDS_2013_Core.SAV -> direct reader
+[2026-07-17 15:27:54] [run_id=20260717T102031_1996_807598] [READ] NEDS_2013_Core.SAV: 29,581,718 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 15:42:15] [run_id=20260717T102031_1996_807598] [OK] 20/42  NEDS_2013_Core.SAV -> NEDS_Core (year=2013)
+[2026-07-17 15:42:15] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||Core||YEAR=2013||NEDS_Data||NEDS_2013_Core.SAV||SOURCE=meta:5973760871:2019-04-03T20:17:58.000000Z: NEDS_Core
+[2026-07-17 15:44:37] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] Direct read unsuccessful for NEDS_2013_Core_DX.SAV: Failed to parse X:/National Databases/NEDS_Data/NEDS_2013_Core_DX.SAV: File did not contain the expected number of rows. -- using chunked reader
+[2026-07-17 15:44:37] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NEDS_2013_Core_DX.SAV -> chunked reader
+[2026-07-17 15:44:37] [run_id=20260717T102031_1996_807598] [READ] NEDS_2013_Core_DX.SAV: 121,991,384 rows -> chunked reader (PartitionBy=FAIL)
+[2026-07-17 15:44:39] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2013_Core_DX.SAV (TerminalHivePartition=FALSE, chunk_size=4000000)
+[2026-07-17 15:44:39] [run_id=20260717T102031_1996_807598] [CHUNKED] ncases unavailable -- counting: NEDS_2013_Core_DX.SAV
+[2026-07-17 15:45:28] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2013_Core_DX.SAV: 121991384 rows
+[2026-07-17 15:45:39] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2013_Core_DX.SAV chunk 1: 4000000 rows -> NEDS_2013_Core_DX_00001.parquet (chunk_size=4000000)
+[2026-07-17 15:45:49] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2013_Core_DX.SAV chunk 2: 4000000 rows -> NEDS_2013_Core_DX_00002.parquet (chunk_size=4000000)
+[2026-07-17 15:46:00] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2013_Core_DX.SAV chunk 3: 4000000 rows -> NEDS_2013_Core_DX_00003.parquet (chunk_size=4000000)
+[2026-07-17 15:46:11] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2013_Core_DX.SAV chunk 4: 4000000 rows -> NEDS_2013_Core_DX_00004.parquet (chunk_size=4000000)
+[2026-07-17 15:46:22] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2013_Core_DX.SAV chunk 5: 4000000 rows -> NEDS_2013_Core_DX_00005.parquet (chunk_size=4000000)
+[2026-07-17 15:46:32] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2013_Core_DX.SAV chunk 6: 4000000 rows -> NEDS_2013_Core_DX_00006.parquet (chunk_size=4000000)
+[2026-07-17 15:46:43] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2013_Core_DX.SAV chunk 7: 4000000 rows -> NEDS_2013_Core_DX_00007.parquet (chunk_size=4000000)
+[2026-07-17 15:46:54] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2013_Core_DX.SAV chunk 8: 4000000 rows -> NEDS_2013_Core_DX_00008.parquet (chunk_size=4000000)
+[2026-07-17 15:47:06] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2013_Core_DX.SAV chunk 9: 4000000 rows -> NEDS_2013_Core_DX_00009.parquet (chunk_size=4000000)
+[2026-07-17 15:47:17] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2013_Core_DX.SAV chunk 10: 4000000 rows -> NEDS_2013_Core_DX_00010.parquet (chunk_size=4000000)
+[2026-07-17 15:47:28] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2013_Core_DX.SAV chunk 11: 4000000 rows -> NEDS_2013_Core_DX_00011.parquet (chunk_size=4000000)
+[2026-07-17 15:47:39] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2013_Core_DX.SAV chunk 12: 4000000 rows -> NEDS_2013_Core_DX_00012.parquet (chunk_size=4000000)
+[2026-07-17 15:47:51] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2013_Core_DX.SAV chunk 13: 4000000 rows -> NEDS_2013_Core_DX_00013.parquet (chunk_size=4000000)
+[2026-07-17 15:48:03] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2013_Core_DX.SAV chunk 14: 4000000 rows -> NEDS_2013_Core_DX_00014.parquet (chunk_size=4000000)
+[2026-07-17 15:48:14] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2013_Core_DX.SAV chunk 15: 4000000 rows -> NEDS_2013_Core_DX_00015.parquet (chunk_size=4000000)
+[2026-07-17 15:48:26] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2013_Core_DX.SAV chunk 16: 4000000 rows -> NEDS_2013_Core_DX_00016.parquet (chunk_size=4000000)
+[2026-07-17 15:48:38] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2013_Core_DX.SAV chunk 17: 4000000 rows -> NEDS_2013_Core_DX_00017.parquet (chunk_size=4000000)
+[2026-07-17 15:48:51] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2013_Core_DX.SAV chunk 18: 4000000 rows -> NEDS_2013_Core_DX_00018.parquet (chunk_size=4000000)
+[2026-07-17 15:49:03] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2013_Core_DX.SAV chunk 19: 4000000 rows -> NEDS_2013_Core_DX_00019.parquet (chunk_size=4000000)
+[2026-07-17 15:49:15] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2013_Core_DX.SAV chunk 20: 4000000 rows -> NEDS_2013_Core_DX_00020.parquet (chunk_size=4000000)
+[2026-07-17 15:49:27] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2013_Core_DX.SAV chunk 21: 4000000 rows -> NEDS_2013_Core_DX_00021.parquet (chunk_size=4000000)
+[2026-07-17 15:49:40] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2013_Core_DX.SAV chunk 22: 4000000 rows -> NEDS_2013_Core_DX_00022.parquet (chunk_size=4000000)
+[2026-07-17 15:49:53] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2013_Core_DX.SAV chunk 23: 4000000 rows -> NEDS_2013_Core_DX_00023.parquet (chunk_size=4000000)
+[2026-07-17 15:50:05] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2013_Core_DX.SAV chunk 24: 4000000 rows -> NEDS_2013_Core_DX_00024.parquet (chunk_size=4000000)
+[2026-07-17 15:50:18] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2013_Core_DX.SAV chunk 25: 4000000 rows -> NEDS_2013_Core_DX_00025.parquet (chunk_size=4000000)
+[2026-07-17 15:50:30] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2013_Core_DX.SAV chunk 26: 4000000 rows -> NEDS_2013_Core_DX_00026.parquet (chunk_size=4000000)
+[2026-07-17 15:50:43] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2013_Core_DX.SAV chunk 27: 4000000 rows -> NEDS_2013_Core_DX_00027.parquet (chunk_size=4000000)
+[2026-07-17 15:50:56] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2013_Core_DX.SAV chunk 28: 4000000 rows -> NEDS_2013_Core_DX_00028.parquet (chunk_size=4000000)
+[2026-07-17 15:51:09] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2013_Core_DX.SAV chunk 29: 4000000 rows -> NEDS_2013_Core_DX_00029.parquet (chunk_size=4000000)
+[2026-07-17 15:51:22] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2013_Core_DX.SAV chunk 30: 4000000 rows -> NEDS_2013_Core_DX_00030.parquet (chunk_size=4000000)
+[2026-07-17 15:51:30] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2013_Core_DX.SAV chunk 31: 1991384 rows -> NEDS_2013_Core_DX_00031.parquet (chunk_size=4000000)
+[2026-07-17 15:51:31] [run_id=20260717T102031_1996_807598] [OK] 21/42  NEDS_2013_Core_DX.SAV -> NEDS_Core_DX (year=2013, 121991384 rows)
+[2026-07-17 15:51:31] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||Core_DX||YEAR=2013||NEDS_Data||NEDS_2013_Core_DX.SAV||SOURCE=meta:2795795924:2019-04-03T21:15:05.000000Z: NEDS_Core_DX
+[2026-07-17 15:52:12] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NEDS_2013_Core_ECODE.SAV -> direct reader
+[2026-07-17 15:52:12] [run_id=20260717T102031_1996_807598] [READ] NEDS_2013_Core_ECODE.SAV: 13,140,358 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 15:53:21] [run_id=20260717T102031_1996_807598] [OK] 22/42  NEDS_2013_Core_ECODE.SAV -> NEDS_Core_ECODE (year=2013)
+[2026-07-17 15:53:21] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||Core_ECODE||YEAR=2013||NEDS_Data||NEDS_2013_Core_ECODE.SAV||SOURCE=meta:472937957:2018-06-18T23:31:47.000000Z: NEDS_Core_ECODE
+[2026-07-17 15:58:53] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NEDS_2013_Core_Misc.SAV -> direct reader
+[2026-07-17 15:58:53] [run_id=20260717T102031_1996_807598] [READ] NEDS_2013_Core_Misc.SAV: 29,581,718 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 16:03:13] [run_id=20260717T102031_1996_807598] [OK] 23/42  NEDS_2013_Core_Misc.SAV -> NEDS_Core_Misc (year=2013)
+[2026-07-17 16:03:14] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||Core_Misc||YEAR=2013||NEDS_Data||NEDS_2013_Core_Misc.SAV||SOURCE=meta:2891406582:2020-08-10T21:27:59.000000Z: NEDS_Core_Misc
+[2026-07-17 16:19:36] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NEDS_2013_ED.SAV -> direct reader
+[2026-07-17 16:19:36] [run_id=20260717T102031_1996_807598] [READ] NEDS_2013_ED.SAV: 25,344,296 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 16:27:23] [run_id=20260717T102031_1996_807598] [OK] 24/42  NEDS_2013_ED.SAV -> NEDS_ED (year=2013)
+[2026-07-17 16:27:24] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||ED||YEAR=2013||NEDS_Data||NEDS_2013_ED.SAV||SOURCE=meta:4108122125:2019-05-07T15:39:22.000000Z: NEDS_ED
+[2026-07-17 16:27:25] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NEDS_2013_Hospital.SAV -> direct reader
+[2026-07-17 16:27:25] [run_id=20260717T102031_1996_807598] [READ] NEDS_2013_Hospital.SAV: 947 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 16:27:28] [run_id=20260717T102031_1996_807598] [OK] 25/42  NEDS_2013_Hospital.SAV -> NEDS_Hospital (year=2013)
+[2026-07-17 16:27:29] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||Hospital||YEAR=2013||NEDS_Data||NEDS_2013_Hospital.SAV||SOURCE=meta:78275:2019-05-08T18:32:29.000000Z: NEDS_Hospital
+[2026-07-17 16:28:10] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NEDS_2013_IP.SAV -> direct reader
+[2026-07-17 16:28:10] [run_id=20260717T102031_1996_807598] [READ] NEDS_2013_IP.SAV: 4,237,422 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 16:29:06] [run_id=20260717T102031_1996_807598] [OK] 26/42  NEDS_2013_IP.SAV -> NEDS_IP (year=2013)
+[2026-07-17 16:29:06] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||IP||YEAR=2013||NEDS_Data||NEDS_2013_IP.SAV||SOURCE=meta:465117807:2019-05-08T18:37:54.000000Z: NEDS_IP
+[2026-07-17 16:30:16] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NEDS_2014_Comorbidities.SAV -> direct reader
+[2026-07-17 16:30:16] [run_id=20260717T102031_1996_807598] [READ] NEDS_2014_Comorbidities.SAV: 31,018,357 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 16:32:01] [run_id=20260717T102031_1996_807598] [OK] 27/42  NEDS_2014_Comorbidities.SAV -> NEDS_Comorbidities (year=2014)
+[2026-07-17 16:32:01] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||Comorbidities||YEAR=2014||NEDS_Data||NEDS_2014_Comorbidities.SAV||SOURCE=meta:837497486:2021-11-03T16:58:10.865571Z: NEDS_Comorbidities
+[2026-07-17 16:40:11] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NEDS_2014_Core.SAV -> direct reader
+[2026-07-17 16:40:11] [run_id=20260717T102031_1996_807598] [READ] NEDS_2014_Core.SAV: 31,026,417 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 16:53:47] [run_id=20260717T102031_1996_807598] [OK] 28/42  NEDS_2014_Core.SAV -> NEDS_Core (year=2014)
+[2026-07-17 16:53:48] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||Core||YEAR=2014||NEDS_Data||NEDS_2014_Core.SAV||SOURCE=meta:4038190693:2019-05-06T22:32:57.000000Z: NEDS_Core
+[2026-07-17 16:59:49] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NEDS_2014_Core_DX.sav -> direct reader
+[2026-07-17 16:59:49] [run_id=20260717T102031_1996_807598] [READ] NEDS_2014_Core_DX.sav: 136,887,980 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 17:03:01] [run_id=20260717T102031_1996_807598] [OK] 29/42  NEDS_2014_Core_DX.sav -> NEDS_Core_DX (year=2014)
+[2026-07-17 17:03:02] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||Core_DX||YEAR=2014||NEDS_Data||NEDS_2014_Core_DX.sav||SOURCE=meta:4373848888:2019-06-06T22:19:08.000000Z: NEDS_Core_DX
+[2026-07-17 17:03:39] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NEDS_2014_Core_ECODE.SAV -> direct reader
+[2026-07-17 17:03:39] [run_id=20260717T102031_1996_807598] [READ] NEDS_2014_Core_ECODE.SAV: 13,743,987 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 17:04:54] [run_id=20260717T102031_1996_807598] [OK] 30/42  NEDS_2014_Core_ECODE.SAV -> NEDS_Core_ECODE (year=2014)
+[2026-07-17 17:04:55] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||Core_ECODE||YEAR=2014||NEDS_Data||NEDS_2014_Core_ECODE.SAV||SOURCE=meta:494778741:2018-06-18T23:25:53.000000Z: NEDS_Core_ECODE
+[2026-07-17 17:10:43] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NEDS_2014_Core_MISC.SAV -> direct reader
+[2026-07-17 17:10:43] [run_id=20260717T102031_1996_807598] [READ] NEDS_2014_Core_MISC.SAV: 31,026,417 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 17:15:26] [run_id=20260717T102031_1996_807598] [OK] 31/42  NEDS_2014_Core_MISC.SAV -> NEDS_Core_Misc (year=2014)
+[2026-07-17 17:15:27] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||Core_Misc||YEAR=2014||NEDS_Data||NEDS_2014_Core_MISC.SAV||SOURCE=meta:2873342282:2020-08-10T21:40:12.000000Z: NEDS_Core_Misc
+[2026-07-17 17:15:28] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NEDS_2014_Hospital.SAV -> direct reader
+[2026-07-17 17:15:28] [run_id=20260717T102031_1996_807598] [READ] NEDS_2014_Hospital.SAV: 945 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 17:15:30] [run_id=20260717T102031_1996_807598] [OK] 32/42  NEDS_2014_Hospital.SAV -> NEDS_Hospital (year=2014)
+[2026-07-17 17:15:31] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||Hospital||YEAR=2014||NEDS_Data||NEDS_2014_Hospital.SAV||SOURCE=meta:77539:2019-05-08T20:04:14.000000Z: NEDS_Hospital
+[2026-07-17 17:16:17] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NEDS_2014_IP.SAV -> direct reader
+[2026-07-17 17:16:17] [run_id=20260717T102031_1996_807598] [READ] NEDS_2014_IP.SAV: 4,388,925 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 17:17:16] [run_id=20260717T102031_1996_807598] [OK] 33/42  NEDS_2014_IP.SAV -> NEDS_IP (year=2014)
+[2026-07-17 17:17:17] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||IP||YEAR=2014||NEDS_Data||NEDS_2014_IP.SAV||SOURCE=meta:483755127:2019-05-08T20:18:20.000000Z: NEDS_IP
+[2026-07-17 17:40:38] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] Direct read unsuccessful for NEDS_2016_Core.SAV: Failed to parse X:/National Databases/NEDS_Data/NEDS_2016/NEDS_2016_CORE/NEDS_2016_Core.SAV: File did not contain the expected number of rows. -- using chunked reader
+[2026-07-17 17:40:38] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NEDS_2016_Core.SAV -> chunked reader
+[2026-07-17 17:40:38] [run_id=20260717T102031_1996_807598] [READ] NEDS_2016_Core.SAV: 32,680,232 rows -> chunked reader (PartitionBy=FAIL)
+[2026-07-17 17:40:42] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2016_Core.SAV (TerminalHivePartition=FALSE, chunk_size=4000000)
+[2026-07-17 17:40:43] [run_id=20260717T102031_1996_807598] [CHUNKED] ncases unavailable -- counting: NEDS_2016_Core.SAV
+[2026-07-17 17:42:03] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2016_Core.SAV: 32680232 rows
+[2026-07-17 17:45:56] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2016_Core.SAV chunk 1: 4000000 rows -> NEDS_2016_Core_00001.parquet (chunk_size=4000000)
+[2026-07-17 17:49:59] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2016_Core.SAV chunk 2: 4000000 rows -> NEDS_2016_Core_00002.parquet (chunk_size=4000000)
+[2026-07-17 17:54:12] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2016_Core.SAV chunk 3: 4000000 rows -> NEDS_2016_Core_00003.parquet (chunk_size=4000000)
+[2026-07-17 17:58:36] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2016_Core.SAV chunk 4: 4000000 rows -> NEDS_2016_Core_00004.parquet (chunk_size=4000000)
+[2026-07-17 18:04:08] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2016_Core.SAV chunk 5: 4000000 rows -> NEDS_2016_Core_00005.parquet (chunk_size=4000000)
+[2026-07-17 18:08:54] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2016_Core.SAV chunk 6: 4000000 rows -> NEDS_2016_Core_00006.parquet (chunk_size=4000000)
+[2026-07-17 18:13:46] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2016_Core.SAV chunk 7: 4000000 rows -> NEDS_2016_Core_00007.parquet (chunk_size=4000000)
+[2026-07-17 18:18:42] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2016_Core.SAV chunk 8: 4000000 rows -> NEDS_2016_Core_00008.parquet (chunk_size=4000000)
+[2026-07-17 18:20:21] [run_id=20260717T102031_1996_807598] [CHUNKED] NEDS_2016_Core.SAV chunk 9: 680232 rows -> NEDS_2016_Core_00009.parquet (chunk_size=4000000)
+[2026-07-17 18:20:21] [run_id=20260717T102031_1996_807598] [OK] 34/42  NEDS_2016/NEDS_2016_CORE/NEDS_2016_Core.SAV -> NEDS_Core (year=2016, 32680232 rows)
+[2026-07-17 18:20:22] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||Core||YEAR=2016||NEDS_Data||NEDS_2016/NEDS_2016_CORE/NEDS_2016_Core.SAV||SOURCE=meta:4929019250:2021-06-11T21:41:34.000000Z: NEDS_Core
+[2026-07-17 18:30:38] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NEDS_2016_ED.SAV -> direct reader
+[2026-07-17 18:30:38] [run_id=20260717T102031_1996_807598] [READ] NEDS_2016_ED.SAV: 28,328,168 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 18:39:26] [run_id=20260717T102031_1996_807598] [OK] 35/42  NEDS_2016/NEDS_2016_ED/NEDS_2016_ED.SAV -> NEDS_ED (year=2016)
+[2026-07-17 18:39:26] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||ED||YEAR=2016||NEDS_Data||NEDS_2016/NEDS_2016_ED/NEDS_2016_ED.SAV||SOURCE=meta:3792373033:2021-06-11T21:45:47.907312Z: NEDS_ED
+[2026-07-17 18:39:28] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NEDS_2016_Hospital.SAV -> direct reader
+[2026-07-17 18:39:28] [run_id=20260717T102031_1996_807598] [READ] NEDS_2016_Hospital.SAV: 953 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 18:39:30] [run_id=20260717T102031_1996_807598] [OK] 36/42  NEDS_2016/NEDS_2016_HOSPITAL/NEDS_2016_Hospital.SAV -> NEDS_Hospital (year=2016)
+[2026-07-17 18:39:31] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||Hospital||YEAR=2016||NEDS_Data||NEDS_2016/NEDS_2016_HOSPITAL/NEDS_2016_Hospital.SAV||SOURCE=meta:77819:2021-06-11T21:48:12.392068Z: NEDS_Hospital
+[2026-07-17 18:40:05] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NEDS_2016_IP.SAV -> direct reader
+[2026-07-17 18:40:05] [run_id=20260717T102031_1996_807598] [READ] NEDS_2016_IP.SAV: 4,352,064 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 18:41:01] [run_id=20260717T102031_1996_807598] [OK] 37/42  NEDS_2016/NEDS_2016_IP/NEDS_2016_IP.SAV -> NEDS_IP (year=2016)
+[2026-07-17 18:41:01] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||IP||YEAR=2016||NEDS_Data||NEDS_2016/NEDS_2016_IP/NEDS_2016_IP.SAV||SOURCE=meta:303828060:2021-06-11T21:49:48.000000Z: NEDS_IP
+[2026-07-17 19:20:33] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NEDS_2017_Core.SAV -> direct reader
+[2026-07-17 19:20:33] [run_id=20260717T102031_1996_807598] [READ] NEDS_2017_Core.SAV: 33,506,645 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 19:36:38] [run_id=20260717T102031_1996_807598] [WRITE RETRY] Write attempt 1 failed: IOError: Error writing bytes to file. Detail: [errno 22] Invalid argument
+[2026-07-17 19:36:38] [run_id=20260717T102031_1996_807598] [WRITE RETRY] Attempt 2/3 after 10s pause: NEDS_2017_Core_SAV.parquet
+[2026-07-17 19:49:59] [run_id=20260717T102031_1996_807598] [OK] 38/42  NEDS_2017/NEDS_2017_CORE/NEDS_2017_Core.SAV -> NEDS_Core (year=2017)
+[2026-07-17 19:50:00] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||Core||YEAR=2017||NEDS_Data||NEDS_2017/NEDS_2017_CORE/NEDS_2017_Core.SAV||SOURCE=meta:5231801273:2021-06-11T22:02:53.000000Z: NEDS_Core
+[2026-07-17 20:19:16] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NEDS_2017_ED.SAV -> direct reader
+[2026-07-17 20:19:16] [run_id=20260717T102031_1996_807598] [READ] NEDS_2017_ED.SAV: 28,803,011 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 20:28:52] [run_id=20260717T102031_1996_807598] [OK] 39/42  NEDS_2017/NEDS_2017_ED/NEDS_2017_ED.SAV -> NEDS_ED (year=2017)
+[2026-07-17 20:28:52] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||ED||YEAR=2017||NEDS_Data||NEDS_2017/NEDS_2017_ED/NEDS_2017_ED.SAV||SOURCE=meta:5460725629:2021-06-11T22:14:36.522333Z: NEDS_ED
+[2026-07-17 20:28:54] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NEDS_2017_Hospital.SAV -> direct reader
+[2026-07-17 20:28:54] [run_id=20260717T102031_1996_807598] [READ] NEDS_2017_Hospital.SAV: 984 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 20:28:56] [run_id=20260717T102031_1996_807598] [OK] 40/42  NEDS_2017/NEDS_2017_HOSPITAL/NEDS_2017_Hospital.SAV -> NEDS_Hospital (year=2017)
+[2026-07-17 20:28:57] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||Hospital||YEAR=2017||NEDS_Data||NEDS_2017/NEDS_2017_HOSPITAL/NEDS_2017_Hospital.SAV||SOURCE=meta:80507:2021-06-11T22:21:35.523452Z: NEDS_Hospital
+[2026-07-17 20:29:45] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] neds_2017_IP.sav -> direct reader
+[2026-07-17 20:29:45] [run_id=20260717T102031_1996_807598] [READ] neds_2017_IP.sav: 4,703,634 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 20:30:44] [run_id=20260717T102031_1996_807598] [OK] 41/42  NEDS_2017/NEDS_2017_IP/neds_2017_IP.sav -> NEDS_IP (year=2017)
+[2026-07-17 20:30:45] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||IP||YEAR=2017||NEDS_Data||NEDS_2017/NEDS_2017_IP/neds_2017_IP.sav||SOURCE=meta:412217072:2022-12-16T22:25:27.038263Z: NEDS_IP
+[2026-07-17 20:31:39] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] neds_2018_IP.sav -> direct reader
+[2026-07-17 20:31:39] [run_id=20260717T102031_1996_807598] [READ] neds_2018_IP.sav: 5,091,286 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 20:32:49] [run_id=20260717T102031_1996_807598] [OK] 42/42  NEDS_2018/NEDS_2018_IP/neds_2018_IP.sav -> NEDS_IP (year=2018)
+[2026-07-17 20:32:50] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NEDS||IP||YEAR=2018||NEDS_Data||NEDS_2018/NEDS_2018_IP/neds_2018_IP.sav||SOURCE=meta:441169197:2022-12-16T22:48:39.677505Z: NEDS_IP
+[2026-07-17 20:32:51] [run_id=20260717T102031_1996_807598] NEDS complete. Checkpoint size: 42
+[2026-07-17 20:32:51] [run_id=20260717T102031_1996_807598] === Loading NIS ===
+[2026-07-17 20:35:07] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2010_DX_PR_GRPS.SAV -> direct reader
+[2026-07-17 20:35:07] [run_id=20260717T102031_1996_807598] [READ] NIS_2010_DX_PR_GRPS.SAV: 7,800,441 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 21:02:26] [run_id=20260717T102031_1996_807598] [OK] 1/52  NIS_Data_2010-2014/Hospital_Severity_DX_PR_GRPS/NIS_2010_DX_PR_GRPS/NIS_2010_DX_PR_GRPS.SAV -> NIS_DX_PR_GRPS (year=2010)
+[2026-07-17 21:02:26] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||DX_PR_GRPS||YEAR=2010||NIS_Data||NIS_Data_2010-2014/Hospital_Severity_DX_PR_GRPS/NIS_2010_DX_PR_GRPS/NIS_2010_DX_PR_GRPS.SAV||SOURCE=meta:823030437:2018-04-26T20:55:44.000000Z: NIS_DX_PR_GRPS
+[2026-07-17 21:02:32] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2010_Hospital.SAV -> direct reader
+[2026-07-17 21:02:32] [run_id=20260717T102031_1996_807598] [READ] NIS_2010_Hospital.SAV: 1,051 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 21:02:35] [run_id=20260717T102031_1996_807598] [OK] 2/52  NIS_Data_2010-2014/Hospital_Severity_DX_PR_GRPS/NIS_2010_Hospital/NIS_2010_Hospital.SAV -> NIS_Hospital (year=2010)
+[2026-07-17 21:02:36] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||Hospital||YEAR=2010||NIS_Data||NIS_Data_2010-2014/Hospital_Severity_DX_PR_GRPS/NIS_2010_Hospital/NIS_2010_Hospital.SAV||SOURCE=meta:222693:2018-04-26T21:15:19.000000Z: NIS_Hospital
+[2026-07-17 21:03:18] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2010_Severity.SAV -> direct reader
+[2026-07-17 21:03:19] [run_id=20260717T102031_1996_807598] [READ] NIS_2010_Severity.SAV: 7,800,441 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 21:04:13] [run_id=20260717T102031_1996_807598] [OK] 3/52  NIS_Data_2010-2014/Hospital_Severity_DX_PR_GRPS/NIS_2010_Severity/NIS_2010_Severity.SAV -> NIS_Severity (year=2010)
+[2026-07-17 21:04:14] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||Severity||YEAR=2010||NIS_Data||NIS_Data_2010-2014/Hospital_Severity_DX_PR_GRPS/NIS_2010_Severity/NIS_2010_Severity.SAV||SOURCE=meta:576952022:2018-04-26T21:42:26.000000Z: NIS_Severity
+[2026-07-17 21:06:24] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2011_DX_PR_GRPS.SAV -> direct reader
+[2026-07-17 21:06:24] [run_id=20260717T102031_1996_807598] [READ] NIS_2011_DX_PR_GRPS.SAV: 8,023,590 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 21:32:37] [run_id=20260717T102031_1996_807598] [WRITE RETRY] Write attempt 1 failed: IOError: Error writing bytes to file. Detail: [errno 22] Invalid argument
+[2026-07-17 21:32:38] [run_id=20260717T102031_1996_807598] [WRITE RETRY] Attempt 2/3 after 10s pause: NIS_2011_DX_PR_GRPS_SAV.parquet
+[2026-07-17 21:55:16] [run_id=20260717T102031_1996_807598] [OK] 4/52  NIS_Data_2010-2014/Hospital_Severity_DX_PR_GRPS/NIS_2011_DX_PR_GRPS/NIS_2011_DX_PR_GRPS.SAV -> NIS_DX_PR_GRPS (year=2011)
+[2026-07-17 21:55:16] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||DX_PR_GRPS||YEAR=2011||NIS_Data||NIS_Data_2010-2014/Hospital_Severity_DX_PR_GRPS/NIS_2011_DX_PR_GRPS/NIS_2011_DX_PR_GRPS.SAV||SOURCE=meta:847010261:2018-04-26T20:47:46.000000Z: NIS_DX_PR_GRPS
+[2026-07-17 21:55:23] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2011_Hospital.SAV -> direct reader
+[2026-07-17 21:55:23] [run_id=20260717T102031_1996_807598] [READ] NIS_2011_Hospital.SAV: 1,049 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 21:55:25] [run_id=20260717T102031_1996_807598] [OK] 5/52  NIS_Data_2010-2014/Hospital_Severity_DX_PR_GRPS/NIS_2011_Hospital/NIS_2011_Hospital.SAV -> NIS_Hospital (year=2011)
+[2026-07-17 21:55:26] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||Hospital||YEAR=2011||NIS_Data||NIS_Data_2010-2014/Hospital_Severity_DX_PR_GRPS/NIS_2011_Hospital/NIS_2011_Hospital.SAV||SOURCE=meta:223341:2018-04-26T21:13:54.000000Z: NIS_Hospital
+[2026-07-17 21:55:59] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2011_Severity.SAV -> direct reader
+[2026-07-17 21:55:59] [run_id=20260717T102031_1996_807598] [READ] NIS_2011_Severity.SAV: 8,023,590 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 21:56:53] [run_id=20260717T102031_1996_807598] [OK] 6/52  NIS_Data_2010-2014/Hospital_Severity_DX_PR_GRPS/NIS_2011_Severity/NIS_2011_Severity.SAV -> NIS_Severity (year=2011)
+[2026-07-17 21:56:54] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||Severity||YEAR=2011||NIS_Data||NIS_Data_2010-2014/Hospital_Severity_DX_PR_GRPS/NIS_2011_Severity/NIS_2011_Severity.SAV||SOURCE=meta:454444666:2018-04-26T21:39:42.000000Z: NIS_Severity
+[2026-07-17 21:58:46] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2012_DX_PR_GRPS.SAV -> direct reader
+[2026-07-17 21:58:46] [run_id=20260717T102031_1996_807598] [READ] NIS_2012_DX_PR_GRPS.SAV: 7,296,968 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 22:24:32] [run_id=20260717T102031_1996_807598] [OK] 7/52  NIS_Data_2010-2014/Hospital_Severity_DX_PR_GRPS/NIS_2012_DX_PR_GRPS/NIS_2012_DX_PR_GRPS.SAV -> NIS_DX_PR_GRPS (year=2012)
+[2026-07-17 22:24:33] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||DX_PR_GRPS||YEAR=2012||NIS_Data||NIS_Data_2010-2014/Hospital_Severity_DX_PR_GRPS/NIS_2012_DX_PR_GRPS/NIS_2012_DX_PR_GRPS.SAV||SOURCE=meta:770005483:2018-04-26T20:22:11.000000Z: NIS_DX_PR_GRPS
+[2026-07-17 22:24:39] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2012_Hospital.SAV -> direct reader
+[2026-07-17 22:24:39] [run_id=20260717T102031_1996_807598] [READ] NIS_2012_Hospital.SAV: 4,378 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 22:24:42] [run_id=20260717T102031_1996_807598] [OK] 8/52  NIS_Data_2010-2014/Hospital_Severity_DX_PR_GRPS/NIS_2012_Hospital/NIS_2012_Hospital.SAV -> NIS_Hospital (year=2012)
+[2026-07-17 22:24:42] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||Hospital||YEAR=2012||NIS_Data||NIS_Data_2010-2014/Hospital_Severity_DX_PR_GRPS/NIS_2012_Hospital/NIS_2012_Hospital.SAV||SOURCE=meta:298201:2018-04-26T21:13:18.000000Z: NIS_Hospital
+[2026-07-17 22:25:13] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2012_Severity.SAV -> direct reader
+[2026-07-17 22:25:13] [run_id=20260717T102031_1996_807598] [READ] NIS_2012_Severity.SAV: 7,296,968 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 22:26:05] [run_id=20260717T102031_1996_807598] [OK] 9/52  NIS_Data_2010-2014/Hospital_Severity_DX_PR_GRPS/NIS_2012_Severity/NIS_2012_Severity.SAV -> NIS_Severity (year=2012)
+[2026-07-17 22:26:06] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||Severity||YEAR=2012||NIS_Data||NIS_Data_2010-2014/Hospital_Severity_DX_PR_GRPS/NIS_2012_Severity/NIS_2012_Severity.SAV||SOURCE=meta:413369544:2018-04-26T21:36:13.000000Z: NIS_Severity
+[2026-07-17 22:27:45] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2013_DX_PR_GRPS.SAV -> direct reader
+[2026-07-17 22:27:45] [run_id=20260717T102031_1996_807598] [READ] NIS_2013_DX_PR_GRPS.SAV: 7,119,563 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 22:53:32] [run_id=20260717T102031_1996_807598] [OK] 10/52  NIS_Data_2010-2014/Hospital_Severity_DX_PR_GRPS/NIS_2013_DX_PR_GRPS/NIS_2013_DX_PR_GRPS.SAV -> NIS_DX_PR_GRPS (year=2013)
+[2026-07-17 22:53:33] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||DX_PR_GRPS||YEAR=2013||NIS_Data||NIS_Data_2010-2014/Hospital_Severity_DX_PR_GRPS/NIS_2013_DX_PR_GRPS/NIS_2013_DX_PR_GRPS.SAV||SOURCE=meta:751714155:2018-04-26T19:47:55.000000Z: NIS_DX_PR_GRPS
+[2026-07-17 22:53:38] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2013_Hospital.SAV -> direct reader
+[2026-07-17 22:53:38] [run_id=20260717T102031_1996_807598] [READ] NIS_2013_Hospital.SAV: 4,363 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 22:53:41] [run_id=20260717T102031_1996_807598] [OK] 11/52  NIS_Data_2010-2014/Hospital_Severity_DX_PR_GRPS/NIS_2013_Hospital/NIS_2013_Hospital.SAV -> NIS_Hospital (year=2013)
+[2026-07-17 22:53:42] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||Hospital||YEAR=2013||NIS_Data||NIS_Data_2010-2014/Hospital_Severity_DX_PR_GRPS/NIS_2013_Hospital/NIS_2013_Hospital.SAV||SOURCE=meta:296561:2018-04-26T21:12:16.000000Z: NIS_Hospital
+[2026-07-17 22:54:11] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2013_Severity.SAV -> direct reader
+[2026-07-17 22:54:11] [run_id=20260717T102031_1996_807598] [READ] NIS_2013_Severity.SAV: 7,119,563 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 22:55:30] [run_id=20260717T102031_1996_807598] [OK] 12/52  NIS_Data_2010-2014/Hospital_Severity_DX_PR_GRPS/NIS_2013_Severity/NIS_2013_Severity.SAV -> NIS_Severity (year=2013)
+[2026-07-17 22:55:31] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||Severity||YEAR=2013||NIS_Data||NIS_Data_2010-2014/Hospital_Severity_DX_PR_GRPS/NIS_2013_Severity/NIS_2013_Severity.SAV||SOURCE=meta:403349568:2018-04-26T21:23:35.000000Z: NIS_Severity
+[2026-07-17 22:57:19] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2014_DX_PR_GRPS.sav -> direct reader
+[2026-07-17 22:57:19] [run_id=20260717T102031_1996_807598] [READ] NIS_2014_DX_PR_GRPS.sav: 7,071,762 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 23:20:44] [run_id=20260717T102031_1996_807598] [OK] 13/52  NIS_Data_2010-2014/Hospital_Severity_DX_PR_GRPS/NIS_2014_DX_PR_GRPS/NIS_2014_DX_PR_GRPS.sav -> NIS_DX_PR_GRPS (year=2014)
+[2026-07-17 23:20:45] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||DX_PR_GRPS||YEAR=2014||NIS_Data||NIS_Data_2010-2014/Hospital_Severity_DX_PR_GRPS/NIS_2014_DX_PR_GRPS/NIS_2014_DX_PR_GRPS.sav||SOURCE=meta:817779936:2018-04-11T21:43:48.000000Z: NIS_DX_PR_GRPS
+[2026-07-17 23:20:50] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2014_Hospital.sav -> direct reader
+[2026-07-17 23:20:50] [run_id=20260717T102031_1996_807598] [READ] NIS_2014_Hospital.sav: 4,411 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 23:20:52] [run_id=20260717T102031_1996_807598] [OK] 14/52  NIS_Data_2010-2014/Hospital_Severity_DX_PR_GRPS/NIS_2014_Hospital/NIS_2014_Hospital.sav -> NIS_Hospital (year=2014)
+[2026-07-17 23:20:53] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||Hospital||YEAR=2014||NIS_Data||NIS_Data_2010-2014/Hospital_Severity_DX_PR_GRPS/NIS_2014_Hospital/NIS_2014_Hospital.sav||SOURCE=meta:299641:2018-04-11T21:50:38.000000Z: NIS_Hospital
+[2026-07-17 23:21:23] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2014_Severity.sav -> direct reader
+[2026-07-17 23:21:23] [run_id=20260717T102031_1996_807598] [READ] NIS_2014_Severity.sav: 7,071,762 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-17 23:22:13] [run_id=20260717T102031_1996_807598] [OK] 15/52  NIS_Data_2010-2014/Hospital_Severity_DX_PR_GRPS/NIS_2014_Severity/NIS_2014_Severity.sav -> NIS_Severity (year=2014)
+[2026-07-17 23:22:14] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||Severity||YEAR=2014||NIS_Data||NIS_Data_2010-2014/Hospital_Severity_DX_PR_GRPS/NIS_2014_Severity/NIS_2014_Severity.sav||SOURCE=meta:400870520:2018-04-11T21:59:06.000000Z: NIS_Severity
+[2026-07-17 23:28:37] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] Direct read unsuccessful for NIS_Core_2010.sav: Failed to parse X:/National Databases/NIS_Data/NIS_Data_2010-2014/NIS_SPSS_CORE_FILES_2010-2014/NIS_Core_2010.sav: File did not contain the expected number of rows. -- using chunked reader
+[2026-07-17 23:28:37] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_Core_2010.sav -> chunked reader
+[2026-07-17 23:28:37] [run_id=20260717T102031_1996_807598] [READ] NIS_Core_2010.sav: 7,800,441 rows -> chunked reader (PartitionBy=FAIL)
+[2026-07-17 23:28:39] [run_id=20260717T102031_1996_807598] [CHUNKED] NIS_Core_2010.sav (TerminalHivePartition=FALSE, chunk_size=4000000)
+[2026-07-17 23:28:39] [run_id=20260717T102031_1996_807598] [CHUNKED] ncases unavailable -- counting: NIS_Core_2010.sav
+[2026-07-17 23:29:41] [run_id=20260717T102031_1996_807598] [CHUNKED] NIS_Core_2010.sav: 7800441 rows
+[2026-07-17 23:37:22] [run_id=20260717T102031_1996_807598] [CHUNKED] NIS_Core_2010.sav chunk 1: 4000000 rows -> NIS_Core_2010_00001.parquet (chunk_size=4000000)
+[2026-07-17 23:45:12] [run_id=20260717T102031_1996_807598] [CHUNKED] NIS_Core_2010.sav chunk 2: 3800441 rows -> NIS_Core_2010_00002.parquet (chunk_size=4000000)
+[2026-07-17 23:45:12] [run_id=20260717T102031_1996_807598] [OK] 16/52  NIS_Data_2010-2014/NIS_SPSS_CORE_FILES_2010-2014/NIS_Core_2010.sav -> NIS_Core (year=2010, 7800441 rows)
+[2026-07-17 23:45:13] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||Core||YEAR=2010||NIS_Data||NIS_Data_2010-2014/NIS_SPSS_CORE_FILES_2010-2014/NIS_Core_2010.sav||SOURCE=meta:3045100511:2018-05-09T15:57:47.000000Z: NIS_Core
+[2026-07-17 23:56:32] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_Core_2011.sav -> direct reader
+[2026-07-17 23:56:32] [run_id=20260717T102031_1996_807598] [READ] NIS_Core_2011.sav: 8,023,590 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-18 00:03:43] [run_id=20260717T102031_1996_807598] [OK] 17/52  NIS_Data_2010-2014/NIS_SPSS_CORE_FILES_2010-2014/NIS_Core_2011.sav -> NIS_Core (year=2011)
+[2026-07-18 00:03:43] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||Core||YEAR=2011||NIS_Data||NIS_Data_2010-2014/NIS_SPSS_CORE_FILES_2010-2014/NIS_Core_2011.sav||SOURCE=meta:3188338807:2018-05-08T18:31:55.000000Z: NIS_Core
+[2026-07-18 00:12:22] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_Core_2012.sav -> direct reader
+[2026-07-18 00:12:22] [run_id=20260717T102031_1996_807598] [READ] NIS_Core_2012.sav: 7,296,968 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-18 00:18:45] [run_id=20260717T102031_1996_807598] [OK] 18/52  NIS_Data_2010-2014/NIS_SPSS_CORE_FILES_2010-2014/NIS_Core_2012.sav -> NIS_Core (year=2012)
+[2026-07-18 00:18:45] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||Core||YEAR=2012||NIS_Data||NIS_Data_2010-2014/NIS_SPSS_CORE_FILES_2010-2014/NIS_Core_2012.sav||SOURCE=meta:2432295198:2018-05-16T20:24:57.000000Z: NIS_Core
+[2026-07-18 00:27:17] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_Core_2013.sav -> direct reader
+[2026-07-18 00:27:17] [run_id=20260717T102031_1996_807598] [READ] NIS_Core_2013.sav: 7,119,563 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-18 00:35:04] [run_id=20260717T102031_1996_807598] [OK] 19/52  NIS_Data_2010-2014/NIS_SPSS_CORE_FILES_2010-2014/NIS_Core_2013.sav -> NIS_Core (year=2013)
+[2026-07-18 00:35:06] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||Core||YEAR=2013||NIS_Data||NIS_Data_2010-2014/NIS_SPSS_CORE_FILES_2010-2014/NIS_Core_2013.sav||SOURCE=meta:2395000485:2018-05-16T21:06:28.000000Z: NIS_Core
+[2026-07-18 00:45:20] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_Core_2014.sav -> direct reader
+[2026-07-18 00:45:20] [run_id=20260717T102031_1996_807598] [READ] NIS_Core_2014.sav: 7,071,762 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-18 00:52:22] [run_id=20260717T102031_1996_807598] [OK] 20/52  NIS_Data_2010-2014/NIS_SPSS_CORE_FILES_2010-2014/NIS_Core_2014.sav -> NIS_Core (year=2014)
+[2026-07-18 00:52:23] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||Core||YEAR=2014||NIS_Data||NIS_Data_2010-2014/NIS_SPSS_CORE_FILES_2010-2014/NIS_Core_2014.sav||SOURCE=meta:2503346672:2018-06-04T18:11:49.000000Z: NIS_Core
+[2026-07-18 01:02:37] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2016_Core.SAV -> direct reader
+[2026-07-18 01:02:37] [run_id=20260717T102031_1996_807598] [READ] NIS_2016_Core.SAV: 7,135,090 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-18 01:08:42] [run_id=20260717T102031_1996_807598] [OK] 21/52  NIS_Data_2016-2018/NIS_2016/NIS_2016_Core extracted/NIS_2016_Core.SAV -> NIS_Core (year=2016)
+[2026-07-18 01:08:43] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||Core||YEAR=2016||NIS_Data||NIS_Data_2016-2018/NIS_2016/NIS_2016_Core extracted/NIS_2016_Core.SAV||SOURCE=meta:1926981696:2022-12-16T23:37:41.000000Z: NIS_Core
+[2026-07-18 01:08:44] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2016_Hospital.SAV -> direct reader
+[2026-07-18 01:08:44] [run_id=20260717T102031_1996_807598] [READ] NIS_2016_Hospital.SAV: 4,575 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-18 01:08:47] [run_id=20260717T102031_1996_807598] [OK] 22/52  NIS_Data_2016-2018/NIS_2016/NIS_2016_Hospital/NIS_2016_Hospital.SAV -> NIS_Hospital (year=2016)
+[2026-07-18 01:08:48] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||Hospital||YEAR=2016||NIS_Data||NIS_Data_2016-2018/NIS_2016/NIS_2016_Hospital/NIS_2016_Hospital.SAV||SOURCE=meta:311289:2021-06-11T19:04:15.000000Z: NIS_Hospital
+[2026-07-18 01:08:56] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2016_Severity.SAV -> direct reader
+[2026-07-18 01:08:56] [run_id=20260717T102031_1996_807598] [READ] NIS_2016_Severity.SAV: 7,135,090 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-18 01:09:42] [run_id=20260717T102031_1996_807598] [OK] 23/52  NIS_Data_2016-2018/NIS_2016/NIS_2016_Severity/NIS_2016_Severity.SAV -> NIS_Severity (year=2016)
+[2026-07-18 01:09:42] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||Severity||YEAR=2016||NIS_Data||NIS_Data_2016-2018/NIS_2016/NIS_2016_Severity/NIS_2016_Severity.SAV||SOURCE=meta:197697998:2021-06-11T19:09:37.000000Z: NIS_Severity
+[2026-07-18 01:22:06] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2017_Core.SAV -> direct reader
+[2026-07-18 01:22:06] [run_id=20260717T102031_1996_807598] [READ] NIS_2017_Core.SAV: 7,159,694 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-18 01:24:37] [run_id=20260717T102031_1996_807598] [WRITE RETRY] Write attempt 1 failed: IOError: Error writing bytes to file. Detail: [errno 22] Invalid argument
+[2026-07-18 01:24:37] [run_id=20260717T102031_1996_807598] [WRITE RETRY] Attempt 2/3 after 10s pause: NIS_2017_Core_SAV.parquet
+[2026-07-18 01:30:07] [run_id=20260717T102031_1996_807598] [OK] 24/52  NIS_Data_2016-2018/NIS_2017/NIS_2017_Core/NIS_2017_Core.SAV -> NIS_Core (year=2017)
+[2026-07-18 01:30:08] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||Core||YEAR=2017||NIS_Data||NIS_Data_2016-2018/NIS_2017/NIS_2017_Core/NIS_2017_Core.SAV||SOURCE=meta:2147615965:2022-12-19T15:51:25.897891Z: NIS_Core
+[2026-07-18 01:30:09] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2017_Hospital.SAV -> direct reader
+[2026-07-18 01:30:09] [run_id=20260717T102031_1996_807598] [READ] NIS_2017_Hospital.SAV: 4,584 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-18 01:30:12] [run_id=20260717T102031_1996_807598] [OK] 25/52  NIS_Data_2016-2018/NIS_2017/NIS_2017_Hospital/NIS_2017_Hospital.SAV -> NIS_Hospital (year=2017)
+[2026-07-18 01:30:12] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||Hospital||YEAR=2017||NIS_Data||NIS_Data_2016-2018/NIS_2017/NIS_2017_Hospital/NIS_2017_Hospital.SAV||SOURCE=meta:311321:2021-06-11T19:09:38.000000Z: NIS_Hospital
+[2026-07-18 01:30:20] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2017_Severity.SAV -> direct reader
+[2026-07-18 01:30:20] [run_id=20260717T102031_1996_807598] [READ] NIS_2017_Severity.SAV: 7,159,694 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-18 01:31:05] [run_id=20260717T102031_1996_807598] [OK] 26/52  NIS_Data_2016-2018/NIS_2017/NIS_2017_Severity/NIS_2017_Severity.SAV -> NIS_Severity (year=2017)
+[2026-07-18 01:31:05] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||Severity||YEAR=2017||NIS_Data||NIS_Data_2016-2018/NIS_2017/NIS_2017_Severity/NIS_2017_Severity.SAV||SOURCE=meta:198226542:2021-06-11T19:13:19.000000Z: NIS_Severity
+[2026-07-18 01:42:50] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2018_Core.SAV -> direct reader
+[2026-07-18 01:42:50] [run_id=20260717T102031_1996_807598] [READ] NIS_2018_Core.SAV: 7,105,498 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-18 01:49:50] [run_id=20260717T102031_1996_807598] [OK] 27/52  NIS_Data_2016-2018/NIS_2018/NIS_2018_Core/NIS_2018_Core.SAV -> NIS_Core (year=2018)
+[2026-07-18 01:49:51] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||Core||YEAR=2018||NIS_Data||NIS_Data_2016-2018/NIS_2018/NIS_2018_Core/NIS_2018_Core.SAV||SOURCE=meta:2107656835:2022-12-19T16:19:28.000000Z: NIS_Core
+[2026-07-18 02:07:48] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2018_DX_PR_GRPS.SAV -> direct reader
+[2026-07-18 02:07:48] [run_id=20260717T102031_1996_807598] [READ] NIS_2018_DX_PR_GRPS.SAV: 7,105,498 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-18 02:33:45] [run_id=20260717T102031_1996_807598] [OK] 28/52  NIS_Data_2016-2018/NIS_2018/NIS_2018_DX_PR_GRPS/NIS_2018_DX_PR_GRPS.SAV -> NIS_DX_PR_GRPS (year=2018)
+[2026-07-18 02:33:46] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||DX_PR_GRPS||YEAR=2018||NIS_Data||NIS_Data_2016-2018/NIS_2018/NIS_2018_DX_PR_GRPS/NIS_2018_DX_PR_GRPS.SAV||SOURCE=meta:4092869183:2021-06-11T19:32:20.000000Z: NIS_DX_PR_GRPS
+[2026-07-18 02:33:51] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2018_Hospital.SAV -> direct reader
+[2026-07-18 02:33:51] [run_id=20260717T102031_1996_807598] [READ] NIS_2018_Hospital.SAV: 4,550 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-18 02:33:54] [run_id=20260717T102031_1996_807598] [OK] 29/52  NIS_Data_2016-2018/NIS_2018/NIS_2018_Hospital/NIS_2018_Hospital.SAV -> NIS_Hospital (year=2018)
+[2026-07-18 02:33:55] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||Hospital||YEAR=2018||NIS_Data||NIS_Data_2016-2018/NIS_2018/NIS_2018_Hospital/NIS_2018_Hospital.SAV||SOURCE=meta:307385:2021-06-11T19:16:02.000000Z: NIS_Hospital
+[2026-07-18 02:34:03] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2018_Severity.SAV -> direct reader
+[2026-07-18 02:34:03] [run_id=20260717T102031_1996_807598] [READ] NIS_2018_Severity.SAV: 7,105,498 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-18 02:34:47] [run_id=20260717T102031_1996_807598] [OK] 30/52  NIS_Data_2016-2018/NIS_2018/NIS_2018_Severity/NIS_2018_Severity.SAV -> NIS_Severity (year=2018)
+[2026-07-18 02:34:48] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||Severity||YEAR=2018||NIS_Data||NIS_Data_2016-2018/NIS_2018/NIS_2018_Severity/NIS_2018_Severity.SAV||SOURCE=meta:196664310:2021-06-11T19:18:39.000000Z: NIS_Severity
+[2026-07-18 02:46:19] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2019_Core.sav -> direct reader
+[2026-07-18 02:46:19] [run_id=20260717T102031_1996_807598] [READ] NIS_2019_Core.sav: 7,083,805 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-18 02:52:19] [run_id=20260717T102031_1996_807598] [OK] 31/52  NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2019/NIS_2019_Core.sav -> NIS_Core (year=2019)
+[2026-07-18 02:52:20] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||Core||YEAR=2019||NIS_Data||NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2019/NIS_2019_Core.sav||SOURCE=meta:2112518683:2024-06-25T19:43:18.537637Z: NIS_Core
+[2026-07-18 03:00:28] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] Direct read unsuccessful for NIS_2019_DX_PR_GRPS.SAV: Failed to parse X:/National Databases/NIS_Data/NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2019/NIS_2019_DX_PR_GRPS.SAV: File did not contain the expected number of rows. -- using chunked reader
+[2026-07-18 03:00:28] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2019_DX_PR_GRPS.SAV -> chunked reader
+[2026-07-18 03:00:28] [run_id=20260717T102031_1996_807598] [READ] NIS_2019_DX_PR_GRPS.SAV: unknown rows -> chunked reader (PartitionBy=FAIL)
+[2026-07-18 03:00:30] [run_id=20260717T102031_1996_807598] [CHUNKED] NIS_2019_DX_PR_GRPS.SAV (TerminalHivePartition=FALSE, chunk_size=4000000)
+[2026-07-18 03:00:30] [run_id=20260717T102031_1996_807598] [CHUNKED] ncases unavailable -- counting: NIS_2019_DX_PR_GRPS.SAV
+[2026-07-18 03:01:00] [run_id=20260717T102031_1996_807598] [CHUNKED] Cannot determine row count -- switching to EOF-based chunking: NIS_2019_DX_PR_GRPS.SAV
+[2026-07-18 03:07:46] [run_id=20260717T102031_1996_807598] [CHUNKED] NIS_2019_DX_PR_GRPS.SAV: chunk 1 failed at chunk_size=4000000 (Failed to parse X:/National Databases/NIS_Data/NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2019/NIS_2019_DX_PR_GRPS.SAV: File did not contain the expected number of rows.) -- reducing to 3600000 rows for the remainder of this file and retrying
+[2026-07-18 03:20:37] [run_id=20260717T102031_1996_807598] [CHUNKED WRITE RETRY] Chunk write attempt 1 failed: IOError: Error writing bytes to file. Detail: [errno 22] Invalid argument
+[2026-07-18 03:20:37] [run_id=20260717T102031_1996_807598] [CHUNKED WRITE RETRY] Attempt 2/3 after 10s: NIS_2019_DX_PR_GRPS_00001.parquet
+[2026-07-18 03:31:53] [run_id=20260717T102031_1996_807598] [CHUNKED] NIS_2019_DX_PR_GRPS.SAV chunk 1: 3600000 rows -> NIS_2019_DX_PR_GRPS_00001.parquet (chunk_size=3600000)
+[2026-07-18 03:32:51] [run_id=20260717T102031_1996_807598] [CHUNKED] NIS_2019_DX_PR_GRPS.SAV chunk 2: skip=3600000 exceeds declared ncases -- switching to foreign::read.spss() for tail read
+[2026-07-18 03:48:47] [run_id=20260717T102031_1996_807598] [CHUNKED] NIS_2019_DX_PR_GRPS.SAV tail chunk: 3483805 rows written via foreign::read.spss() -> NIS_2019_DX_PR_GRPS_00002.parquet
+[2026-07-18 03:48:47] [run_id=20260717T102031_1996_807598] [CHUNKED] NIS_2019_DX_PR_GRPS.SAV: completed using reduced chunk_size=3600000 (original=4000000). This reduction applies only to this file.
+[2026-07-18 03:48:47] [run_id=20260717T102031_1996_807598] [WARN] file=NIS_2019_DX_PR_GRPS.SAV | issue=ncases_unavailable_eof_chunking_used | declared_ncases=NA | rows_written=7083805 | The SPSS header ncases was unavailable or misreported. The file may be truncated -- verify against HCUP documentation or re-download.
+[2026-07-18 03:48:52] [run_id=20260717T102031_1996_807598] [OK] 32/52  NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2019/NIS_2019_DX_PR_GRPS.SAV -> NIS_DX_PR_GRPS (year=2019, 7083805 rows)
+[2026-07-18 03:48:53] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||DX_PR_GRPS||YEAR=2019||NIS_Data||NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2019/NIS_2019_DX_PR_GRPS.SAV||SOURCE=meta:3565867008:2024-06-25T20:39:33.519556Z: NIS_DX_PR_GRPS
+[2026-07-18 03:48:54] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2019_Hospital.SAV -> direct reader
+[2026-07-18 03:48:54] [run_id=20260717T102031_1996_807598] [READ] NIS_2019_Hospital.SAV: 4,568 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-18 03:48:57] [run_id=20260717T102031_1996_807598] [OK] 33/52  NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2019/NIS_2019_Hospital.SAV -> NIS_Hospital (year=2019)
+[2026-07-18 03:48:58] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||Hospital||YEAR=2019||NIS_Data||NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2019/NIS_2019_Hospital.SAV||SOURCE=meta:305705:2024-06-26T15:09:22.987472Z: NIS_Hospital
+[2026-07-18 03:49:06] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2019_Severity.SAV -> direct reader
+[2026-07-18 03:49:06] [run_id=20260717T102031_1996_807598] [READ] NIS_2019_Severity.SAV: 7,083,805 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-18 03:49:53] [run_id=20260717T102031_1996_807598] [OK] 34/52  NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2019/NIS_2019_Severity.SAV -> NIS_Severity (year=2019)
+[2026-07-18 03:49:54] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||Severity||YEAR=2019||NIS_Data||NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2019/NIS_2019_Severity.SAV||SOURCE=meta:196127062:2024-07-11T18:12:41.512807Z: NIS_Severity
+[2026-07-18 04:00:30] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2020_Core.sav -> direct reader
+[2026-07-18 04:00:30] [run_id=20260717T102031_1996_807598] [READ] NIS_2020_Core.sav: 6,471,165 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-18 04:06:11] [run_id=20260717T102031_1996_807598] [OK] 35/52  NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2020/NIS_2020_Core.sav -> NIS_Core (year=2020)
+[2026-07-18 04:06:11] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||Core||YEAR=2020||NIS_Data||NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2020/NIS_2020_Core.sav||SOURCE=meta:1973351971:2024-06-26T15:19:21.000000Z: NIS_Core
+[2026-07-18 04:06:48] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2020_DX_PR_GRPS.SAV -> direct reader
+[2026-07-18 04:06:48] [run_id=20260717T102031_1996_807598] [READ] NIS_2020_DX_PR_GRPS.SAV: 253,338 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-18 04:07:43] [run_id=20260717T102031_1996_807598] [OK] 36/52  NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2020/NIS_2020_DX_PR_GRPS.SAV -> NIS_DX_PR_GRPS (year=2020)
+[2026-07-18 04:07:44] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||DX_PR_GRPS||YEAR=2020||NIS_Data||NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2020/NIS_2020_DX_PR_GRPS.SAV||SOURCE=meta:247222272:2024-06-26T16:23:53.000000Z: NIS_DX_PR_GRPS
+[2026-07-18 04:07:45] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2020_Hospital.SAV -> direct reader
+[2026-07-18 04:07:45] [run_id=20260717T102031_1996_807598] [READ] NIS_2020_Hospital.SAV: 4,580 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-18 04:07:47] [run_id=20260717T102031_1996_807598] [OK] 37/52  NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2020/NIS_2020_Hospital.SAV -> NIS_Hospital (year=2020)
+[2026-07-18 04:07:48] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||Hospital||YEAR=2020||NIS_Data||NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2020/NIS_2020_Hospital.SAV||SOURCE=meta:309513:2024-06-26T17:23:19.000000Z: NIS_Hospital
+[2026-07-18 04:07:55] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2020_Severity.SAV -> direct reader
+[2026-07-18 04:07:55] [run_id=20260717T102031_1996_807598] [READ] NIS_2020_Severity.SAV: 6,471,165 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-18 04:08:34] [run_id=20260717T102031_1996_807598] [OK] 38/52  NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2020/NIS_2020_Severity.SAV -> NIS_Severity (year=2020)
+[2026-07-18 04:08:35] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||Severity||YEAR=2020||NIS_Data||NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2020/NIS_2020_Severity.SAV||SOURCE=meta:178446878:2024-06-26T19:02:18.000000Z: NIS_Severity
+[2026-07-18 04:19:20] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2021_Core.sav -> direct reader
+[2026-07-18 04:19:20] [run_id=20260717T102031_1996_807598] [READ] NIS_2021_Core.sav: 6,666,752 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-18 04:25:05] [run_id=20260717T102031_1996_807598] [OK] 39/52  NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2021/NIS_2021_Core.sav -> NIS_Core (year=2021)
+[2026-07-18 04:25:06] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||Core||YEAR=2021||NIS_Data||NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2021/NIS_2021_Core.sav||SOURCE=meta:2057917147:2024-06-25T20:10:05.000000Z: NIS_Core
+[2026-07-18 04:40:10] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2021_DX_PR_GRPS.SAV -> direct reader
+[2026-07-18 04:40:10] [run_id=20260717T102031_1996_807598] [READ] NIS_2021_DX_PR_GRPS.SAV: 6,666,752 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-18 05:05:26] [run_id=20260717T102031_1996_807598] [OK] 40/52  NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2021/NIS_2021_DX_PR_GRPS.SAV -> NIS_DX_PR_GRPS (year=2021)
+[2026-07-18 05:05:26] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||DX_PR_GRPS||YEAR=2021||NIS_Data||NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2021/NIS_2021_DX_PR_GRPS.SAV||SOURCE=meta:6520253683:2024-06-26T19:18:54.000000Z: NIS_DX_PR_GRPS
+[2026-07-18 05:05:33] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2021_Hospital.SAV -> direct reader
+[2026-07-18 05:05:33] [run_id=20260717T102031_1996_807598] [READ] NIS_2021_Hospital.SAV: 4,558 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-18 05:05:35] [run_id=20260717T102031_1996_807598] [OK] 41/52  NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2021/NIS_2021_Hospital.SAV -> NIS_Hospital (year=2021)
+[2026-07-18 05:05:36] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||Hospital||YEAR=2021||NIS_Data||NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2021/NIS_2021_Hospital.SAV||SOURCE=meta:307721:2024-06-26T19:20:55.000000Z: NIS_Hospital
+[2026-07-18 05:11:38] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2021_Misc.sav -> direct reader
+[2026-07-18 05:11:38] [run_id=20260717T102031_1996_807598] [READ] NIS_2021_Misc.sav: 6,666,752 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-18 05:13:29] [run_id=20260717T102031_1996_807598] [OK] 42/52  NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2021/NIS_2021_Misc.sav -> NIS_Misc (year=2021)
+[2026-07-18 05:13:30] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||Misc||YEAR=2021||NIS_Data||NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2021/NIS_2021_Misc.sav||SOURCE=meta:4559051450:2026-05-26T16:47:54.000000Z: NIS_Misc
+[2026-07-18 05:13:38] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2021_Severity.SAV -> direct reader
+[2026-07-18 05:13:38] [run_id=20260717T102031_1996_807598] [READ] NIS_2021_Severity.SAV: 6,666,752 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-18 05:14:21] [run_id=20260717T102031_1996_807598] [OK] 43/52  NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2021/NIS_2021_Severity.SAV -> NIS_Severity (year=2021)
+[2026-07-18 05:14:21] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||Severity||YEAR=2021||NIS_Data||NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2021/NIS_2021_Severity.SAV||SOURCE=meta:183372454:2024-06-26T19:24:42.000000Z: NIS_Severity
+[2026-07-18 05:16:38] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] Direct read unsuccessful for NIS_2022_Core.SAV: Failed to parse X:/National Databases/NIS_Data/NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2022/NIS_2022_Core.SAV: File did not contain the expected number of rows. -- using chunked reader
+[2026-07-18 05:16:38] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2022_Core.SAV -> chunked reader
+[2026-07-18 05:16:38] [run_id=20260717T102031_1996_807598] [READ] NIS_2022_Core.SAV: 6,578,372 rows -> chunked reader (PartitionBy=FAIL)
+[2026-07-18 05:16:40] [run_id=20260717T102031_1996_807598] [CHUNKED] NIS_2022_Core.SAV (TerminalHivePartition=FALSE, chunk_size=4000000)
+[2026-07-18 05:16:40] [run_id=20260717T102031_1996_807598] [CHUNKED] ncases unavailable -- counting: NIS_2022_Core.SAV
+[2026-07-18 05:17:14] [run_id=20260717T102031_1996_807598] [CHUNKED] NIS_2022_Core.SAV: 6578372 rows
+[2026-07-18 05:25:49] [run_id=20260717T102031_1996_807598] [CHUNKED] NIS_2022_Core.SAV chunk 1: 4000000 rows -> NIS_2022_Core_00001.parquet (chunk_size=4000000)
+[2026-07-18 05:31:20] [run_id=20260717T102031_1996_807598] [CHUNKED] NIS_2022_Core.SAV chunk 2: 2578372 rows -> NIS_2022_Core_00002.parquet (chunk_size=4000000)
+[2026-07-18 05:31:20] [run_id=20260717T102031_1996_807598] [OK] 44/52  NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2022/NIS_2022_Core.SAV -> NIS_Core (year=2022, 6578372 rows)
+[2026-07-18 05:31:21] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||Core||YEAR=2022||NIS_Data||NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2022/NIS_2022_Core.SAV||SOURCE=meta:2043669891:2026-04-28T16:26:09.000000Z: NIS_Core
+[2026-07-18 05:47:55] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2022_DX_PR_GRPS.SAV -> direct reader
+[2026-07-18 05:47:55] [run_id=20260717T102031_1996_807598] [READ] NIS_2022_DX_PR_GRPS.SAV: 6,578,372 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-18 06:09:55] [run_id=20260717T102031_1996_807598] [OK] 45/52  NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2022/NIS_2022_DX_PR_GRPS.SAV -> NIS_DX_PR_GRPS (year=2022)
+[2026-07-18 06:09:56] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||DX_PR_GRPS||YEAR=2022||NIS_Data||NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2022/NIS_2022_DX_PR_GRPS.SAV||SOURCE=meta:6393450003:2026-05-18T16:16:59.000000Z: NIS_DX_PR_GRPS
+[2026-07-18 06:15:55] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2022_Misc.SAV -> direct reader
+[2026-07-18 06:15:55] [run_id=20260717T102031_1996_807598] [READ] NIS_2022_Misc.SAV: 6,578,372 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-18 06:17:41] [run_id=20260717T102031_1996_807598] [OK] 46/52  NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2022/NIS_2022_Misc.SAV -> NIS_Misc (year=2022)
+[2026-07-18 06:17:42] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||Misc||YEAR=2022||NIS_Data||NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2022/NIS_2022_Misc.SAV||SOURCE=meta:4506079058:2026-05-26T20:05:39.000000Z: NIS_Misc
+[2026-07-18 06:28:28] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2023_Core.SAV -> direct reader
+[2026-07-18 06:28:28] [run_id=20260717T102031_1996_807598] [READ] NIS_2023_Core.SAV: 6,743,716 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-18 06:34:31] [run_id=20260717T102031_1996_807598] [OK] 47/52  NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2023/NIS_2023_Core.SAV -> NIS_Core (year=2023)
+[2026-07-18 06:34:32] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||Core||YEAR=2023||NIS_Data||NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2023/NIS_2023_Core.SAV||SOURCE=meta:2036942852:2026-04-28T19:58:05.000000Z: NIS_Core
+[2026-07-18 06:51:24] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2023_DX_Long.SAV -> direct reader
+[2026-07-18 06:51:24] [run_id=20260717T102031_1996_807598] [READ] NIS_2023_DX_Long.SAV: 269,748,640 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-18 06:57:41] [run_id=20260717T102031_1996_807598] [OK] 48/52  NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2023/NIS_2023_DX_Long.SAV -> NIS_DX_Long (year=2023)
+[2026-07-18 06:57:41] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||DX_Long||YEAR=2023||NIS_Data||NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2023/NIS_2023_DX_Long.SAV||SOURCE=meta:6868930700:2026-05-12T21:52:24.577730Z: NIS_DX_Long
+[2026-07-18 07:12:37] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] Direct read unsuccessful for NIS_2023_DX_PR_GRPS.SAV: Failed to parse X:/National Databases/NIS_Data/NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2023/NIS_2023_DX_PR_GRPS.SAV: File did not contain the expected number of rows. -- using chunked reader
+[2026-07-18 07:12:37] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2023_DX_PR_GRPS.SAV -> chunked reader
+[2026-07-18 07:12:37] [run_id=20260717T102031_1996_807598] [READ] NIS_2023_DX_PR_GRPS.SAV: 6,743,716 rows -> chunked reader (PartitionBy=FAIL)
+[2026-07-18 07:12:41] [run_id=20260717T102031_1996_807598] [CHUNKED] NIS_2023_DX_PR_GRPS.SAV (TerminalHivePartition=FALSE, chunk_size=4000000)
+[2026-07-18 07:12:41] [run_id=20260717T102031_1996_807598] [CHUNKED] ncases unavailable -- counting: NIS_2023_DX_PR_GRPS.SAV
+[2026-07-18 07:15:05] [run_id=20260717T102031_1996_807598] [CHUNKED] NIS_2023_DX_PR_GRPS.SAV: 6743716 rows
+[2026-07-18 07:37:03] [run_id=20260717T102031_1996_807598] [CHUNKED] NIS_2023_DX_PR_GRPS.SAV chunk 1: 4000000 rows -> NIS_2023_DX_PR_GRPS_00001.parquet (chunk_size=4000000)
+[2026-07-18 07:52:57] [run_id=20260717T102031_1996_807598] [CHUNKED] NIS_2023_DX_PR_GRPS.SAV chunk 2: 2743716 rows -> NIS_2023_DX_PR_GRPS_00002.parquet (chunk_size=4000000)
+[2026-07-18 07:52:59] [run_id=20260717T102031_1996_807598] [OK] 49/52  NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2023/NIS_2023_DX_PR_GRPS.SAV -> NIS_DX_PR_GRPS (year=2023, 6743716 rows)
+[2026-07-18 07:52:59] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||DX_PR_GRPS||YEAR=2023||NIS_Data||NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2023/NIS_2023_DX_PR_GRPS.SAV||SOURCE=meta:6998227240:2026-04-28T23:24:23.000000Z: NIS_DX_PR_GRPS
+[2026-07-18 07:53:00] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2023_Hospital.SAV -> direct reader
+[2026-07-18 07:53:00] [run_id=20260717T102031_1996_807598] [READ] NIS_2023_Hospital.SAV: 4,181 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-18 07:53:03] [run_id=20260717T102031_1996_807598] [OK] 50/52  NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2023/NIS_2023_Hospital.SAV -> NIS_Hospital (year=2023)
+[2026-07-18 07:53:04] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||Hospital||YEAR=2023||NIS_Data||NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2023/NIS_2023_Hospital.SAV||SOURCE=meta:252853:2026-04-29T19:43:07.719135Z: NIS_Hospital
+[2026-07-18 07:58:04] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2023_MISC.SAV -> direct reader
+[2026-07-18 07:58:04] [run_id=20260717T102031_1996_807598] [READ] NIS_2023_MISC.SAV: 6,743,716 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-18 08:00:03] [run_id=20260717T102031_1996_807598] [OK] 51/52  NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2023/NIS_2023_MISC.SAV -> NIS_Misc (year=2023)
+[2026-07-18 08:00:03] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||Misc||YEAR=2023||NIS_Data||NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2023/NIS_2023_MISC.SAV||SOURCE=meta:3843904473:2026-05-26T20:08:33.747262Z: NIS_Misc
+[2026-07-18 08:00:11] [run_id=20260717T102031_1996_807598] [LOAD CHECK COMPLETE] NIS_2023_Severity.SAV -> direct reader
+[2026-07-18 08:00:11] [run_id=20260717T102031_1996_807598] [READ] NIS_2023_Severity.SAV: 6,743,716 rows -> direct reader (PartitionBy=FAIL)
+[2026-07-18 08:00:55] [run_id=20260717T102031_1996_807598] [OK] 52/52  NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2023/NIS_2023_Severity.SAV -> NIS_Severity (year=2023)
+[2026-07-18 08:00:55] [run_id=20260717T102031_1996_807598] [CHECKPOINT] NIS||Severity||YEAR=2023||NIS_Data||NIS_data_2019-2023/Unzipped Files/NIS_data_2019-2023/NIS_2023/NIS_2023_Severity.SAV||SOURCE=meta:184543766:2026-04-29T19:44:00.500093Z: NIS_Severity
+[2026-07-18 08:00:56] [run_id=20260717T102031_1996_807598] NIS complete. Checkpoint size: 94
+[2026-07-18 08:00:56] [run_id=20260717T102031_1996_807598] === Loading NISBishoy ===
+[2026-07-18 08:00:58] [run_id=20260717T102031_1996_807598] [PARTITION ROUTE] NIS_2020_2023_FULL.csv contains all configured partition columns; rows will stream directly to their source-defined Hive partitions.
+[2026-07-18 08:03:24] [run_id=20260717T102031_1996_807598] [READ] NIS_2020_2023_FULL.csv: 21,822,950 rows -> chunked reader (PartitionBy=FAIL)
+[2026-07-18 08:05:53] [run_id=20260717T102031_1996_807598] [CHUNKED-DELIM] NIS_2020_2023_FULL.csv: 21,822,950 rows (chunk_size=4000000)
+[2026-07-20 07:23:23] [run_id=20260720T072206_17012_640352] Parallel workers available: 15 (scoped per scan)
+[2026-07-20 07:23:23] [run_id=20260720T072206_17012_640352] [PREFLIGHT] Skipped inside loader (RunPreflight = FALSE) -- caller is responsible for having run ValidateMDTPreflight.
+[2026-07-20 07:23:24] [run_id=20260720T072206_17012_640352] [LOCK] Stale lock detected (heartbeat 2838 min old, holder: PCMC400005437 | 1996 | 2026-07-17 11:13:43 | ParquetBackEndCreate) -- claiming it for takeover.
+[2026-07-20 07:23:24] [run_id=20260720T072206_17012_640352] [LOCK] Acquired repository lock after stale takeover: X:/Brendan/NationalDatabases/formattedDatabases/.repository.lock (PCMC400005437 | 17012 | 2026-07-20 07:23:23 | ParquetBackEndCreate)
+[2026-07-20 07:23:35] [run_id=20260720T072206_17012_640352] [SNAPSHOT] Saved 4/4 state file(s) to X:/Brendan/NationalDatabases/formattedDatabases/StateBackups/20260720_072335
+[2026-07-20 07:23:38] [run_id=20260720T072206_17012_640352] [SCHEMA CATALOG] Using reviewed column types from X:/Brendan/NationalDatabases/formattedDatabases/Schema/TableSchemas.xlsx.
+[2026-07-20 07:23:38] [run_id=20260720T072206_17012_640352] === Building schema: NEDS ===
+[2026-07-20 07:23:39] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 5 item(s) to 5 worker(s).
+[2026-07-20 07:23:46] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 5/5 item(s) completed in parallel.
+[2026-07-20 07:23:46] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 7 item(s) to 7 worker(s).
+[2026-07-20 07:23:55] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-20 07:23:55] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 5 item(s) to 5 worker(s).
+[2026-07-20 07:24:02] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 5/5 item(s) completed in parallel.
+[2026-07-20 07:24:02] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 5 item(s) to 5 worker(s).
+[2026-07-20 07:24:10] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 5/5 item(s) completed in parallel.
+[2026-07-20 07:24:10] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 4 item(s) to 4 worker(s).
+[2026-07-20 07:24:16] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 4/4 item(s) completed in parallel.
+[2026-07-20 07:24:16] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 4 item(s) to 4 worker(s).
+[2026-07-20 07:24:23] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 4/4 item(s) completed in parallel.
+[2026-07-20 07:24:23] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 5 item(s) to 5 worker(s).
+[2026-07-20 07:24:30] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 5/5 item(s) completed in parallel.
+[2026-07-20 07:24:30] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 6 item(s) to 6 worker(s).
+[2026-07-20 07:24:38] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 6/6 item(s) completed in parallel.
+[2026-07-20 07:24:39] [run_id=20260720T072206_17012_640352] [SCAN PROGRESS] schema header inference: starting serial scan of 1 item(s).
+[2026-07-20 07:24:39] [run_id=20260720T072206_17012_640352] [SCAN PROGRESS] schema header inference: 1/1 complete (100.0%); elapsed 0s; ETA 0s.
+[2026-07-20 07:24:39] [run_id=20260720T072206_17012_640352] === Building schema: NIS ===
+[2026-07-20 07:24:39] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 13 item(s) to 13 worker(s).
+[2026-07-20 07:24:50] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 13/13 item(s) completed in parallel.
+[2026-07-20 07:24:50] [run_id=20260720T072206_17012_640352] [SCAN PROGRESS] schema header inference: starting serial scan of 1 item(s).
+[2026-07-20 07:24:50] [run_id=20260720T072206_17012_640352] [SCAN PROGRESS] schema header inference: 1/1 complete (100.0%); elapsed 0s; ETA 0s.
+[2026-07-20 07:24:50] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 11 item(s) to 11 worker(s).
+[2026-07-20 07:25:00] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 11/11 item(s) completed in parallel.
+[2026-07-20 07:25:01] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 12 item(s) to 12 worker(s).
+[2026-07-20 07:25:10] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 12/12 item(s) completed in parallel.
+[2026-07-20 07:25:10] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 3 item(s) to 3 worker(s).
+[2026-07-20 07:25:16] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 3/3 item(s) completed in parallel.
+[2026-07-20 07:25:17] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 12 item(s) to 12 worker(s).
+[2026-07-20 07:25:27] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 12/12 item(s) completed in parallel.
+[2026-07-20 07:25:27] [run_id=20260720T072206_17012_640352] === Building schema: NISBishoy ===
+[2026-07-20 07:25:27] [run_id=20260720T072206_17012_640352] [SCAN PROGRESS] schema header inference: starting serial scan of 1 item(s).
+[2026-07-20 07:25:28] [run_id=20260720T072206_17012_640352] [SCAN PROGRESS] schema header inference: 1/1 complete (100.0%); elapsed 1s; ETA 0s.
+[2026-07-20 07:25:28] [run_id=20260720T072206_17012_640352] [SCAN PROGRESS] schema header inference: starting serial scan of 1 item(s).
+[2026-07-20 07:25:29] [run_id=20260720T072206_17012_640352] [SCAN PROGRESS] schema header inference: 1/1 complete (100.0%); elapsed 2s; ETA 0s.
+[2026-07-20 07:25:30] [run_id=20260720T072206_17012_640352] === Building schema: NRD ===
+[2026-07-20 07:25:30] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 11 item(s) to 11 worker(s).
+[2026-07-20 07:25:37] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 11/11 item(s) completed in parallel.
+[2026-07-20 07:25:37] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 3 item(s) to 3 worker(s).
+[2026-07-20 07:25:43] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 3/3 item(s) completed in parallel.
+[2026-07-20 07:25:43] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 6 item(s) to 6 worker(s).
+[2026-07-20 07:25:49] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 6/6 item(s) completed in parallel.
+[2026-07-20 07:25:49] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 3 item(s) to 3 worker(s).
+[2026-07-20 07:25:56] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 3/3 item(s) completed in parallel.
+[2026-07-20 07:25:56] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 4 item(s) to 4 worker(s).
+[2026-07-20 07:26:03] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 4/4 item(s) completed in parallel.
+[2026-07-20 07:26:03] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 9 item(s) to 9 worker(s).
+[2026-07-20 07:26:09] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 9/9 item(s) completed in parallel.
+[2026-07-20 07:26:09] [run_id=20260720T072206_17012_640352] [SCAN PROGRESS] schema header inference: starting serial scan of 1 item(s).
+[2026-07-20 07:26:09] [run_id=20260720T072206_17012_640352] [SCAN PROGRESS] schema header inference: 1/1 complete (100.0%); elapsed 0s; ETA 0s.
+[2026-07-20 07:26:09] [run_id=20260720T072206_17012_640352] [SCAN PROGRESS] schema header inference: starting serial scan of 1 item(s).
+[2026-07-20 07:26:09] [run_id=20260720T072206_17012_640352] [SCAN PROGRESS] schema header inference: 1/1 complete (100.0%); elapsed 0s; ETA 0s.
+[2026-07-20 07:26:10] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 6 item(s) to 6 worker(s).
+[2026-07-20 07:26:17] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 6/6 item(s) completed in parallel.
+[2026-07-20 07:26:17] [run_id=20260720T072206_17012_640352] [SCAN PROGRESS] schema header inference: starting serial scan of 1 item(s).
+[2026-07-20 07:26:17] [run_id=20260720T072206_17012_640352] [SCAN PROGRESS] schema header inference: 1/1 complete (100.0%); elapsed 0s; ETA 0s.
+[2026-07-20 07:26:17] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 9 item(s) to 9 worker(s).
+[2026-07-20 07:26:26] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 9/9 item(s) completed in parallel.
+[2026-07-20 07:26:26] [run_id=20260720T072206_17012_640352] === Building schema: NSQIP ===
+[2026-07-20 07:26:26] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 14 item(s) to 14 worker(s).
+[2026-07-20 07:26:41] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 14/14 item(s) completed in parallel.
+[2026-07-20 07:26:41] [run_id=20260720T072206_17012_640352] === Building schema: NTDB ===
+[2026-07-20 07:26:41] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 6 item(s) to 6 worker(s).
+[2026-07-20 07:26:49] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 6/6 item(s) completed in parallel.
+[2026-07-20 07:26:49] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 6 item(s) to 6 worker(s).
+[2026-07-20 07:26:57] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 6/6 item(s) completed in parallel.
+[2026-07-20 07:26:57] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-20 07:27:03] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-20 07:27:03] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 4 item(s) to 4 worker(s).
+[2026-07-20 07:27:12] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 4/4 item(s) completed in parallel.
+[2026-07-20 07:27:12] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 7 item(s) to 7 worker(s).
+[2026-07-20 07:27:19] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-20 07:27:20] [run_id=20260720T072206_17012_640352] [SCAN PROGRESS] schema header inference: starting serial scan of 1 item(s).
+[2026-07-20 07:27:20] [run_id=20260720T072206_17012_640352] [SCAN PROGRESS] schema header inference: 1/1 complete (100.0%); elapsed 0s; ETA 0s.
+[2026-07-20 07:27:20] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 3 item(s) to 3 worker(s).
+[2026-07-20 07:27:26] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 3/3 item(s) completed in parallel.
+[2026-07-20 07:27:26] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 7 item(s) to 7 worker(s).
+[2026-07-20 07:27:33] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-20 07:27:33] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 7 item(s) to 7 worker(s).
+[2026-07-20 07:27:44] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-20 07:27:44] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 7 item(s) to 7 worker(s).
+[2026-07-20 07:27:52] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-20 07:27:52] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 7 item(s) to 7 worker(s).
+[2026-07-20 07:28:00] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-20 07:28:00] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 7 item(s) to 7 worker(s).
+[2026-07-20 07:28:08] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-20 07:28:08] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 7 item(s) to 7 worker(s).
+[2026-07-20 07:28:16] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-20 07:28:16] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 7 item(s) to 7 worker(s).
+[2026-07-20 07:28:25] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-20 07:28:25] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 7 item(s) to 7 worker(s).
+[2026-07-20 07:28:32] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-20 07:28:33] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 7 item(s) to 7 worker(s).
+[2026-07-20 07:28:39] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-20 07:28:39] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 4 item(s) to 4 worker(s).
+[2026-07-20 07:28:48] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 4/4 item(s) completed in parallel.
+[2026-07-20 07:28:48] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 4 item(s) to 4 worker(s).
+[2026-07-20 07:28:55] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 4/4 item(s) completed in parallel.
+[2026-07-20 07:28:55] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-20 07:29:01] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-20 07:29:01] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-20 07:29:07] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-20 07:29:07] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-20 07:29:14] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-20 07:29:14] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-20 07:29:20] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-20 07:29:20] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-20 07:29:26] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-20 07:29:27] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-20 07:29:33] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-20 07:29:33] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-20 07:29:40] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-20 07:29:41] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 7 item(s) to 7 worker(s).
+[2026-07-20 07:29:49] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-20 07:29:50] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 7 item(s) to 7 worker(s).
+[2026-07-20 07:29:59] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-20 07:29:59] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 4 item(s) to 4 worker(s).
+[2026-07-20 07:30:07] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 4/4 item(s) completed in parallel.
+[2026-07-20 07:30:07] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 7 item(s) to 7 worker(s).
+[2026-07-20 07:30:15] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-20 07:30:15] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 7 item(s) to 7 worker(s).
+[2026-07-20 07:30:25] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-20 07:30:25] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 7 item(s) to 7 worker(s).
+[2026-07-20 07:30:33] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 7/7 item(s) completed in parallel.
+[2026-07-20 07:30:33] [run_id=20260720T072206_17012_640352] === Building schema: TQP ===
+[2026-07-20 07:30:33] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 4 item(s) to 4 worker(s).
+[2026-07-20 07:30:39] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 4/4 item(s) completed in parallel.
+[2026-07-20 07:30:39] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 5 item(s) to 5 worker(s).
+[2026-07-20 07:30:46] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 5/5 item(s) completed in parallel.
+[2026-07-20 07:30:46] [run_id=20260720T072206_17012_640352] [SCAN PROGRESS] schema header inference: starting serial scan of 1 item(s).
+[2026-07-20 07:30:46] [run_id=20260720T072206_17012_640352] [SCAN PROGRESS] schema header inference: 1/1 complete (100.0%); elapsed 0s; ETA 0s.
+[2026-07-20 07:30:47] [run_id=20260720T072206_17012_640352] [SCAN PROGRESS] schema header inference: starting serial scan of 1 item(s).
+[2026-07-20 07:30:47] [run_id=20260720T072206_17012_640352] [SCAN PROGRESS] schema header inference: 1/1 complete (100.0%); elapsed 0s; ETA 0s.
+[2026-07-20 07:30:47] [run_id=20260720T072206_17012_640352] [SCAN PROGRESS] schema header inference: starting serial scan of 1 item(s).
+[2026-07-20 07:30:47] [run_id=20260720T072206_17012_640352] [SCAN PROGRESS] schema header inference: 1/1 complete (100.0%); elapsed 0s; ETA 0s.
+[2026-07-20 07:30:47] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 8 item(s) to 8 worker(s).
+[2026-07-20 07:30:56] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 8/8 item(s) completed in parallel.
+[2026-07-20 07:30:56] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 8 item(s) to 8 worker(s).
+[2026-07-20 07:31:05] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 8/8 item(s) completed in parallel.
+[2026-07-20 07:31:05] [run_id=20260720T072206_17012_640352] [SCAN PROGRESS] schema header inference: starting serial scan of 1 item(s).
+[2026-07-20 07:31:05] [run_id=20260720T072206_17012_640352] [SCAN PROGRESS] schema header inference: 1/1 complete (100.0%); elapsed 0s; ETA 0s.
+[2026-07-20 07:31:05] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-20 07:31:12] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-20 07:31:12] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-20 07:31:18] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-20 07:31:18] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-20 07:31:25] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-20 07:31:25] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-20 07:31:33] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-20 07:31:33] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-20 07:31:38] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-20 07:31:38] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-20 07:31:44] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-20 07:31:44] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-20 07:31:49] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-20 07:31:49] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-20 07:31:55] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-20 07:31:56] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 8 item(s) to 8 worker(s).
+[2026-07-20 07:32:07] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 8/8 item(s) completed in parallel.
+[2026-07-20 07:32:07] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-20 07:32:12] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-20 07:32:12] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-20 07:32:20] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-20 07:32:20] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 8 item(s) to 8 worker(s).
+[2026-07-20 07:32:28] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 8/8 item(s) completed in parallel.
+[2026-07-20 07:32:28] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 6 item(s) to 6 worker(s).
+[2026-07-20 07:32:35] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 6/6 item(s) completed in parallel.
+[2026-07-20 07:32:35] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-20 07:32:42] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-20 07:32:42] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-20 07:32:48] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-20 07:32:48] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-20 07:32:54] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-20 07:32:54] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-20 07:33:00] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-20 07:33:00] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-20 07:33:05] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-20 07:33:05] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-20 07:33:12] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-20 07:33:12] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-20 07:33:19] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-20 07:33:19] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 8 item(s) to 8 worker(s).
+[2026-07-20 07:33:30] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 8/8 item(s) completed in parallel.
+[2026-07-20 07:33:30] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 8 item(s) to 8 worker(s).
+[2026-07-20 07:33:38] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 8/8 item(s) completed in parallel.
+[2026-07-20 07:33:38] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 8 item(s) to 8 worker(s).
+[2026-07-20 07:33:46] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 8/8 item(s) completed in parallel.
+[2026-07-20 07:33:46] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 8 item(s) to 8 worker(s).
+[2026-07-20 07:33:54] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 8/8 item(s) completed in parallel.
+[2026-07-20 07:33:54] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 10 item(s) to 10 worker(s).
+[2026-07-20 07:34:05] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 10/10 item(s) completed in parallel.
+[2026-07-20 07:34:05] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-20 07:34:11] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-20 07:34:11] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-20 07:34:17] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-20 07:34:17] [run_id=20260720T072206_17012_640352] [SCAN PROGRESS] schema header inference: starting serial scan of 1 item(s).
+[2026-07-20 07:34:18] [run_id=20260720T072206_17012_640352] [SCAN PROGRESS] schema header inference: 1/1 complete (100.0%); elapsed 0s; ETA 0s.
+[2026-07-20 07:34:18] [run_id=20260720T072206_17012_640352] [SCAN PROGRESS] schema header inference: starting serial scan of 1 item(s).
+[2026-07-20 07:34:18] [run_id=20260720T072206_17012_640352] [SCAN PROGRESS] schema header inference: 1/1 complete (100.0%); elapsed 0s; ETA 0s.
+[2026-07-20 07:34:18] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-20 07:34:25] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-20 07:34:25] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-20 07:34:32] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-20 07:34:32] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-20 07:34:38] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-20 07:34:38] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 6 item(s) to 6 worker(s).
+[2026-07-20 07:34:46] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 6/6 item(s) completed in parallel.
+[2026-07-20 07:34:46] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-20 07:34:52] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-20 07:34:52] [run_id=20260720T072206_17012_640352] [SCAN PROGRESS] schema header inference: starting serial scan of 1 item(s).
+[2026-07-20 07:34:52] [run_id=20260720T072206_17012_640352] [SCAN PROGRESS] schema header inference: 1/1 complete (100.0%); elapsed 0s; ETA 0s.
+[2026-07-20 07:34:52] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-20 07:34:59] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-20 07:34:59] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 8 item(s) to 8 worker(s).
+[2026-07-20 07:35:10] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 8/8 item(s) completed in parallel.
+[2026-07-20 07:35:11] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 6 item(s) to 6 worker(s).
+[2026-07-20 07:35:19] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 6/6 item(s) completed in parallel.
+[2026-07-20 07:35:19] [run_id=20260720T072206_17012_640352] [SCAN START] schema header inference: submitting 2 item(s) to 2 worker(s).
+[2026-07-20 07:35:24] [run_id=20260720T072206_17012_640352] [SCAN COMPLETE] schema header inference: 2/2 item(s) completed in parallel.
+[2026-07-20 07:35:27] [run_id=20260720T072206_17012_640352] === Loading NEDS ===
+[2026-07-20 07:35:29] [run_id=20260720T072206_17012_640352] Skipping 42 already-completed files
+[2026-07-20 07:35:29] [run_id=20260720T072206_17012_640352] NEDS complete. Checkpoint size: 94
+[2026-07-20 07:35:29] [run_id=20260720T072206_17012_640352] === Loading NIS ===
+[2026-07-20 07:35:31] [run_id=20260720T072206_17012_640352] Skipping 52 already-completed files
+[2026-07-20 07:35:31] [run_id=20260720T072206_17012_640352] NIS complete. Checkpoint size: 94
+[2026-07-20 07:35:31] [run_id=20260720T072206_17012_640352] === Loading NISBishoy ===
+[2026-07-20 07:35:33] [run_id=20260720T072206_17012_640352] [PARTITION ROUTE] NIS_2020_2023_FULL.csv contains all configured partition columns; rows will stream directly to their source-defined Hive partitions.
+[2026-07-20 07:38:06] [run_id=20260720T072206_17012_640352] [READ] NIS_2020_2023_FULL.csv: 21,822,950 rows -> chunked reader (PartitionBy=FAIL)
+[2026-07-20 07:40:35] [run_id=20260720T072206_17012_640352] [CHUNKED-DELIM] NIS_2020_2023_FULL.csv: 21,822,950 rows (chunk_size=4000000)
