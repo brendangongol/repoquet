@@ -137,6 +137,21 @@ test_that("chunk composition cannot change values: all-empty chunks match direct
   expect_identical(unique(got$NOTE[11:20]), unique(direct$NOTE[11:20]))
 })
 
+test_that("delimited chunk sizing enforces a conservative memory cap", {
+  path <- tempfile(fileext = ".csv")
+  on.exit(unlink(path), add = TRUE)
+  writeLines(c("VALUE", rep(strrep("x", 1000L), 10000L)), path)
+
+  capped <- .effective_delimited_chunk_size(
+    path, requested_rows = 1000000L, total_rows = 10000L, MaxChunkMemoryMB = 1L)
+  expect_lt(capped, 1000000L)
+  expect_gte(capped, 1000L)
+  expect_identical(
+    .effective_delimited_chunk_size(path, requested_rows = 1000000L,
+                                    total_rows = NA_real_, MaxChunkMemoryMB = 1L),
+    250000L)
+})
+
 test_that("chunked delimited loads validate partition columns and clean up on failure", {
   fx <- new_repo_fixture(); on.exit(unlink(fx$root, recursive = TRUE))
   data.table::fwrite(data.table::data.table(YEAR = rep(2018L, 25), AGE = 1:25),

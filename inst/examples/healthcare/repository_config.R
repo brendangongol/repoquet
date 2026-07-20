@@ -5,7 +5,8 @@ repository_config <- list(
   MDTPath         = "C:/Users/e282219/Downloads/github/repoquet/inst/extdata/DBSetupV2.xlsx",   # the Master Database Table workbook
   PartitionBy       = "FAIL",     # NRows | RAMEstimate | FAIL
   SAV_ROW_THRESHOLD = 4000000L,    # rows above which files stream in chunks
-  SAV_CHUNK_SIZE    = 4000000L,    # rows per chunk
+  SAV_CHUNK_SIZE    = 4000000L,    # requested rows per chunk for SAV files
+  DelimitedChunkMaxMB = 256L,      # cap each CSV/TSV chunk's estimated peak memory
   RAMThreshold      = 30,          # GB, for PartitionBy = "RAMEstimate"
   MaxCoerceNAPct    = 25,          # fail a file when coercion destroys more than this % of a column
   SourceFingerprintMode = "metadata", # metadata | sha256 | none

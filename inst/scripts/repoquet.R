@@ -70,7 +70,7 @@ if (command == "validate") {
     CheckpointPath = paths$CheckpointPath, ParquetBasePath = paths$ParquetBasePath,
     LogPath = paths$LogPath, n_workers = cfg$n_workers, PartitionBy = cfg$PartitionBy,
     RAMThreshold = cfg$RAMThreshold, SAV_ROW_THRESHOLD = cfg$SAV_ROW_THRESHOLD,
-    SAV_CHUNK_SIZE = cfg$SAV_CHUNK_SIZE, SchemaRegistryPath = paths$SchemaRegistryPath,
+    SAV_CHUNK_SIZE = cfg$SAV_CHUNK_SIZE, DelimitedChunkMaxMB = cfg$DelimitedChunkMaxMB, SchemaRegistryPath = paths$SchemaRegistryPath,
     TableSchemaPath = paths$TableSchemaPath, ManifestPath = paths$ManifestPath,
     MetadataWorkbookPath = paths$ManifestWorkbookPath,
     UseSchemaCatalog = TRUE,

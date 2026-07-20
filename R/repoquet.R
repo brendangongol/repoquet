@@ -3589,6 +3589,31 @@ safe_read_sav_chunked <- function(path, chunk_size = 1000000L, TerminalHiveParti
   })
 }
 
+.effective_delimited_chunk_size <- function(path, requested_rows, total_rows = NA_real_,
+                                            MaxChunkMemoryMB = 256L) {
+  requested_rows <- suppressWarnings(as.integer(requested_rows[1]))
+  if (is.na(requested_rows) || requested_rows < 1L) {
+    stop("chunk_size must be a positive integer.")
+  }
+  max_mb <- suppressWarnings(as.numeric(MaxChunkMemoryMB[1]))
+  if (!is.finite(max_mb) || max_mb <= 0) {
+    stop("MaxChunkMemoryMB must be a positive number.")
+  }
+  fallback_rows <- 250000L
+  compressed <- grepl("\\.gz$", path, ignore.case = TRUE)
+  if (compressed || !is.finite(total_rows) || total_rows <= 0) {
+    return(min(requested_rows, fallback_rows))
+  }
+  source_bytes <- suppressWarnings(as.numeric(file.info(path)$size[1]))
+  if (!is.finite(source_bytes) || source_bytes <= 0) {
+    return(min(requested_rows, fallback_rows))
+  }
+  # fread, UTF-8 normalization, partition routing, and Arrow can coexist briefly.
+  estimated_rows <- floor((max_mb * 1024^2) / ((source_bytes / total_rows) * 6))
+  cap_rows <- max(1000, min(estimated_rows, .Machine$integer.max))
+  as.integer(min(requested_rows, cap_rows))
+}
+
 #' Stream a large delimited file to hive-partitioned Parquet in chunks
 #'
 #' Memory-bounded counterpart of \code{\link{safe_read_sav_chunked}} for the
@@ -3613,7 +3638,7 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
                                    max_coerce_na_pct = NULL,
                                    ManifestPath = NULL, Database = NULL, TableName = NULL,
                                    DuckDBTable = NULL, SourcePath = NULL, SchemaHash = NA_character_,
-                                   MaxFileStemTruncate = FALSE,
+                                   MaxFileStemTruncate = FALSE, MaxChunkMemoryMB = 256L,
                                    reader = "csv", reader_options = list(), RepositoryLock = NULL) {
   partition_keys <- canonical_colnames(partition_keys)
   if (!is.null(col_classes)) names(col_classes) <- canonical_colnames(names(col_classes))
@@ -3631,10 +3656,18 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
   }
   total_rows <- if (logical_stream) NA_real_ else
     as.numeric(call_reader(rd, "count_rows", path, reader_options = reader_options))
-  log_msg(sprintf("[CHUNKED-DELIM] %s: %s (chunk_size=%d)", basename(path),
+  requested_chunk_size <- as.integer(chunk_size)
+  chunk_size <- .effective_delimited_chunk_size(
+    path, requested_rows = requested_chunk_size, total_rows = total_rows,
+    MaxChunkMemoryMB = MaxChunkMemoryMB)
+  log_msg(sprintf("[CHUNKED-DELIM] %s: %s (chunk_size=%d%s)", basename(path),
                   if (logical_stream) "streaming repaired logical records" else
                     paste(formatC(total_rows, format = "d", big.mark = ","), "rows"),
-                  as.integer(chunk_size)))
+                  as.integer(chunk_size),
+                  if (chunk_size < requested_chunk_size) {
+                    sprintf(", requested=%d, memory_cap=%s MB", requested_chunk_size,
+                            format(MaxChunkMemoryMB, trim = TRUE))
+                  } else ""))
   chunk_col_classes <- NULL
   if (!is.null(col_classes)) {
     canon_hdr <- canonical_colnames(header)
@@ -3760,7 +3793,9 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
         actual_values <- vapply(values, function(v) v[idx[1]], character(1))
         target_dir <- file.path(table_dir,
                                 paste(paste0(tolower(partition_keys), "=", actual_values), collapse = "/"))
-        write_piece(data.table::copy(df_chunk[idx]), actual_values, target_dir, signature)
+        piece <- if (length(groups) == 1L) df_chunk else df_chunk[idx]
+        write_piece(piece, actual_values, target_dir, signature)
+        if (length(groups) > 1L) rm(piece)
       }
     } else {
       validate_partition_column_values(df_chunk, partition_keys, partition_values,
@@ -3786,10 +3821,16 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
       while (offset < total_rows) {
         touch_repository_lock(RepositoryLock)
         n_this <- min(as.integer(chunk_size), total_rows - offset)
+        log_msg(sprintf("[CHUNKED-DELIM] %s: reading rows %s-%s of %s", basename(path),
+                        formatC(offset + 1L, format = "d", big.mark = ","),
+                        formatC(offset + n_this, format = "d", big.mark = ","),
+                        formatC(total_rows, format = "d", big.mark = ",")))
         df_chunk <- call_reader(rd, "read_chunk", path, reader_options = reader_options,
                                 offset = offset, n_max = n_this, header = header,
                                 col_classes = col_classes)
         process_chunk(df_chunk)
+        rm(df_chunk)
+        gc(verbose = FALSE)
         offset <- offset + n_this
       }
     }
@@ -5556,7 +5597,7 @@ validate_duckdb_table <- function(con, table_name, schema_registry = NULL, stric
 read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL, table_dir = NULL,
                     col_classes = NULL, year_val = NULL, PrintStatus = FALSE, TerminalHivePartition = FALSE,
                     MDTSelect, MasterDBPath, reader, PartitionBy, SAV_ROW_THRESHOLD, RAMThreshold, SAV_CHUNK_SIZE,
-                    chunk_size_decrement = NULL, min_chunk_size = NULL, partition_keys = "YEAR",
+                    DelimitedChunkMaxMB = 256L, chunk_size_decrement = NULL, min_chunk_size = NULL, partition_keys = "YEAR",
                     partition_values = NULL, max_coerce_na_pct = NULL,
                      ManifestPath = NULL, Database = NULL, TableName = NULL,
                     DuckDBTable = NULL, SourcePath = NULL, SchemaHash = NA_character_,
@@ -5686,6 +5727,7 @@ read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL, tab
                              ManifestPath = ManifestPath, Database = Database, TableName = TableName,
                              DuckDBTable = DuckDBTable, SourcePath = SourcePath %||% path,
                              SchemaHash = SchemaHash, MaxFileStemTruncate = MaxFileStemTruncate,
+                             MaxChunkMemoryMB = DelimitedChunkMaxMB,
                              reader = reader, reader_options = reader_options,
                              RepositoryLock = RepositoryLock)
     }
@@ -6554,6 +6596,8 @@ discover_schema_relationships <- function(table_schema, include_candidates = TRU
 #'   that defines \code{repository_config} list).
 #' @param SAV_CHUNK_SIZE Integer or NULL. Rows per chunk for SAV file streaming.
 #'   NULL retains the configuration-file value or the default of 1000000L.
+#' @param DelimitedChunkMaxMB Numeric or NULL. Conservative cap on the estimated
+#'   peak memory of each CSV/TSV/TXT chunk. NULL retains the file value or 256.
 #' @param SAV_ROW_THRESHOLD Integer. Rows above which SAV files stream in chunks.
 #'   NULL retains the configuration-file value or the default of 1000000L.
 #' @param RAMThreshold Numeric. RAM limit in GB for PartitionBy = "RAMEstimate".
@@ -6592,6 +6636,7 @@ discover_schema_relationships <- function(table_schema, include_candidates = TRU
 load_repository_config <- function(
     path,
     SAV_CHUNK_SIZE = NULL,
+    DelimitedChunkMaxMB = NULL,
     SAV_ROW_THRESHOLD = NULL,
     RAMThreshold = NULL,
     PartitionBy = NULL,
@@ -6626,6 +6671,7 @@ load_repository_config <- function(
 
   defaults <- list(
     SAV_CHUNK_SIZE = 1000000L,
+    DelimitedChunkMaxMB = 256L,
     SAV_ROW_THRESHOLD = 1000000L,
     RAMThreshold = 30,
     PartitionBy = "NRows",
@@ -6666,6 +6712,7 @@ load_repository_config <- function(
   cfg <- utils::modifyList(cfg, overrides)
   explicit_args <- list(
     SAV_CHUNK_SIZE = SAV_CHUNK_SIZE,
+    DelimitedChunkMaxMB = DelimitedChunkMaxMB,
     SAV_ROW_THRESHOLD = SAV_ROW_THRESHOLD,
     RAMThreshold = RAMThreshold,
     PartitionBy = PartitionBy,
@@ -6706,7 +6753,7 @@ load_repository_config <- function(
   cfg$SchemaSurveyMode <- match.arg(tolower(as.character(cfg$SchemaSurveyMode)),
                                     c("adaptive", "full", "sample"))
   for (field in c("SchemaChunkSize", "SchemaAdaptiveSampleRows",
-                  "SchemaFutureGlobalsMaxSizeMB")) {
+                  "SchemaFutureGlobalsMaxSizeMB", "DelimitedChunkMaxMB")) {
     cfg[[field]] <- suppressWarnings(as.numeric(cfg[[field]]))
     if (length(cfg[[field]]) != 1L || is.na(cfg[[field]]) || cfg[[field]] < 1) {
       stop(sprintf("repository_config %s must be a positive number.", field))
@@ -6778,7 +6825,8 @@ create_repository_project <- function(dir, MasterDBPath = file.path(dir, "source
     sprintf("  MDTPath         = \"%s\",   # the Master Database Table workbook", norm(paths$MDTPath)),
     "  PartitionBy       = \"NRows\",     # NRows | RAMEstimate | FAIL",
     "  SAV_ROW_THRESHOLD = 1000000L,    # rows above which files stream in chunks",
-    "  SAV_CHUNK_SIZE    = 1000000L,    # rows per chunk",
+    "  SAV_CHUNK_SIZE    = 1000000L,    # requested rows per chunk for SAV files",
+    "  DelimitedChunkMaxMB = 256L,      # cap each CSV/TSV chunk's estimated peak memory",
     "  RAMThreshold      = 30,          # GB, for PartitionBy = \"RAMEstimate\"",
     "  MaxCoerceNAPct    = 25,          # fail a file when coercion destroys more than this % of a column",
     "  SourceFingerprintMode = \"metadata\", # metadata | sha256 | none",
@@ -6884,6 +6932,7 @@ create_repository_project <- function(dir, MasterDBPath = file.path(dir, "source
     "                                  PartitionBy = cfg$PartitionBy, RAMThreshold = cfg$RAMThreshold,",
     "                                  SAV_ROW_THRESHOLD = cfg$SAV_ROW_THRESHOLD,",
     "                                  SAV_CHUNK_SIZE = cfg$SAV_CHUNK_SIZE,",
+    "                                  DelimitedChunkMaxMB = cfg$DelimitedChunkMaxMB,",
     "                                  MaxFileStemTruncate = TRUE, TerminalHivePartition = FALSE,",
     "                                  SchemaRegistryPath = paths$SchemaRegistryPath,",
     "                                  TableSchemaPath = paths$TableSchemaPath,",
@@ -10865,7 +10914,7 @@ generic_db_loader <- function(files, base_path, db_prefix, completed_checkpoint,
                               CheckpointPath, ParquetBasePath, MDTSelect,
                               comprehensive, col_classes = NULL, reader = NULL,
                               PartitionBy, RAMThreshold, SAV_ROW_THRESHOLD,
-                              LogPath, SAV_CHUNK_SIZE, PrintStatus = FALSE,
+                              LogPath, SAV_CHUNK_SIZE, DelimitedChunkMaxMB = 256L, PrintStatus = FALSE,
                               ManifestPath = NULL, SchemaRegistryPath = NULL, schema_registry = NULL,
                               TerminalHivePartition = FALSE,
                               MaxFileStemTruncate = FALSE,
@@ -10930,6 +10979,7 @@ generic_db_loader <- function(files, base_path, db_prefix, completed_checkpoint,
                     all_cols = all_cols_v, col_classes = table_col_classes, year_val = year_val, TerminalHivePartition = TerminalHivePartition,
                     MDTSelect = row_meta, MasterDBPath = base_path, reader = reader_file, PartitionBy = PartitionBy,
                     SAV_ROW_THRESHOLD = SAV_ROW_THRESHOLD, RAMThreshold = RAMThreshold, SAV_CHUNK_SIZE = SAV_CHUNK_SIZE,
+                    DelimitedChunkMaxMB = DelimitedChunkMaxMB,
                     chunk_size_decrement = chunk_size_decrement, min_chunk_size = min_chunk_size,
                     partition_keys = pspec$keys, partition_values = pspec$values,
                     max_coerce_na_pct = MaxCoerceNAPct,
@@ -11126,7 +11176,8 @@ print.RepositoryRunResult <- function(x, ...) {
 #'
 #' @export
 ParquetBackEndCreate <- function(MDT, DBLoad, MasterDBPath, completed_checkpoint, CheckpointPath, ParquetBasePath, SAV_ROW_THRESHOLD = 1000000L,
-                                 PartitionBy, RAMThreshold, SAV_CHUNK_SIZE = 1000000L, LogPath, n_workers = 1, PrintStatus = FALSE,
+                                 PartitionBy, RAMThreshold, SAV_CHUNK_SIZE = 1000000L, DelimitedChunkMaxMB = 256L,
+                                 LogPath, n_workers = 1, PrintStatus = FALSE,
                                  TerminalHivePartition = FALSE, MaxFileStemTruncate = TRUE,
                                  chunk_size_decrement = NULL, min_chunk_size = NULL,
                                  SchemaRegistryPath = NULL, TableSchemaPath = NULL, ManifestPath = NULL,
@@ -11152,6 +11203,10 @@ ParquetBackEndCreate <- function(MDT, DBLoad, MasterDBPath, completed_checkpoint
   SourceFingerprintMode <- match.arg(SourceFingerprintMode)
   CleanupAfterPhase <- match.arg(CleanupAfterPhase, c("all", "database", "none"))
   RemoteDefaultDownloadPolicy <- match.arg(RemoteDefaultDownloadPolicy)
+  DelimitedChunkMaxMB <- suppressWarnings(as.numeric(DelimitedChunkMaxMB[1]))
+  if (!is.finite(DelimitedChunkMaxMB) || DelimitedChunkMaxMB <= 0) {
+    stop("DelimitedChunkMaxMB must be a positive number.")
+  }
   previous_run <- begin_repository_run(LogPath = LogPath, RunId = RunId)
   on.exit(restore_repository_run(previous_run), add = TRUE)
   RunId <- resolve_run_id()
@@ -11168,6 +11223,9 @@ ParquetBackEndCreate <- function(MDT, DBLoad, MasterDBPath, completed_checkpoint
   if (is.na(Sys.getenv("R_DATATABLE_NOMMAP", unset = NA))) {
     Sys.setenv(R_DATATABLE_NOMMAP = "true")
     on.exit(Sys.unsetenv("R_DATATABLE_NOMMAP"), add = TRUE)
+    log_msg("[IO SAFETY] Disabled data.table memory mapping for this run.", log_path = LogPath)
+  } else {
+    log_msg("[IO SAFETY] Respecting caller-supplied R_DATATABLE_NOMMAP setting.", log_path = LogPath)
   }
   log_msg(sprintf("Parallel workers available: %d (scoped per scan)", n_workers), log_path = LogPath)
   if (is.null(ManifestPath)) ManifestPath <- manifest_path_default(ParquetBasePath)
@@ -11311,6 +11369,7 @@ ParquetBackEndCreate <- function(MDT, DBLoad, MasterDBPath, completed_checkpoint
                                                 MaxFileStemTruncate = MaxFileStemTruncate,
                                                 TerminalHivePartition = TerminalHivePartition,
                                                 SAV_CHUNK_SIZE = SAV_CHUNK_SIZE,
+                                                DelimitedChunkMaxMB = DelimitedChunkMaxMB,
                                                 chunk_size_decrement = chunk_size_decrement,
                                                 min_chunk_size = min_chunk_size,
                                                 registry_resolved = TRUE,
