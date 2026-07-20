@@ -117,8 +117,12 @@ schema_issues <- GetSchemaObservations(ObservationPath = RepositoryPaths$SchemaO
                                        IssuesOnly = TRUE, Limit = 100L)
 if(nrow(schema_issues) > 0L){ print(schema_issues) }
 
-obs <- GetSchemaObservations(ObservationPath, Column = "AGE", IssuesOnly = FALSE)
+###############################
+#### To load Schema values ####
+###############################
+obs <- GetSchemaObservations(ObservationPath = RepositoryPaths$SchemaObservationPath, Column = "AGE", IssuesOnly = FALSE)
 obs[, .(Database, TableName, ObservedType, ValueCount, ValueProfileStatus)]
+obs[, .(Database, TableName, ObservedType, NumericParseFailureCount, Minimum, Maximum, MaximumTextLength)][TableName == "DBTable",]
 
 ###############################################################################
 #### 4. Review decisions and finalize the catalog #############################
