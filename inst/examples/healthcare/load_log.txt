@@ -938,3 +938,22 @@
 [2026-07-20 07:35:33] [run_id=20260720T072206_17012_640352] [PARTITION ROUTE] NIS_2020_2023_FULL.csv contains all configured partition columns; rows will stream directly to their source-defined Hive partitions.
 [2026-07-20 07:38:06] [run_id=20260720T072206_17012_640352] [READ] NIS_2020_2023_FULL.csv: 21,822,950 rows -> chunked reader (PartitionBy=FAIL)
 [2026-07-20 07:40:35] [run_id=20260720T072206_17012_640352] [CHUNKED-DELIM] NIS_2020_2023_FULL.csv: 21,822,950 rows (chunk_size=4000000)
+[2026-07-20 09:08:49] [run_id=20260720T090831_7448_744890] [SCHEMA PREPARE] Stage 1/3: surveying 483 source(s) in 'adaptive' mode. Completed source evidence is cached for resumable runs.
+[2026-07-20 09:09:23] [run_id=20260720T090831_7448_744890] [SCHEMA CACHE] Reusing 483 of 483 unchanged source observation(s); 0 require scanning.
+[2026-07-20 09:09:25] [run_id=20260720T090831_7448_744890] [SCHEMA SURVEY] 483 source(s), 53631 observation row(s), 0 failed source(s); wrote X:/Brendan/NationalDatabases/formattedDatabases/Schema/SchemaObservations.parquet
+[2026-07-20 09:09:25] [run_id=20260720T090831_7448_744890] [SCHEMA PREPARE] Stage 2/3: deriving type recommendations and compatibility decisions.
+[2026-07-20 09:14:25] [run_id=20260720T090831_7448_744890] [SCHEMA PREPARE] Stage 3/3: writing the schema review workbook.
+[2026-07-20 09:16:12] [run_id=20260720T090831_7448_744890] [SCHEMA PREPARE] Stage 1/3: surveying 483 source(s) in 'adaptive' mode. Completed source evidence is cached for resumable runs.
+[2026-07-20 09:16:46] [run_id=20260720T090831_7448_744890] [SCHEMA CACHE] Reusing 483 of 483 unchanged source observation(s); 0 require scanning.
+[2026-07-20 09:16:47] [run_id=20260720T090831_7448_744890] [SCHEMA SURVEY] 483 source(s), 53631 observation row(s), 0 failed source(s); wrote X:/Brendan/NationalDatabases/formattedDatabases/Schema/SchemaObservations.parquet
+[2026-07-20 09:16:47] [run_id=20260720T090831_7448_744890] [SCHEMA PREPARE] Stage 2/3: deriving type recommendations and compatibility decisions.
+[2026-07-20 09:21:51] [run_id=20260720T090831_7448_744890] [SCHEMA PREPARE] Stage 3/3: writing the schema review workbook.
+[2026-07-20 09:22:01] [SCHEMA PROPOSAL] Wrote X:/Brendan/NationalDatabases/formattedDatabases/Schema/SchemaReview.xlsx (5334 columns; 0 column decision(s), 1 compatibility decision(s), 0 dictionary decision(s), 0 blocking source error(s)).
+[2026-07-20 09:22:01] [SCHEMA READY] Open StartHere in X:/Brendan/NationalDatabases/formattedDatabases/Schema/SchemaReview.xlsx: 0 column decision(s), 1 compatibility decision(s), 0 dictionary decision(s), 0 blocking source error(s).
+[2026-07-20 09:33:51] [run_id=20260720T093341_7448_444210] [SCHEMA PREPARE] Stage 1/3: surveying 483 source(s) in 'adaptive' mode. Completed source evidence is cached for resumable runs.
+[2026-07-20 09:34:27] [run_id=20260720T093341_7448_444210] [SCHEMA CACHE] Reusing 483 of 483 unchanged source observation(s); 0 require scanning.
+[2026-07-20 09:34:28] [run_id=20260720T093341_7448_444210] [SCHEMA SURVEY] 483 source(s), 53631 observation row(s), 0 failed source(s); wrote X:/Brendan/NationalDatabases/formattedDatabases/Schema/SchemaObservations.parquet
+[2026-07-20 09:34:28] [run_id=20260720T093341_7448_444210] [SCHEMA PREPARE] Stage 2/3: deriving type recommendations and compatibility decisions.
+[2026-07-20 09:39:38] [run_id=20260720T093341_7448_444210] [SCHEMA PREPARE] Stage 3/3: writing the schema review workbook.
+[2026-07-20 09:39:49] [SCHEMA PROPOSAL] Wrote X:/Brendan/NationalDatabases/formattedDatabases/Schema/SchemaReview.xlsx (5334 columns; 0 column decision(s), 1 compatibility decision(s), 0 dictionary decision(s), 0 blocking source error(s)).
+[2026-07-20 09:39:49] [SCHEMA READY] Open StartHere in X:/Brendan/NationalDatabases/formattedDatabases/Schema/SchemaReview.xlsx: 0 column decision(s), 1 compatibility decision(s), 0 dictionary decision(s), 0 blocking source error(s).

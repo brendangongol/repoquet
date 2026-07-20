@@ -188,7 +188,7 @@ SummaryVerification(MDT = MDT, CheckpointPath = CheckpointPath, LogPath = LogPat
 #### Optional: force one table to rebuild under the current schema #############
 ################################################################################
 release_repository_lock("X:/Brendan/NationalDatabases/formattedDatabases/.repository.lock", force = TRUE)
-reset_table_for_reload(MDT = MDT, Database = "NEDS", TableName = "Core_MISC",
+reset_table_for_reload(MDT = MDT, Database = "NTDB", TableName = "DEMO",
                        ParquetBasePath = RepositoryPaths$ParquetBasePath,
                        CheckpointPath = RepositoryPaths$CheckpointPath,
                        ManifestPath = RepositoryPaths$ManifestPath, DryRun = FALSE)
