@@ -11142,6 +11142,18 @@ ParquetBackEndCreate <- function(MDT, DBLoad, MasterDBPath, completed_checkpoint
   RunId <- resolve_run_id()
   run_started_at <- format(Sys.time(), "%Y-%m-%dT%H:%M:%S%z")
   coercion_report_reset()
+  #### data.table::fread() memory-maps the source file by default. Memory-  ####
+  #### mapped reads of very large files on network-mounted drives are a    ####
+  #### known crash vector on Windows (the whole R session dies with no     ####
+  #### catchable error, mid-read, with no diagnostic). Force fread's       ####
+  #### buffered (non-mmap) read path for this run unless the caller has    ####
+  #### already set a preference, so multi-GB sources on a mapped drive     ####
+  #### (e.g. X:\...) don't take the session down. See data.table's         ####
+  #### R_DATATABLE_NOMMAP option.                                          ####
+  if (is.na(Sys.getenv("R_DATATABLE_NOMMAP", unset = NA))) {
+    Sys.setenv(R_DATATABLE_NOMMAP = "true")
+    on.exit(Sys.unsetenv("R_DATATABLE_NOMMAP"), add = TRUE)
+  }
   log_msg(sprintf("Parallel workers available: %d (scoped per scan)", n_workers), log_path = LogPath)
   if (is.null(ManifestPath)) ManifestPath <- manifest_path_default(ParquetBasePath)
   if (is.null(ExportMetadataWorkbook)) ExportMetadataWorkbook <- manifest_is_duckdb(ManifestPath)

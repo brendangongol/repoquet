@@ -249,3 +249,25 @@ test_that("a genuinely unrecoverable item names its source file in the fallback 
   expect_true(any(grepl("bad.csv: input string 1 is invalid UTF-8", out, fixed = TRUE)))
   expect_false(isTRUE(results[[2]]$ok))
 })
+
+test_that("ParquetBackEndCreate defaults fread to non-mmap reads without leaking the setting", {
+  had_prior <- !is.na(Sys.getenv("R_DATATABLE_NOMMAP", unset = NA))
+  prior <- Sys.getenv("R_DATATABLE_NOMMAP", unset = NA)
+  if (had_prior) Sys.unsetenv("R_DATATABLE_NOMMAP")
+  on.exit({
+    if (had_prior) Sys.setenv(R_DATATABLE_NOMMAP = prior) else Sys.unsetenv("R_DATATABLE_NOMMAP")
+  }, add = TRUE)
+
+  fx <- new_repo_fixture(); on.exit(unlink(fx$root, recursive = TRUE), add = TRUE)
+  data.table::fwrite(data.table::data.table(AGE = c(1, 2), CODE = c("Z1", "Z2")), file.path(fx$src, "a.csv"))
+  M <- data.frame(Database = "REG", MDBDir = "REG", TableName = "T",
+                  Path = "a.csv", FileType = "csv", PartitionKey = "year", PartitionValue = "2020")
+  run_loader(fx, M, "REG")
+  expect_true(is.na(Sys.getenv("R_DATATABLE_NOMMAP", unset = NA)))
+
+  #### An explicit caller preference must not be overridden or cleared.     ####
+  Sys.setenv(R_DATATABLE_NOMMAP = "false")
+  run_loader(fx, M, "REG", completed = load_checkpoint(fx$cp))
+  expect_identical(Sys.getenv("R_DATATABLE_NOMMAP", unset = NA), "false")
+  Sys.unsetenv("R_DATATABLE_NOMMAP")
+})
