@@ -187,10 +187,12 @@ SummaryVerification(MDT = MDT, CheckpointPath = CheckpointPath, LogPath = LogPat
 ################################################################################
 #### Optional: force one table to rebuild under the current schema #############
 ################################################################################
-# reset_table_for_reload(MDT = MDT, Database = "NIS", TableName = "Core",
-#                        ParquetBasePath = ParquetBasePath,
-#                        CheckpointPath = CheckpointPath,
-#                        ManifestPath = RepositoryPaths$ManifestPath, DryRun = TRUE)
+release_repository_lock("X:/Brendan/NationalDatabases/formattedDatabases/.repository.lock", force = TRUE)
+reset_table_for_reload(MDT = MDT, Database = "NEDS", TableName = "Core_MISC",
+                       ParquetBasePath = RepositoryPaths$ParquetBasePath,
+                       CheckpointPath = RepositoryPaths$CheckpointPath,
+                       ManifestPath = RepositoryPaths$ManifestPath, DryRun = FALSE)
+
 
 ################################################################################
 #### 6. Register and strictly validate DuckDB views ############################
