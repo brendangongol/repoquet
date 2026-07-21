@@ -70,12 +70,12 @@ new_repo_fixture <- function() {
 
 #### Run ParquetBackEndCreate with fixture defaults, quietly.                ####
 run_loader <- function(fx, MDT, DBLoad, completed = character(0), PartitionBy = "NRows",
-                       UseSchemaCatalog = FALSE, ...) {
+                       UseSchemaCatalog = FALSE, RAMThreshold = 30, ...) {
   out <- utils::capture.output(
     ck <- ParquetBackEndCreate(MDT = MDT, DBLoad = DBLoad, MasterDBPath = fx$root,
                                completed_checkpoint = completed,
                                CheckpointPath = fx$cp, ParquetBasePath = fx$pq,
-                               PartitionBy = PartitionBy, RAMThreshold = 30,
+                               PartitionBy = PartitionBy, RAMThreshold = RAMThreshold,
                                SAV_ROW_THRESHOLD = 10L, SAV_CHUNK_SIZE = 10L,
                                LogPath = fx$log, n_workers = 1,
                                SchemaRegistryPath = fx$reg, TableSchemaPath = fx$ts,

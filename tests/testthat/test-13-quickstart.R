@@ -29,7 +29,7 @@ test_that("the scaffold creates a valid, parseable project", {
   }, integer(1))
   expect_false(anyNA(call_positions))
   expect_true(all(diff(call_positions) > 0L))
-  expect_true(any(grepl('DelimitedChunkMaxMB = cfg$DelimitedChunkMaxMB', reference_lines, fixed = TRUE)))
+  expect_true(any(grepl('DelimitedChunkMaxMB = cfg$DelimitedChunkMaxMB', runner_lines, fixed = TRUE)))
   cfg <- load_repository_config(paths$ConfigPath)
   expect_identical(cfg$MasterDBPath, gsub("\\\\", "/", paths$MasterDBPath))
   original_config <- readLines(paths$ConfigPath, warn = FALSE)

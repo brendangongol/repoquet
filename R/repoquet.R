@@ -55,7 +55,7 @@ utils::globalVariables(c(
   "age_hours", "mtime", "should_clean", "size_bytes",
   "TypeSet", "code", "column_name", "database_table", "diagnosis_column",
   "URI", "URIs", "n_keysets", "n_raw", "n_rows", "n_typesets", "pct_of_table",
-  "Member", "Sources"
+  "Member", "Sources", "Large"
 ))
 
 # Internal globals
@@ -3589,6 +3589,25 @@ safe_read_sav_chunked <- function(path, chunk_size = 1000000L, TerminalHiveParti
   })
 }
 
+#' Average on-disk bytes per row for a delimited source
+#'
+#' Shared estimator used to translate a memory budget (MB) into a row count.
+#' Returns \code{NA_real_} when the size can't be trusted -- compressed files
+#' don't reveal their decompressed size, and a missing/zero row or byte count
+#' means there's nothing to divide -- callers should treat \code{NA} as "fall
+#' back to a conservative fixed size" rather than guessing further.
+#' @keywords internal
+.avg_delimited_bytes_per_row <- function(path, total_rows) {
+  if (grepl("\\.gz$", path, ignore.case = TRUE)) return(NA_real_)
+  if (!is.finite(total_rows) || total_rows <= 0) return(NA_real_)
+  source_bytes <- suppressWarnings(as.numeric(file.info(path)$size[1]))
+  if (!is.finite(source_bytes) || source_bytes <= 0) return(NA_real_)
+  source_bytes / total_rows
+}
+
+#' fread, UTF-8 normalization, partition routing, and Arrow can coexist briefly.
+.DELIMITED_MEMORY_SAFETY_MULTIPLIER <- 6
+
 .effective_delimited_chunk_size <- function(path, requested_rows, total_rows = NA_real_,
                                             MaxChunkMemoryMB = 256L) {
   requested_rows <- suppressWarnings(as.integer(requested_rows[1]))
@@ -3600,18 +3619,111 @@ safe_read_sav_chunked <- function(path, chunk_size = 1000000L, TerminalHiveParti
     stop("MaxChunkMemoryMB must be a positive number.")
   }
   fallback_rows <- 250000L
-  compressed <- grepl("\\.gz$", path, ignore.case = TRUE)
-  if (compressed || !is.finite(total_rows) || total_rows <= 0) {
+  avg_bytes <- .avg_delimited_bytes_per_row(path, total_rows)
+  if (!is.finite(avg_bytes)) {
     return(min(requested_rows, fallback_rows))
   }
-  source_bytes <- suppressWarnings(as.numeric(file.info(path)$size[1]))
-  if (!is.finite(source_bytes) || source_bytes <= 0) {
-    return(min(requested_rows, fallback_rows))
-  }
-  # fread, UTF-8 normalization, partition routing, and Arrow can coexist briefly.
-  estimated_rows <- floor((max_mb * 1024^2) / ((source_bytes / total_rows) * 6))
+  estimated_rows <- floor((max_mb * 1024^2) / (avg_bytes * .DELIMITED_MEMORY_SAFETY_MULTIPLIER))
   cap_rows <- max(1000, min(estimated_rows, .Machine$integer.max))
   as.integer(min(requested_rows, cap_rows))
+}
+
+#' Estimated in-memory footprint (MB) for reading n_rows at a given row size
+#' @keywords internal
+.estimate_delimited_memory_mb <- function(n_rows, avg_bytes_per_row) {
+  if (!is.finite(avg_bytes_per_row)) return(Inf)
+  (n_rows * avg_bytes_per_row * .DELIMITED_MEMORY_SAFETY_MULTIPLIER) / 1024^2
+}
+
+#' Normalize a raw partition column vector to sanitized directory-name strings
+#' @keywords internal
+.normalize_partition_value_vector <- function(x) {
+  if (is.numeric(x)) {
+    rounded <- suppressWarnings(round(x))
+    value <- ifelse(!is.na(x) & abs(x - rounded) < 1e-9,
+                    format(rounded, scientific = FALSE, trim = TRUE), as.character(x))
+  } else {
+    value <- trimws(as.character(x))
+  }
+  value[is.na(x) | !nzchar(value)] <- NA_character_
+  ok <- !is.na(value)
+  value[ok] <- sanitize_partition_value(value[ok])
+  value
+}
+
+#' Read only the declared partition key column(s) of a delimited file
+#'
+#' Cheap narrow scan (fread's \code{select=}) used to size up each partition's
+#' row count before deciding whether it can be read as a single piece --
+#' reading a few narrow columns for every row is far cheaper than reading the
+#' full (often wide) table just to find out how it's laid out.
+#' @keywords internal
+.read_delimited_partition_columns <- function(path, reader_options, header, partition_keys) {
+  header_canonical <- canonical_colnames(header)
+  raw_names <- vapply(partition_keys, function(pk) {
+    idx <- match(pk, header_canonical)
+    if (is.na(idx)) stop(sprintf("Partition column %s not found in the header of %s.", pk, basename(path)))
+    header[idx]
+  }, character(1))
+  args <- delimited_fread_args(reader_options)
+  args$select <- raw_names
+  df <- .fread_with_structural_errors(c(.delimited_input(path, reader_options), args), path)
+  df <- .normalize_delimited_frame(df, reader_options, path)
+  canonicalize_dataframe_names(df)
+}
+
+#' Decide how to read a source-partitioned delimited file: whole file, one
+#' partition run at a time, or memory-capped chunks
+#'
+#' Three-tier decision, cheapest first: (1) if the whole file's estimated
+#' in-memory footprint fits \code{MaxWholeFileMemoryMB}, read it in one shot
+#' and let the caller group-and-write by partition value. (2) Otherwise, scan
+#' just the partition key column(s) (cheap even for huge files) and run-length
+#' encode them in file order; if every contiguous partition run's estimated
+#' footprint fits \code{MaxPartitionMemoryMB}, read the file one run at a time
+#' so each partition becomes as close to one piece as the file's actual
+#' layout allows. (3) Otherwise, defer to the existing fixed-size,
+#' memory-capped chunked reader -- correct regardless of how the partition
+#' values are interleaved, just potentially many small pieces.
+#' @return A list with \code{strategy} (\code{"whole_file"}, \code{"partition_aligned"},
+#'   or \code{"chunked"}), \code{chunk_row_plan} (an integer vector of row
+#'   counts to read in sequence, or \code{NULL} when the caller should fall
+#'   back to its own fixed-size stepping), and \code{message} (a log line
+#'   describing the decision).
+#' @keywords internal
+.plan_partition_aligned_read <- function(path, reader_options, header, partition_keys,
+                                         total_rows, MaxWholeFileMemoryMB, MaxPartitionMemoryMB) {
+  avg_bytes <- .avg_delimited_bytes_per_row(path, total_rows)
+  base_name <- basename(path)
+  if (!is.finite(avg_bytes)) {
+    return(list(strategy = "chunked", chunk_row_plan = NULL, message = sprintf(
+      "[CHUNKED-DELIM] %s: cannot estimate an in-memory footprint (compressed or unknown size) -- using memory-capped chunking.",
+      base_name)))
+  }
+  whole_mb <- .estimate_delimited_memory_mb(total_rows, avg_bytes)
+  if (whole_mb <= MaxWholeFileMemoryMB) {
+    return(list(strategy = "whole_file", chunk_row_plan = NULL, message = sprintf(
+      "[CHUNKED-DELIM] %s: estimated %.0f MB fits the whole-file budget (%.0f MB) -- reading directly and routing by partition.",
+      base_name, whole_mb, MaxWholeFileMemoryMB)))
+  }
+  partition_cols <- .read_delimited_partition_columns(path, reader_options, header, partition_keys)
+  values <- lapply(partition_keys, function(pk) .normalize_partition_value_vector(partition_cols[[pk]]))
+  bad <- Reduce(`|`, lapply(values, is.na))
+  if (any(bad)) {
+    stop(sprintf("Partition column(s) %s in %s contain missing or empty values at %d row(s); every row must map to a Hive partition.",
+                paste(partition_keys, collapse = ", "), base_name, sum(bad)))
+  }
+  signatures <- do.call(paste, c(values, sep = "\034"))
+  runs <- rle(signatures)
+  run_mb <- .estimate_delimited_memory_mb(runs$lengths, avg_bytes)
+  if (all(run_mb <= MaxPartitionMemoryMB)) {
+    return(list(strategy = "partition_aligned", chunk_row_plan = as.integer(runs$lengths), message = sprintf(
+      "[CHUNKED-DELIM] %s: whole file is ~%.0f MB (exceeds the %.0f MB whole-file budget), but each of its %d partition run(s) fits the %.0f MB per-partition budget -- reading one partition run at a time.",
+      base_name, whole_mb, MaxWholeFileMemoryMB, length(runs$lengths), MaxPartitionMemoryMB)))
+  }
+  list(strategy = "chunked", chunk_row_plan = NULL, message = sprintf(
+    "[CHUNKED-DELIM] %s: whole file (~%.0f MB) and its largest partition run (~%.0f MB) both exceed budget -- falling back to memory-capped chunking.",
+    base_name, whole_mb, max(run_mb)))
 }
 
 #' Stream a large delimited file to hive-partitioned Parquet in chunks
@@ -3625,10 +3737,11 @@ safe_read_sav_chunked <- function(path, chunk_size = 1000000L, TerminalHiveParti
 #' reconcile against, and a chunk read error fails the file rather than
 #' entering a shrink-retry loop.
 #'
-#' Standard sources retain the fast line-offset reader. Sources configured
-#' with \code{MalformedRowPolicy="append_previous"} use the same logical-record
-#' stream as schema discovery, so quoted multiline fields and verified
-#' one-field continuations remain memory bounded without intermediate files.
+#' Sources configured with \code{MalformedRowPolicy="append_previous"} use the
+#' same logical-record stream as schema discovery. When a large source-defined
+#' partition cannot be read as a whole or by partition run, that one-pass stream
+#' is also used for the fixed-size fallback. This avoids repeatedly rescanning a
+#' growing prefix of the source with \code{fread(skip=...)}.
 #' @export
 read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
                                    all_cols = NULL, col_classes = NULL, year_val = NULL,
@@ -3639,6 +3752,8 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
                                    ManifestPath = NULL, Database = NULL, TableName = NULL,
                                    DuckDBTable = NULL, SourcePath = NULL, SchemaHash = NA_character_,
                                    MaxFileStemTruncate = FALSE, MaxChunkMemoryMB = 256L,
+                                   MaxWholeFileMemoryMB = NULL,
+                                   MaxPartitionMemoryMB = MaxWholeFileMemoryMB,
                                    reader = "csv", reader_options = list(), RepositoryLock = NULL) {
   partition_keys <- canonical_colnames(partition_keys)
   if (!is.null(col_classes)) names(col_classes) <- canonical_colnames(names(col_classes))
@@ -3656,18 +3771,55 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
   }
   total_rows <- if (logical_stream) NA_real_ else
     as.numeric(call_reader(rd, "count_rows", path, reader_options = reader_options))
+  if (!is.null(MaxWholeFileMemoryMB)) {
+    MaxWholeFileMemoryMB <- suppressWarnings(as.numeric(MaxWholeFileMemoryMB[1]))
+    if (!is.finite(MaxWholeFileMemoryMB) || MaxWholeFileMemoryMB <= 0) {
+      stop("MaxWholeFileMemoryMB must be a positive number when supplied.")
+    }
+  }
+  if (!is.null(MaxPartitionMemoryMB)) {
+    MaxPartitionMemoryMB <- suppressWarnings(as.numeric(MaxPartitionMemoryMB[1]))
+    if (!is.finite(MaxPartitionMemoryMB) || MaxPartitionMemoryMB <= 0) {
+      stop("MaxPartitionMemoryMB must be a positive number when supplied.")
+    }
+  }
+  #### Cheapest-first: try a whole-file read, then a partition-aligned read, ####
+  #### before falling back to fixed-size memory-capped chunking. Only       ####
+  #### meaningful when routing to source-defined partitions -- a plain      ####
+  #### single-partition file has no "per-partition" tier to try.           ####
+  read_strategy <- "chunked"
+  chunk_row_plan <- NULL
   requested_chunk_size <- as.integer(chunk_size)
-  chunk_size <- .effective_delimited_chunk_size(
-    path, requested_rows = requested_chunk_size, total_rows = total_rows,
-    MaxChunkMemoryMB = MaxChunkMemoryMB)
-  log_msg(sprintf("[CHUNKED-DELIM] %s: %s (chunk_size=%d%s)", basename(path),
-                  if (logical_stream) "streaming repaired logical records" else
-                    paste(formatC(total_rows, format = "d", big.mark = ","), "rows"),
-                  as.integer(chunk_size),
-                  if (chunk_size < requested_chunk_size) {
-                    sprintf(", requested=%d, memory_cap=%s MB", requested_chunk_size,
-                            format(MaxChunkMemoryMB, trim = TRUE))
-                  } else ""))
+  if (route_source_partitions && !logical_stream && is.finite(total_rows) && total_rows > 0 &&
+      !is.null(MaxWholeFileMemoryMB)) {
+    plan <- .plan_partition_aligned_read(
+      path = path, reader_options = reader_options, header = header,
+      partition_keys = partition_keys, total_rows = total_rows,
+      MaxWholeFileMemoryMB = MaxWholeFileMemoryMB,
+      MaxPartitionMemoryMB = MaxPartitionMemoryMB)
+    read_strategy <- plan$strategy
+    chunk_row_plan <- plan$chunk_row_plan
+    log_msg(plan$message)
+  }
+  if (identical(read_strategy, "chunked")) {
+    chunk_size <- .effective_delimited_chunk_size(
+      path, requested_rows = requested_chunk_size, total_rows = total_rows,
+      MaxChunkMemoryMB = MaxChunkMemoryMB)
+    log_msg(sprintf("[CHUNKED-DELIM] %s: %s (chunk_size=%d%s)", basename(path),
+                    if (logical_stream) "streaming repaired logical records" else
+                      paste(formatC(total_rows, format = "d", big.mark = ","), "rows"),
+                    as.integer(chunk_size),
+                    if (chunk_size < requested_chunk_size) {
+                      sprintf(", requested=%d, memory_cap=%s MB", requested_chunk_size,
+                              format(MaxChunkMemoryMB, trim = TRUE))
+                    } else ""))
+  }
+  one_pass_stream <- logical_stream ||
+    (route_source_partitions && identical(read_strategy, "chunked"))
+  if (one_pass_stream && !logical_stream) {
+    log_msg(sprintf("[CHUNKED-DELIM] %s: using a one-pass record stream for memory-capped chunks.",
+                    basename(path)))
+  }
   chunk_col_classes <- NULL
   if (!is.null(col_classes)) {
     canon_hdr <- canonical_colnames(header)
@@ -3710,19 +3862,7 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
   offset <- 0L; total_written <- 0L
   chunk_counters <- new.env(parent = emptyenv())
   partition_records <- list()
-  normalize_partition_vector <- function(x) {
-    if (is.numeric(x)) {
-      rounded <- suppressWarnings(round(x))
-      value <- ifelse(!is.na(x) & abs(x - rounded) < 1e-9,
-                      format(rounded, scientific = FALSE, trim = TRUE), as.character(x))
-    } else {
-      value <- trimws(as.character(x))
-    }
-    value[is.na(x) | !nzchar(value)] <- NA_character_
-    ok <- !is.na(value)
-    value[ok] <- sanitize_partition_value(value[ok])
-    value
-  }
+  normalize_partition_vector <- .normalize_partition_value_vector
   write_piece <- function(df_piece, actual_values, target_dir, partition_signature) {
     for (pk in intersect(partition_keys, names(df_piece))) df_piece[, (pk) := NULL]
     if (!is.null(all_cols)) df_piece <- align_columns(df_piece, all_cols, col_classes,
@@ -3806,7 +3946,7 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
     invisible(NULL)
   }
   tryCatch({
-    if (logical_stream) {
+    if (one_pass_stream) {
       diagnostics <- .stream_delimited_logical_records(
         path, reader_options = reader_options, chunk_size = chunk_size,
         col_classes = col_classes, callback = process_chunk)
@@ -3816,6 +3956,31 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
                         basename(path), as.integer(diagnostics$RepairCount),
                         diagnostics$ContinuationColumn,
                         paste(diagnostics$RepairLines, collapse = ",")))
+      }
+    } else if (identical(read_strategy, "whole_file")) {
+      df_whole <- call_reader(rd, "read_full", path, reader_options = reader_options,
+                              col_classes = col_classes)
+      process_chunk(df_whole)
+      rm(df_whole)
+      gc(verbose = FALSE)
+      offset <- total_rows
+    } else if (!is.null(chunk_row_plan)) {
+      #### Tier 2: one read per partition run, sized from the file's actual  ####
+      #### layout rather than a fixed step -- reuses the same read_chunk/    ####
+      #### process_chunk machinery as the fixed-size fallback below.        ####
+      for (n_this in chunk_row_plan) {
+        touch_repository_lock(RepositoryLock)
+        log_msg(sprintf("[CHUNKED-DELIM] %s: reading rows %s-%s of %s", basename(path),
+                        formatC(offset + 1L, format = "d", big.mark = ","),
+                        formatC(offset + n_this, format = "d", big.mark = ","),
+                        formatC(total_rows, format = "d", big.mark = ",")))
+        df_chunk <- call_reader(rd, "read_chunk", path, reader_options = reader_options,
+                                offset = offset, n_max = n_this, header = header,
+                                col_classes = col_classes)
+        process_chunk(df_chunk)
+        rm(df_chunk)
+        gc(verbose = FALSE)
+        offset <- offset + n_this
       }
     } else {
       while (offset < total_rows) {
@@ -5728,6 +5893,10 @@ read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL, tab
                              DuckDBTable = DuckDBTable, SourcePath = SourcePath %||% path,
                              SchemaHash = SchemaHash, MaxFileStemTruncate = MaxFileStemTruncate,
                              MaxChunkMemoryMB = DelimitedChunkMaxMB,
+                             MaxWholeFileMemoryMB = {
+                               ram_mb <- suppressWarnings(as.numeric(RAMThreshold[1])) * 1024
+                               if (is.finite(ram_mb) && ram_mb > 0) ram_mb else NULL
+                             },
                              reader = reader, reader_options = reader_options,
                              RepositoryLock = RepositoryLock)
     }

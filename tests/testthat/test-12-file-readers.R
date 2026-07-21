@@ -152,6 +152,52 @@ test_that("delimited chunk sizing enforces a conservative memory cap", {
     250000L)
 })
 
+test_that("partition-aligned read planning picks the cheapest tier that fits", {
+  path <- tempfile(fileext = ".csv")
+  on.exit(unlink(path), add = TRUE)
+  # four contiguous "years", 2500 rows each, wide-ish rows so size is easy to reason about
+  rows <- unlist(lapply(2020:2023, function(yr) rep(sprintf("%d,%s", yr, strrep("x", 200L)), 2500L)))
+  writeLines(c("YEAR,PAD", rows), path)
+  total_rows <- 10000L
+  avg_bytes <- .avg_delimited_bytes_per_row(path, total_rows)
+  expect_true(is.finite(avg_bytes))
+  whole_mb <- .estimate_delimited_memory_mb(total_rows, avg_bytes)
+  run_mb <- .estimate_delimited_memory_mb(2500L, avg_bytes)
+  header <- c("YEAR", "PAD")
+
+  # Tier 1: whole-file budget comfortably covers the estimated size.
+  plan1 <- .plan_partition_aligned_read(
+    path, reader_options = list(), header = header, partition_keys = "YEAR",
+    total_rows = total_rows, MaxWholeFileMemoryMB = whole_mb * 2, MaxPartitionMemoryMB = 1)
+  expect_identical(plan1$strategy, "whole_file")
+  expect_null(plan1$chunk_row_plan)
+
+  # Tier 2: whole file doesn't fit, but each 2500-row year does.
+  plan2 <- .plan_partition_aligned_read(
+    path, reader_options = list(), header = header, partition_keys = "YEAR",
+    total_rows = total_rows, MaxWholeFileMemoryMB = whole_mb / 2, MaxPartitionMemoryMB = run_mb * 2)
+  expect_identical(plan2$strategy, "partition_aligned")
+  expect_identical(plan2$chunk_row_plan, rep(2500L, 4L))
+
+  # Tier 3: neither budget is large enough for anything but memory-capped chunking.
+  plan3 <- .plan_partition_aligned_read(
+    path, reader_options = list(), header = header, partition_keys = "YEAR",
+    total_rows = total_rows, MaxWholeFileMemoryMB = whole_mb / 2, MaxPartitionMemoryMB = run_mb / 2)
+  expect_identical(plan3$strategy, "chunked")
+  expect_null(plan3$chunk_row_plan)
+})
+
+test_that("partition-aligned read planning rejects missing partition values", {
+  path <- tempfile(fileext = ".csv")
+  on.exit(unlink(path), add = TRUE)
+  writeLines(c("YEAR,PAD", "2020,a", ",b", "2021,c"), path)
+  expect_error(
+    .plan_partition_aligned_read(
+      path, reader_options = list(), header = c("YEAR", "PAD"), partition_keys = "YEAR",
+      total_rows = 3L, MaxWholeFileMemoryMB = 0.0001, MaxPartitionMemoryMB = 1000),
+    "missing or empty values")
+})
+
 test_that("chunked delimited loads validate partition columns and clean up on failure", {
   fx <- new_repo_fixture(); on.exit(unlink(fx$root, recursive = TRUE))
   data.table::fwrite(data.table::data.table(YEAR = rep(2018L, 25), AGE = 1:25),

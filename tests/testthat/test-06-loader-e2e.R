@@ -44,6 +44,51 @@ test_that("a direct-read source spanning multiple years is routed to its own Hiv
   expect_identical(sum(rows_per_year), 4L)
 })
 
+test_that("a source too big to read whole but small enough per-partition is read one partition at a time", {
+  fx <- new_repo_fixture(); on.exit(unlink(fx$root, recursive = TRUE))
+  # 200 rows total, 4 contiguous 50-row year blocks, padded wide enough to size reliably
+  rows <- unlist(lapply(2020:2023, function(yr) rep(sprintf("%d,%s", yr, strrep("x", 200L)), 50L)))
+  path <- file.path(fx$src, "tiered.csv")
+  writeLines(c("YEAR,PAD", rows), path)
+
+  total_rows <- 200L
+  avg_bytes <- .avg_delimited_bytes_per_row(path, total_rows)
+  whole_mb <- .estimate_delimited_memory_mb(total_rows, avg_bytes)
+  run_mb <- .estimate_delimited_memory_mb(50L, avg_bytes)
+
+  M <- data.frame(Database = "REG", MDBDir = "REG", TableName = "Tiered", Path = "tiered.csv",
+                  FileType = "csv", PartitionKey = "YEAR", PartitionValue = "2020")
+  r <- run_loader(fx, M, "REG", PartitionBy = "FAIL",
+                  RAMThreshold = (whole_mb / 2) / 1024, DelimitedChunkMaxMB = run_mb * 4)
+  expect_true(any(grepl("reading one partition run at a time", r$output, fixed = TRUE)))
+  for (yr in 2020:2023) {
+    files <- list.files(file.path(fx$pq, "REG_Tiered", sprintf("year=%d", yr)), full.names = TRUE)
+    expect_length(files, 1L)
+    expect_identical(nrow(arrow::read_parquet(files[1])), 50L)
+  }
+})
+
+test_that("an oversized single partition falls back to one-pass memory-capped chunking", {
+  fx <- new_repo_fixture(); on.exit(unlink(fx$root, recursive = TRUE))
+  rows <- rep(sprintf("2020,%s", strrep("x", 200L)), 200L)
+  path <- file.path(fx$src, "tiered2.csv")
+  writeLines(c("YEAR,PAD", rows), path)
+
+  total_rows <- 200L
+  avg_bytes <- .avg_delimited_bytes_per_row(path, total_rows)
+  whole_mb <- .estimate_delimited_memory_mb(total_rows, avg_bytes)
+  run_mb <- .estimate_delimited_memory_mb(total_rows, avg_bytes)
+
+  M <- data.frame(Database = "REG", MDBDir = "REG", TableName = "Tiered2", Path = "tiered2.csv",
+                  FileType = "csv", PartitionKey = "YEAR", PartitionValue = "2020")
+  r <- run_loader(fx, M, "REG", PartitionBy = "FAIL",
+                  RAMThreshold = (whole_mb / 2) / 1024, DelimitedChunkMaxMB = run_mb / 4)
+  expect_true(any(grepl("falling back to memory-capped chunking", r$output, fixed = TRUE)))
+  expect_true(any(grepl("using a one-pass record stream", r$output, fixed = TRUE)))
+  files <- list.files(file.path(fx$pq, "REG_Tiered2", "year=2020"), full.names = TRUE)
+  expect_identical(sum(vapply(files, function(f) nrow(arrow::read_parquet(f)), integer(1))), 200L)
+})
+
 test_that("physical parquet schemas are identical across years despite type drift", {
   fx <- new_repo_fixture(); on.exit(unlink(fx$root, recursive = TRUE))
   # KEY_X numeric one year / character the next; AGE int vs decimal; DIED string vs int
