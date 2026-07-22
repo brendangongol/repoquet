@@ -6,7 +6,7 @@ repository_config <- list(
   PartitionBy       = "FAIL",     # NRows | RAMEstimate | FAIL
   SAV_ROW_THRESHOLD = 4000000L,    # rows above which files stream in chunks
   SAV_CHUNK_SIZE    = 4000000L,    # requested rows per chunk for SAV files
-  DelimitedChunkMaxMB = 256L,      # cap each CSV/TSV chunk's estimated peak memory
+  DelimitedChunkMaxMB = 256L,      # NRows/RAMEstimate only: cap estimated CSV/TSV chunk memory; FAIL starts at SAV_CHUNK_SIZE and shrinks on recoverable memory errors
   DelimitedPartitionMaxMB = NULL,  # optional cap for one source-defined partition (e.g. one
                                    # year of a combined multi-year file) in a single pass;
                                    # NULL uses a conservative bounded route budget. Set an

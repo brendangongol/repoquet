@@ -3732,10 +3732,12 @@ safe_read_sav_chunked <- function(path, chunk_size = 1000000L, TerminalHiveParti
 #' delimited family (csv/tsv/txt/gz). Reuses the same machinery: stale-chunk
 #' cleanup, per-chunk alignment against the agreed schema, partition-column
 #' validation, a reference Arrow schema so every chunk writes identical
-#' physical types, atomic writes, and per-chunk manifest rows. Simpler than
-#' the SAV path by design: delimited files have no declared row count to
-#' reconcile against, and a chunk read error fails the file rather than
-#' entering a shrink-retry loop.
+#' physical types, atomic writes, and per-chunk manifest rows. In ordinary
+#' memory-capped mode, the input size is used to derive a conservative row
+#' chunk. In \code{PartitionBy = "FAIL"} mode, the caller instead requests a
+#' direct-read probe followed by SAV-style adaptive chunk retries: the initial
+#' requested row chunk is attempted and is reduced only after a recoverable
+#' memory-allocation error.
 #'
 #' Sources configured with \code{MalformedRowPolicy="append_previous"} use the
 #' same logical-record stream as schema discovery. When a large source-defined
@@ -3754,6 +3756,8 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
                                    MaxFileStemTruncate = FALSE, MaxChunkMemoryMB = 256L,
                                    MaxWholeFileMemoryMB = NULL,
                                    MaxPartitionMemoryMB = NULL,
+                                   chunk_size_decrement = NULL, min_chunk_size = NULL,
+                                   adaptive_chunking = FALSE,
                                    reader = "csv", reader_options = list(), RepositoryLock = NULL) {
   partition_keys <- canonical_colnames(partition_keys)
   if (!is.null(col_classes)) names(col_classes) <- canonical_colnames(names(col_classes))
@@ -3792,15 +3796,31 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
       stop("MaxPartitionMemoryMB must be a positive number when supplied.")
     }
   }
+  requested_chunk_size <- suppressWarnings(as.integer(chunk_size[1]))
+  if (!is.finite(requested_chunk_size) || requested_chunk_size < 1L) {
+    stop("chunk_size must be a positive integer.")
+  }
+  adaptive_chunking <- isTRUE(adaptive_chunking)
+  chunk_decrement <- if (is.null(chunk_size_decrement)) {
+    max(1L, as.integer(requested_chunk_size * 0.1))
+  } else {
+    max(1L, as.integer(chunk_size_decrement[1]))
+  }
+  chunk_floor <- if (is.null(min_chunk_size)) {
+    chunk_decrement
+  } else {
+    max(1L, as.integer(min_chunk_size[1]))
+  }
+  if (chunk_floor > requested_chunk_size) chunk_floor <- requested_chunk_size
+  current_chunk_size <- requested_chunk_size
   #### Cheapest-first: try a whole-file read, then a partition-aligned read, ####
   #### before falling back to fixed-size memory-capped chunking. Only       ####
   #### meaningful when routing to source-defined partitions -- a plain      ####
   #### single-partition file has no "per-partition" tier to try.           ####
   read_strategy <- "chunked"
   chunk_row_plan <- NULL
-  requested_chunk_size <- as.integer(chunk_size)
   if (route_source_partitions && !logical_stream && is.finite(total_rows) && total_rows > 0 &&
-      !is.null(MaxWholeFileMemoryMB)) {
+      !is.null(MaxWholeFileMemoryMB) && !adaptive_chunking) {
     plan <- .plan_partition_aligned_read(
       path = path, reader_options = reader_options, header = header,
       partition_keys = partition_keys, total_rows = total_rows,
@@ -3813,10 +3833,11 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
     #### Release it before any wide source read begins.                       ####
     gc(verbose = FALSE)
   }
-  if (identical(read_strategy, "chunked")) {
+  if (identical(read_strategy, "chunked") && !adaptive_chunking) {
     chunk_size <- .effective_delimited_chunk_size(
       path, requested_rows = requested_chunk_size, total_rows = total_rows,
       MaxChunkMemoryMB = MaxChunkMemoryMB)
+    current_chunk_size <- chunk_size
     log_msg(sprintf("[CHUNKED-DELIM] %s: %s (chunk_size=%d%s)", basename(path),
                     if (logical_stream) "streaming repaired logical records" else
                       paste(formatC(total_rows, format = "d", big.mark = ","), "rows"),
@@ -3825,9 +3846,14 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
                       sprintf(", requested=%d, memory_cap=%s MB", requested_chunk_size,
                               format(MaxChunkMemoryMB, trim = TRUE))
                     } else ""))
+  } else if (adaptive_chunking) {
+    chunk_size <- current_chunk_size
+    log_msg(sprintf(
+      "[CHUNKED-DELIM] %s: FAIL-mode fallback starts at chunk_size=%d; no calculated memory cap will be applied. Recoverable memory errors reduce by %d rows to a floor of %d.",
+      basename(path), current_chunk_size, chunk_decrement, chunk_floor))
   }
   one_pass_stream <- logical_stream ||
-    (route_source_partitions && identical(read_strategy, "chunked"))
+    (route_source_partitions && identical(read_strategy, "chunked") && !adaptive_chunking)
   if (one_pass_stream && !logical_stream) {
     log_msg(sprintf("[CHUNKED-DELIM] %s: using a one-pass record stream for memory-capped chunks.",
                     basename(path)))
@@ -3986,9 +4012,30 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
                         formatC(offset + 1L, format = "d", big.mark = ","),
                         formatC(offset + n_this, format = "d", big.mark = ","),
                         formatC(total_rows, format = "d", big.mark = ",")))
-        df_chunk <- call_reader(rd, "read_chunk", path, reader_options = reader_options,
-                                offset = offset, n_max = n_this, header = header,
-                                col_classes = col_classes)
+        df_chunk <- tryCatch(
+          call_reader(rd, "read_chunk", path, reader_options = reader_options,
+                      offset = offset, n_max = n_this, header = header,
+                      col_classes = col_classes),
+          error = function(e) e)
+        if (inherits(df_chunk, "error")) {
+          message <- conditionMessage(df_chunk)
+          recoverable_memory_error <- grepl(
+            "cannot allocate|vector memory|memory exhausted|out of memory|std::bad_alloc|cannot reserve",
+            message, ignore.case = TRUE, perl = TRUE)
+          if (!adaptive_chunking || !recoverable_memory_error || current_chunk_size <= chunk_floor) {
+            stop(message)
+          }
+          new_chunk_size <- max(chunk_floor, current_chunk_size - chunk_decrement)
+          log_msg(sprintf(
+            "[CHUNKED-DELIM] %s: chunk at rows %s-%s failed at chunk_size=%d (%s) -- reducing to %d rows and retrying the same offset.",
+            basename(path), formatC(offset + 1L, format = "d", big.mark = ","),
+            formatC(offset + n_this, format = "d", big.mark = ","),
+            current_chunk_size, message, new_chunk_size))
+          current_chunk_size <- new_chunk_size
+          chunk_size <- current_chunk_size
+          gc(verbose = FALSE)
+          next
+        }
         process_chunk(df_chunk)
         rm(df_chunk)
         gc(verbose = FALSE)
@@ -3997,14 +4044,35 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
     } else {
       while (offset < total_rows) {
         touch_repository_lock(RepositoryLock)
-        n_this <- min(as.integer(chunk_size), total_rows - offset)
+        n_this <- min(as.integer(current_chunk_size), total_rows - offset)
         log_msg(sprintf("[CHUNKED-DELIM] %s: reading rows %s-%s of %s", basename(path),
                         formatC(offset + 1L, format = "d", big.mark = ","),
                         formatC(offset + n_this, format = "d", big.mark = ","),
                         formatC(total_rows, format = "d", big.mark = ",")))
-        df_chunk <- call_reader(rd, "read_chunk", path, reader_options = reader_options,
-                                offset = offset, n_max = n_this, header = header,
-                                col_classes = col_classes)
+        df_chunk <- tryCatch(
+          call_reader(rd, "read_chunk", path, reader_options = reader_options,
+                      offset = offset, n_max = n_this, header = header,
+                      col_classes = col_classes),
+          error = function(e) e)
+        if (inherits(df_chunk, "error")) {
+          message <- conditionMessage(df_chunk)
+          recoverable_memory_error <- grepl(
+            "cannot allocate|vector memory|memory exhausted|out of memory|std::bad_alloc|cannot reserve",
+            message, ignore.case = TRUE, perl = TRUE)
+          if (!adaptive_chunking || !recoverable_memory_error || current_chunk_size <= chunk_floor) {
+            stop(message)
+          }
+          new_chunk_size <- max(chunk_floor, current_chunk_size - chunk_decrement)
+          log_msg(sprintf(
+            "[CHUNKED-DELIM] %s: chunk at rows %s-%s failed at chunk_size=%d (%s) -- reducing to %d rows and retrying the same offset.",
+            basename(path), formatC(offset + 1L, format = "d", big.mark = ","),
+            formatC(offset + n_this, format = "d", big.mark = ","),
+            current_chunk_size, message, new_chunk_size))
+          current_chunk_size <- new_chunk_size
+          chunk_size <- current_chunk_size
+          gc(verbose = FALSE)
+          next
+        }
         process_chunk(df_chunk)
         rm(df_chunk)
         gc(verbose = FALSE)
@@ -5859,7 +5927,7 @@ read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL, tab
       rm(RAMLimit); rm(estimated_size_gb); rm(row_size_bytes)
     }
   }
-  if(PartitionBy == "FAIL" && !route_source_partitions){
+  if(PartitionBy == "FAIL"){
     if(PrintStatus){ print("Performing test read") }
     DFTemp <- tryCatch({
       df <- call_reader(rd, "read_full", full_path, reader_options = reader_options,
@@ -5867,15 +5935,21 @@ read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL, tab
       df <- align_columns(df, all_cols, col_classes, max_coerce_na_pct = max_coerce_na_pct)
       list(data = df, error = FALSE, pre_aligned = TRUE)
     }, error = function(e){
-      log_msg(sprintf("[LOAD CHECK COMPLETE] Direct read unsuccessful for %s: %s -- using chunked reader",
+      log_msg(sprintf("[LOAD CHECK COMPLETE] Direct read unsuccessful for %s: %s -- using adaptive chunked reader",
                       basename(full_path), e$message))
       list(data = NULL, error = TRUE)
     })
-    use_chunked <- DFTemp$error
+    #### A source-defined partition needs the chunked writer even after a  ####
+    #### successful probe so its rows can be routed to every Hive partition. ####
+    use_chunked <- DFTemp$error || route_source_partitions
+    if (!DFTemp$error && route_source_partitions) {
+      log_msg(sprintf("[LOAD CHECK COMPLETE] Direct read succeeded for %s; using the chunked partition writer to route source rows to their Hive partitions.",
+                      basename(full_path)))
+    }
     log_msg(sprintf("[LOAD CHECK COMPLETE] %s -> %s reader",
                     basename(full_path), ifelse(use_chunked, "chunked", "direct")))
   }
-  if (route_source_partitions) use_chunked <- TRUE
+  if (route_source_partitions && PartitionBy != "FAIL") use_chunked <- TRUE
   log_msg(sprintf("[READ] %s: %s rows -> %s reader (PartitionBy=%s)", basename(full_path),
                   ifelse(is.na(ncases), "unknown", formatC(ncases, format="d", big.mark=",")),
                   ifelse(use_chunked, "chunked", "direct"), PartitionBy))
@@ -5906,6 +5980,9 @@ read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL, tab
                              DuckDBTable = DuckDBTable, SourcePath = SourcePath %||% path,
                              SchemaHash = SchemaHash, MaxFileStemTruncate = MaxFileStemTruncate,
                              MaxChunkMemoryMB = DelimitedChunkMaxMB,
+                             chunk_size_decrement = chunk_size_decrement,
+                             min_chunk_size = min_chunk_size,
+                             adaptive_chunking = identical(PartitionBy, "FAIL"),
                              MaxPartitionMemoryMB = {
                                part_mb <- if (is.null(DelimitedPartitionMaxMB)) NA_real_ else
                                  suppressWarnings(as.numeric(DelimitedPartitionMaxMB[1]))
@@ -6792,7 +6869,10 @@ discover_schema_relationships <- function(table_schema, include_candidates = TRU
 #' @param SAV_CHUNK_SIZE Integer or NULL. Rows per chunk for SAV file streaming.
 #'   NULL retains the configuration-file value or the default of 1000000L.
 #' @param DelimitedChunkMaxMB Numeric or NULL. Conservative cap on the estimated
-#'   peak memory of each CSV/TSV/TXT chunk. NULL retains the file value or 256.
+#'   peak memory of each CSV/TSV/TXT chunk for \\code{NRows} and
+#'   \\code{RAMEstimate}. \\code{FAIL} instead starts at \\code{SAV_CHUNK_SIZE}
+#'   after its direct-read probe and reduces that row chunk after recoverable
+#'   memory-allocation errors. NULL retains the file value or 256.
 #' @param DelimitedPartitionMaxMB Numeric or NULL. Cap on a single source-defined
 #'   partition's estimated in-memory footprint before reading it one partition
 #'   at a time instead of in fixed-size chunks. NULL retains the file value, or

@@ -58,7 +58,7 @@ test_that("a source too big to read whole but small enough per-partition is read
 
   M <- data.frame(Database = "REG", MDBDir = "REG", TableName = "Tiered", Path = "tiered.csv",
                   FileType = "csv", PartitionKey = "YEAR", PartitionValue = "2020")
-  r <- run_loader(fx, M, "REG", PartitionBy = "FAIL",
+  r <- run_loader(fx, M, "REG", PartitionBy = "RAMEstimate",
                   RAMThreshold = (whole_mb / 2) / 1024, DelimitedChunkMaxMB = run_mb * 4,
                   DelimitedPartitionMaxMB = run_mb * 2)
   expect_true(any(grepl("reading one partition run at a time", r$output, fixed = TRUE)))
@@ -82,7 +82,7 @@ test_that("an oversized single partition falls back to one-pass memory-capped ch
 
   M <- data.frame(Database = "REG", MDBDir = "REG", TableName = "Tiered2", Path = "tiered2.csv",
                   FileType = "csv", PartitionKey = "YEAR", PartitionValue = "2020")
-  r <- run_loader(fx, M, "REG", PartitionBy = "FAIL",
+  r <- run_loader(fx, M, "REG", PartitionBy = "RAMEstimate",
                   RAMThreshold = (whole_mb / 2) / 1024, DelimitedChunkMaxMB = run_mb / 4)
   expect_true(any(grepl("falling back to memory-capped chunking", r$output, fixed = TRUE)))
   expect_true(any(grepl("using a one-pass record stream", r$output, fixed = TRUE)))
@@ -109,7 +109,7 @@ test_that("an unconfigured per-partition budget remains bounded below the whole-
   M <- data.frame(Database = "REG", MDBDir = "REG", TableName = "Tiered3", Path = "tiered3.csv",
                   FileType = "csv", PartitionKey = "YEAR", PartitionValue = "2020")
   # DelimitedPartitionMaxMB is deliberately not passed -- exercising the default
-  r <- run_loader(fx, M, "REG", PartitionBy = "FAIL", RAMThreshold = max_whole_mb / 1024)
+  r <- run_loader(fx, M, "REG", PartitionBy = "RAMEstimate", RAMThreshold = max_whole_mb / 1024)
   expect_false(any(grepl("reading one partition run at a time", r$output, fixed = TRUE)))
   expect_true(any(grepl("falling back to memory-capped chunking", r$output, fixed = TRUE)))
   rows_per_year <- sapply(2020:2023, function(yr) {
@@ -119,6 +119,21 @@ test_that("an unconfigured per-partition budget remains bounded below the whole-
   expect_identical(sum(rows_per_year), 200L)
 })
 
+test_that("FAIL mode probes a multi-year CSV then uses requested adaptive chunks", {
+  fx <- new_repo_fixture(); on.exit(unlink(fx$root, recursive = TRUE))
+  data.table::fwrite(data.table::data.table(YEAR = c(2022L, 2022L, 2022L, 2023L, 2023L, 2023L, 2023L), VALUE = 1:7),
+                     file.path(fx$src, "fail_route.csv"))
+  M <- data.frame(Database = "REG", MDBDir = "REG", TableName = "FailRoute",
+                  Path = "fail_route.csv", FileType = "csv",
+                  PartitionKey = "YEAR", PartitionValue = "2022")
+  r <- run_loader(fx, M, "REG", PartitionBy = "FAIL", DelimitedChunkMaxMB = 1L)
+  expect_true(any(grepl("Direct read succeeded", r$output, fixed = TRUE)))
+  expect_true(any(grepl("FAIL-mode fallback starts at chunk_size=10", r$output, fixed = TRUE)))
+  expect_false(any(grepl("memory_cap=", r$output, fixed = TRUE)))
+  files <- list.files(file.path(fx$pq, "REG_FailRoute"), pattern = "\\.parquet$", recursive = TRUE, full.names = TRUE)
+  expect_length(files, 2L)
+  expect_identical(sum(vapply(files, function(f) nrow(arrow::read_parquet(f)), integer(1))), 7L)
+})
 test_that("physical parquet schemas are identical across years despite type drift", {
   fx <- new_repo_fixture(); on.exit(unlink(fx$root, recursive = TRUE))
   # KEY_X numeric one year / character the next; AGE int vs decimal; DIED string vs int
