@@ -5912,8 +5912,16 @@ read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL, tab
                                if (is.finite(part_mb) && part_mb > 0) part_mb else NULL
                              },
                              MaxWholeFileMemoryMB = {
+                               #### Source-defined partition routing can briefly retain the ####
+                               #### input, normalized frame, partition slices, and Arrow table.####
+                               #### A full RAMThreshold is therefore not a safe one-shot cap.  ####
                                ram_mb <- suppressWarnings(as.numeric(RAMThreshold[1])) * 1024
-                               if (is.finite(ram_mb) && ram_mb > 0) ram_mb else NULL
+                               route_cap_mb <- DelimitedChunkMaxMB * 4
+                               if (is.finite(ram_mb) && ram_mb > 0) {
+                                 min(route_cap_mb, ram_mb / 4)
+                               } else {
+                                 route_cap_mb
+                               }
                              },
                              reader = reader, reader_options = reader_options,
                              RepositoryLock = RepositoryLock)
@@ -6788,8 +6796,8 @@ discover_schema_relationships <- function(table_schema, include_candidates = TRU
 #' @param DelimitedPartitionMaxMB Numeric or NULL. Cap on a single source-defined
 #'   partition's estimated in-memory footprint before reading it one partition
 #'   at a time instead of in fixed-size chunks. NULL retains the file value, or
-#'   (if unset there too) leaves it NULL so \code{ParquetBackEndCreate()}
-#'   derives it from \code{RAMThreshold}.
+#'   uses half of the conservative source-route cap derived from
+#'   \code{DelimitedChunkMaxMB} and \code{RAMThreshold}.
 #' @param SAV_ROW_THRESHOLD Integer. Rows above which SAV files stream in chunks.
 #'   NULL retains the configuration-file value or the default of 1000000L.
 #' @param RAMThreshold Numeric. RAM limit in GB for PartitionBy = "RAMEstimate".
@@ -7029,8 +7037,8 @@ create_repository_project <- function(dir, MasterDBPath = file.path(dir, "source
     "  SAV_ROW_THRESHOLD = 1000000L,    # rows above which files stream in chunks",
     "  SAV_CHUNK_SIZE    = 1000000L,    # requested rows per chunk for SAV files",
     "  DelimitedChunkMaxMB = 256L,      # cap each CSV/TSV chunk's estimated peak memory",
-    "  DelimitedPartitionMaxMB = NULL,  # cap for reading one source-defined partition at a",
-    "                                   # time; NULL derives it from RAMThreshold",
+    "  DelimitedPartitionMaxMB = NULL,  # optional cap for one source-defined partition;",
+    "                                   # NULL uses a conservative bounded route budget",
     "  RAMThreshold      = 30,          # GB, for PartitionBy = \"RAMEstimate\"",
     "  MaxCoerceNAPct    = 25,          # fail a file when coercion destroys more than this % of a column",
     "  SourceFingerprintMode = \"metadata\", # metadata | sha256 | none",
@@ -11382,11 +11390,10 @@ print.RepositoryRunResult <- function(x, ...) {
 #' @param DelimitedPartitionMaxMB Numeric or NULL. Cap (MB) on a single
 #'   source-defined partition's estimated in-memory footprint before a
 #'   route-eligible delimited file is read one partition at a time instead of
-#'   in fixed-size chunks. When NULL (default), derived internally as half of
-#'   the whole-file budget (\code{RAMThreshold * 1024}). Deliberately distinct
-#'   from \code{DelimitedChunkMaxMB} -- a one-shot partition read is neither a
-#'   tiny tight-loop chunk nor a full-file read, so reusing either budget is
-#'   wrong (see \code{\link{read_delimited_chunked}}).
+#'   in fixed-size chunks. When NULL (default), it is half of a conservative
+#'   source-route cap: the smaller of four times \code{DelimitedChunkMaxMB}
+#'   and one quarter of \code{RAMThreshold * 1024}. Supply an explicit value
+#'   only after confirming that the resulting one-shot read fits this machine.
 #'
 #' @export
 ParquetBackEndCreate <- function(MDT, DBLoad, MasterDBPath, completed_checkpoint, CheckpointPath, ParquetBasePath, SAV_ROW_THRESHOLD = 1000000L,

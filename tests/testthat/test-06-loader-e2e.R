@@ -59,7 +59,8 @@ test_that("a source too big to read whole but small enough per-partition is read
   M <- data.frame(Database = "REG", MDBDir = "REG", TableName = "Tiered", Path = "tiered.csv",
                   FileType = "csv", PartitionKey = "YEAR", PartitionValue = "2020")
   r <- run_loader(fx, M, "REG", PartitionBy = "FAIL",
-                  RAMThreshold = (whole_mb / 2) / 1024, DelimitedChunkMaxMB = run_mb * 4)
+                  RAMThreshold = (whole_mb / 2) / 1024, DelimitedChunkMaxMB = run_mb * 4,
+                  DelimitedPartitionMaxMB = run_mb * 2)
   expect_true(any(grepl("reading one partition run at a time", r$output, fixed = TRUE)))
   for (yr in 2020:2023) {
     files <- list.files(file.path(fx$pq, "REG_Tiered", sprintf("year=%d", yr)), full.names = TRUE)
@@ -89,11 +90,9 @@ test_that("an oversized single partition falls back to one-pass memory-capped ch
   expect_identical(sum(vapply(files, function(f) nrow(arrow::read_parquet(f)), integer(1))), 200L)
 })
 
-test_that("an unconfigured per-partition budget defaults to half the whole-file budget, not the full budget", {
-  # A partition sized between half and all of the whole-file budget must be
-  # rejected by the default per-partition cap -- reusing the whole-file budget
-  # directly (the historical bug) would wrongly let a partition this large
-  # through as a single read.
+test_that("an unconfigured per-partition budget remains bounded below the whole-file estimate", {
+  # The default must not promote a source partition to a large one-shot read
+  # merely because the machine-level RAM estimate is high.
   fx <- new_repo_fixture(); on.exit(unlink(fx$root, recursive = TRUE))
   rows <- unlist(lapply(2020:2023, function(yr) rep(sprintf("%d,%s", yr, strrep("x", 200L)), 50L)))
   path <- file.path(fx$src, "tiered3.csv")
@@ -102,9 +101,9 @@ test_that("an unconfigured per-partition budget defaults to half the whole-file 
   total_rows <- 200L
   avg_bytes <- .avg_delimited_bytes_per_row(path, total_rows)
   whole_mb <- .estimate_delimited_memory_mb(total_rows, avg_bytes)
-  # each partition run is ~1/4 of the whole file; pick a whole-file budget
-  # strictly between run_mb and 2*run_mb so half of it excludes the run but
-  # the un-halved budget (the historical bug) would have admitted it
+  # Each partition run is ~1/4 of the whole file. The default route budget is
+  # intentionally much smaller than the RAM estimate, so this source must use
+  # bounded streaming unless the caller explicitly opts into a larger partition cap.
   max_whole_mb <- whole_mb * 0.35
 
   M <- data.frame(Database = "REG", MDBDir = "REG", TableName = "Tiered3", Path = "tiered3.csv",

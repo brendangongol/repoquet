@@ -7,12 +7,11 @@ repository_config <- list(
   SAV_ROW_THRESHOLD = 4000000L,    # rows above which files stream in chunks
   SAV_CHUNK_SIZE    = 4000000L,    # requested rows per chunk for SAV files
   DelimitedChunkMaxMB = 256L,      # cap each CSV/TSV chunk's estimated peak memory
-  DelimitedPartitionMaxMB = NULL,  # cap for reading one source-defined partition (e.g. one
+  DelimitedPartitionMaxMB = NULL,  # optional cap for one source-defined partition (e.g. one
                                    # year of a combined multi-year file) in a single pass;
-                                   # NULL derives it as half of RAMThreshold*1024 -- for a
-                                   # source with multi-GB partitions, set this explicitly to
-                                   # whatever this machine can safely hold in memory at once,
-                                   # rather than relying on the derived default
+                                   # NULL uses a conservative bounded route budget. Set an
+                                   # explicit value only after verifying that the complete
+                                   # read, conversion, and Arrow write fit in memory.
   RAMThreshold      = 30,          # GB, for PartitionBy = "RAMEstimate"
   MaxCoerceNAPct    = 25,          # fail a file when coercion destroys more than this % of a column
   SourceFingerprintMode = "metadata", # metadata | sha256 | none
