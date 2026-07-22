@@ -12,6 +12,9 @@ repository_config <- list(
                                    # NULL uses a conservative bounded route budget. Set an
                                    # explicit value only after verifying that the complete
                                    # read, conversion, and Arrow write fit in memory.
+  FailProbeMode = "subprocess",  # subprocess | in_process | disabled; isolates FAIL direct reads
+  FailProbeTimeoutSeconds = 7200, # after timeout, cleanly fall back to adaptive chunking
+  FailProbeSourcePath = Sys.getenv("REPOQUET_SOURCE", unset = ""), # sourced-development worker code
   RAMThreshold      = 30,          # GB, for PartitionBy = "RAMEstimate"
   MaxCoerceNAPct    = 25,          # fail a file when coercion destroys more than this % of a column
   SourceFingerprintMode = "metadata", # metadata | sha256 | none

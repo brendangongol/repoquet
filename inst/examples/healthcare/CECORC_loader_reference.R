@@ -14,6 +14,7 @@ if (!file.exists(RepoquetSourcePath)) {
        ". Set REPOQUET_SOURCE to the cloned repository's R/repoquet.R file.")
 }
 source(RepoquetSourcePath, local = .GlobalEnv)
+Sys.setenv(REPOQUET_SOURCE = RepoquetSourcePath)
 
 ################################################################################
 #### 1. Initialize the run #####################################################
@@ -148,6 +149,9 @@ run_result <- ParquetBackEndCreate(MDT = MDT,
                                    SAV_CHUNK_SIZE = cfg$SAV_CHUNK_SIZE,
                                    DelimitedChunkMaxMB = cfg$DelimitedChunkMaxMB,
                                    DelimitedPartitionMaxMB = cfg$DelimitedPartitionMaxMB,
+                                   FailProbeMode = cfg$FailProbeMode,
+                                   FailProbeTimeoutSeconds = cfg$FailProbeTimeoutSeconds,
+                                   FailProbeSourcePath = cfg$FailProbeSourcePath,
                                    MaxFileStemTruncate = TRUE,
                                    chunk_size_decrement = NULL,
                                    min_chunk_size = NULL,

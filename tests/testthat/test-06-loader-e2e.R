@@ -119,16 +119,19 @@ test_that("an unconfigured per-partition budget remains bounded below the whole-
   expect_identical(sum(rows_per_year), 200L)
 })
 
-test_that("FAIL mode probes a multi-year CSV then uses requested adaptive chunks", {
+test_that("FAIL mode uses an isolated worker for a multi-year CSV", {
   fx <- new_repo_fixture(); on.exit(unlink(fx$root, recursive = TRUE))
+  old_source <- Sys.getenv("REPOQUET_SOURCE", unset = NA_character_)
+  Sys.setenv(REPOQUET_SOURCE = file.path(repoquet_root, "R", "repoquet.R"))
+  on.exit(if (is.na(old_source)) Sys.unsetenv("REPOQUET_SOURCE") else Sys.setenv(REPOQUET_SOURCE = old_source), add = TRUE)
   data.table::fwrite(data.table::data.table(YEAR = c(2022L, 2022L, 2022L, 2023L, 2023L, 2023L, 2023L), VALUE = 1:7),
                      file.path(fx$src, "fail_route.csv"))
   M <- data.frame(Database = "REG", MDBDir = "REG", TableName = "FailRoute",
                   Path = "fail_route.csv", FileType = "csv",
                   PartitionKey = "YEAR", PartitionValue = "2022")
   r <- run_loader(fx, M, "REG", PartitionBy = "FAIL", DelimitedChunkMaxMB = 1L)
-  expect_true(any(grepl("Direct read succeeded", r$output, fixed = TRUE)))
-  expect_true(any(grepl("FAIL-mode fallback starts at chunk_size=10", r$output, fixed = TRUE)))
+  expect_true(any(grepl("Isolated worker completed direct read-and-write", r$output, fixed = TRUE)))
+  expect_false(any(grepl("FAIL-mode fallback", r$output, fixed = TRUE)))
   expect_false(any(grepl("memory_cap=", r$output, fixed = TRUE)))
   files <- list.files(file.path(fx$pq, "REG_FailRoute"), pattern = "\\.parquet$", recursive = TRUE, full.names = TRUE)
   expect_length(files, 2L)

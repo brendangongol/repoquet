@@ -3757,7 +3757,7 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
                                    MaxWholeFileMemoryMB = NULL,
                                    MaxPartitionMemoryMB = NULL,
                                    chunk_size_decrement = NULL, min_chunk_size = NULL,
-                                   adaptive_chunking = FALSE,
+                                   adaptive_chunking = FALSE, preloaded_data = NULL,
                                    reader = "csv", reader_options = list(), RepositoryLock = NULL) {
   partition_keys <- canonical_colnames(partition_keys)
   if (!is.null(col_classes)) names(col_classes) <- canonical_colnames(names(col_classes))
@@ -3765,7 +3765,14 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
   rd <- get_file_reader(reader)
   if (is.null(rd$read_chunk)) stop(sprintf("Reader '%s' has no read_chunk callback.", reader))
   logical_stream <- .uses_delimited_logical_stream(reader_options)
-  header <- call_reader(rd, "read_header", path, reader_options = reader_options)
+  if (!is.null(preloaded_data) && !is.data.frame(preloaded_data)) {
+    stop("preloaded_data must be a data frame when supplied.")
+  }
+  header <- if (is.null(preloaded_data)) {
+    call_reader(rd, "read_header", path, reader_options = reader_options)
+  } else {
+    names(preloaded_data)
+  }
   header_canonical <- canonical_colnames(header)
   route_source_partitions <- isTRUE(route_source_partitions) &&
     length(partition_keys) > 0L && all(partition_keys %in% header_canonical)
@@ -3773,8 +3780,13 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
     table_dir <- year_dir
     for (i in seq_along(partition_keys)) table_dir <- dirname(table_dir)
   }
-  total_rows <- if (logical_stream) NA_real_ else
+  total_rows <- if (!is.null(preloaded_data)) {
+    as.numeric(nrow(preloaded_data))
+  } else if (logical_stream) {
+    NA_real_
+  } else {
     as.numeric(call_reader(rd, "count_rows", path, reader_options = reader_options))
+  }
   if (!is.null(MaxWholeFileMemoryMB)) {
     MaxWholeFileMemoryMB <- suppressWarnings(as.numeric(MaxWholeFileMemoryMB[1]))
     if (!is.finite(MaxWholeFileMemoryMB) || MaxWholeFileMemoryMB <= 0) {
@@ -3817,9 +3829,9 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
   #### before falling back to fixed-size memory-capped chunking. Only       ####
   #### meaningful when routing to source-defined partitions -- a plain      ####
   #### single-partition file has no "per-partition" tier to try.           ####
-  read_strategy <- "chunked"
+  read_strategy <- if (!is.null(preloaded_data)) "whole_file" else "chunked"
   chunk_row_plan <- NULL
-  if (route_source_partitions && !logical_stream && is.finite(total_rows) && total_rows > 0 &&
+  if (is.null(preloaded_data) && route_source_partitions && !logical_stream && is.finite(total_rows) && total_rows > 0 &&
       !is.null(MaxWholeFileMemoryMB) && !adaptive_chunking) {
     plan <- .plan_partition_aligned_read(
       path = path, reader_options = reader_options, header = header,
@@ -3996,10 +4008,15 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
                         paste(diagnostics$RepairLines, collapse = ",")))
       }
     } else if (identical(read_strategy, "whole_file")) {
-      df_whole <- call_reader(rd, "read_full", path, reader_options = reader_options,
-                              col_classes = col_classes)
+      df_whole <- if (is.null(preloaded_data)) {
+        call_reader(rd, "read_full", path, reader_options = reader_options,
+                    col_classes = col_classes)
+      } else {
+        preloaded_data
+      }
       process_chunk(df_whole)
       rm(df_whole)
+      preloaded_data <- NULL
       gc(verbose = FALSE)
       offset <- total_rows
     } else if (!is.null(chunk_row_plan)) {
@@ -5839,10 +5856,138 @@ validate_duckdb_table <- function(con, table_name, schema_registry = NULL, stric
 #' unlink(c(MasterDBPath, year_dir, LogPath), recursive = TRUE)
 #' }
 #' @export
+.resolve_fail_probe_source <- function(source_path = NULL) {
+  candidates <- c(
+    source_path,
+    Sys.getenv("REPOQUET_SOURCE", unset = ""),
+    getOption("repoquet.source.path", default = ""),
+    file.path(getwd(), "R", "repoquet.R"))
+  candidates <- unique(as.character(candidates))
+  candidates <- candidates[!is.na(candidates) & nzchar(trimws(candidates))]
+  hit <- candidates[file.exists(candidates)]
+  if (length(hit) == 0L) return(NA_character_)
+  normalizePath(hit[1], winslash = "/", mustWork = TRUE)
+}
+
+.hardened_fail_probe_worker <- function(payload_path) {
+  payload <- readRDS(payload_path)
+  previous_run <- begin_repository_run(LogPath = payload$LogPath, RunId = payload$RunId)
+  on.exit(restore_repository_run(previous_run), add = TRUE)
+  tryCatch({
+    if (.uses_delimited_logical_stream(payload$reader_options)) {
+      stop("Hardened direct mode is unavailable for MalformedRowPolicy='append_previous'; using the logical-record chunked reader preserves its repair semantics.")
+    }
+    rd <- get_file_reader(payload$reader)
+    df <- call_reader(rd, "read_full", payload$path,
+                      reader_options = payload$reader_options,
+                      col_classes = payload$col_classes)
+    if (!is.data.frame(df)) stop("Direct worker reader did not return a data frame.")
+    result <- read_delimited_chunked(
+      path = payload$path, chunk_size = payload$chunk_size,
+      year_dir = payload$year_dir, table_dir = payload$table_dir,
+      all_cols = payload$all_cols, col_classes = payload$col_classes,
+      year_val = payload$year_val, TerminalHivePartition = payload$TerminalHivePartition,
+      partition_keys = payload$partition_keys, partition_values = payload$partition_values,
+      route_source_partitions = payload$route_source_partitions,
+      max_coerce_na_pct = payload$max_coerce_na_pct,
+      ManifestPath = payload$ManifestPath, Database = payload$Database,
+      TableName = payload$TableName, DuckDBTable = payload$DuckDBTable,
+      SourcePath = payload$SourcePath, SchemaHash = payload$SchemaHash,
+      MaxFileStemTruncate = payload$MaxFileStemTruncate,
+      reader = payload$reader, reader_options = payload$reader_options,
+      RepositoryLock = NULL, preloaded_data = df)
+    rm(df)
+    gc(verbose = FALSE)
+    list(ok = TRUE, result = result, error = NA_character_)
+  }, error = function(e) {
+    list(ok = FALSE, result = NULL, error = conditionMessage(e))
+  })
+}
+
+.run_hardened_fail_probe <- function(path, year_dir, table_dir, all_cols, col_classes,
+                                     year_val, TerminalHivePartition, partition_keys,
+                                     partition_values, route_source_partitions,
+                                     max_coerce_na_pct, ManifestPath, Database, TableName,
+                                     DuckDBTable, SourcePath, SchemaHash,
+                                     MaxFileStemTruncate, reader, reader_options,
+                                     chunk_size, timeout_seconds = 7200,
+                                     source_path = NULL) {
+  if (!requireNamespace("processx", quietly = TRUE)) {
+    return(list(ok = FALSE, error = "Hardened FAIL mode requires the processx package."))
+  }
+  timeout_seconds <- suppressWarnings(as.numeric(timeout_seconds[1]))
+  if (!is.finite(timeout_seconds) || timeout_seconds <= 0) {
+    return(list(ok = FALSE, error = "FailProbeTimeoutSeconds must be a positive number."))
+  }
+  workflow_source <- .resolve_fail_probe_source(source_path)
+  payload_path <- tempfile("repoquet_fail_payload_", fileext = ".rds")
+  result_path <- tempfile("repoquet_fail_result_", fileext = ".rds")
+  script_path <- tempfile("repoquet_fail_worker_", fileext = ".R")
+  on.exit(unlink(c(payload_path, result_path, script_path), force = TRUE), add = TRUE)
+  payload <- list(
+    path = path, year_dir = year_dir, table_dir = table_dir, all_cols = all_cols,
+    col_classes = col_classes, year_val = year_val,
+    TerminalHivePartition = TerminalHivePartition, partition_keys = partition_keys,
+    partition_values = partition_values, route_source_partitions = route_source_partitions,
+    max_coerce_na_pct = max_coerce_na_pct, ManifestPath = ManifestPath,
+    Database = Database, TableName = TableName, DuckDBTable = DuckDBTable,
+    SourcePath = SourcePath, SchemaHash = SchemaHash,
+    MaxFileStemTruncate = MaxFileStemTruncate, reader = reader,
+    reader_options = reader_options, chunk_size = chunk_size,
+    LogPath = resolve_log_path(), RunId = resolve_run_id())
+  saveRDS(payload, payload_path)
+  worker_script <- c(
+    "args <- commandArgs(trailingOnly = TRUE)",
+    "source_path <- args[1]; payload_path <- args[2]; result_path <- args[3]",
+    "from_source <- !is.na(source_path) && nzchar(source_path) && file.exists(source_path)",
+    "if (from_source) source(source_path) else if (requireNamespace('repoquet', quietly = TRUE)) loadNamespace('repoquet') else stop('Cannot load repoquet worker code. Set REPOQUET_SOURCE or install repoquet.')",
+    "worker <- if (from_source) .hardened_fail_probe_worker else getFromNamespace('.hardened_fail_probe_worker', 'repoquet')",
+    "response <- tryCatch(worker(payload_path), error = function(e) list(ok = FALSE, result = NULL, error = conditionMessage(e)))",
+    "tmp <- paste0(result_path, '.tmp')",
+    "saveRDS(response, tmp)",
+    "if (!file.rename(tmp, result_path)) stop('Could not publish hardened FAIL worker result.')",
+    "quit(save = 'no', status = if (isTRUE(response$ok)) 0L else 1L)")
+  writeLines(worker_script, script_path, useBytes = TRUE)
+  rscript <- file.path(R.home("bin"), if (.Platform$OS.type == "windows") "Rscript.exe" else "Rscript")
+  if (!file.exists(rscript)) rscript <- Sys.which("Rscript")
+  if (!nzchar(rscript) || !file.exists(rscript)) {
+    return(list(ok = FALSE, error = "Rscript is unavailable for hardened FAIL mode."))
+  }
+  log_msg(sprintf("[FAIL PROBE] Launching isolated direct read-and-write worker for %s (timeout=%ss).",
+                  basename(path), format(timeout_seconds, trim = TRUE)))
+  # processx::run() receives its timeout in whole seconds. Its internal poll
+  # timeout is millisecond-based, so passing seconds * 1000 overflows there.
+  timeout_processx <- as.integer(min(.Machine$integer.max,
+                                     max(1, ceiling(timeout_seconds))))
+  proc <- tryCatch(
+    processx::run(rscript, args = c("--vanilla", script_path,
+                                    ifelse(is.na(workflow_source), "", workflow_source),
+                                    payload_path, result_path),
+                  error_on_status = FALSE, timeout = timeout_processx,
+                  echo = FALSE),
+    error = function(e) e)
+  if (inherits(proc, "error")) {
+    return(list(ok = FALSE, error = sprintf("Hardened FAIL worker did not complete: %s", conditionMessage(proc))))
+  }
+  if (!file.exists(result_path)) {
+    detail <- trimws(paste(c(proc$stdout %||% "", proc$stderr %||% ""), collapse = " "))
+    return(list(ok = FALSE, error = sprintf("Hardened FAIL worker exited with status %s without a result%s.",
+                                            proc$status %||% "unknown",
+                                            if (nzchar(detail)) paste0(": ", detail) else "")))
+  }
+  response <- tryCatch(readRDS(result_path), error = function(e) list(ok = FALSE, error = conditionMessage(e)))
+  if (!isTRUE(response$ok)) {
+    return(list(ok = FALSE, error = response$error %||% "Hardened FAIL worker failed without a diagnostic."))
+  }
+  log_msg(sprintf("[FAIL PROBE] Isolated worker completed direct read-and-write for %s.", basename(path)))
+  list(ok = TRUE, result = response$result)
+}
 read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL, table_dir = NULL,
                     col_classes = NULL, year_val = NULL, PrintStatus = FALSE, TerminalHivePartition = FALSE,
                     MDTSelect, MasterDBPath, reader, PartitionBy, SAV_ROW_THRESHOLD, RAMThreshold, SAV_CHUNK_SIZE,
                     DelimitedChunkMaxMB = 256L, DelimitedPartitionMaxMB = NULL,
+                    FailProbeMode = c("subprocess", "in_process", "disabled"),
+                    FailProbeTimeoutSeconds = 7200, FailProbeSourcePath = NULL,
                     chunk_size_decrement = NULL, min_chunk_size = NULL, partition_keys = "YEAR",
                     partition_values = NULL, max_coerce_na_pct = NULL,
                      ManifestPath = NULL, Database = NULL, TableName = NULL,
@@ -5850,6 +5995,7 @@ read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL, tab
                     MaxFileStemTruncate = FALSE, accept_partial = FALSE,
                     RepositoryLock = NULL) {
   PartitionBy <- match.arg(PartitionBy, c("NRows", "RAMEstimate", "FAIL"))
+  FailProbeMode <- match.arg(FailProbeMode)
   row_options <- MDTSelect[MDTSelect$Path == path, , drop = FALSE]
   reader_options <- if (nrow(row_options) > 0L) reader_options_for_row(row_options[1, , drop = FALSE]) else list()
   full_path <- if (nrow(row_options) > 0L) {
@@ -5928,26 +6074,50 @@ read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL, tab
     }
   }
   if(PartitionBy == "FAIL"){
-    if(PrintStatus){ print("Performing test read") }
-    DFTemp <- tryCatch({
-      df <- call_reader(rd, "read_full", full_path, reader_options = reader_options,
-                        col_classes = col_classes)
-      df <- align_columns(df, all_cols, col_classes, max_coerce_na_pct = max_coerce_na_pct)
-      list(data = df, error = FALSE, pre_aligned = TRUE)
-    }, error = function(e){
-      log_msg(sprintf("[LOAD CHECK COMPLETE] Direct read unsuccessful for %s: %s -- using adaptive chunked reader",
-                      basename(full_path), e$message))
-      list(data = NULL, error = TRUE)
-    })
-    #### A source-defined partition needs the chunked writer even after a  ####
-    #### successful probe so its rows can be routed to every Hive partition. ####
-    use_chunked <- DFTemp$error || route_source_partitions
-    if (!DFTemp$error && route_source_partitions) {
-      log_msg(sprintf("[LOAD CHECK COMPLETE] Direct read succeeded for %s; using the chunked partition writer to route source rows to their Hive partitions.",
-                      basename(full_path)))
+    if (delimited_reader && FailProbeMode == "subprocess") {
+      probe <- .run_hardened_fail_probe(
+        path = full_path, year_dir = year_dir, table_dir = table_dir,
+        all_cols = all_cols, col_classes = col_classes, year_val = year_val,
+        TerminalHivePartition = TerminalHivePartition,
+        partition_keys = partition_keys, partition_values = partition_values,
+        route_source_partitions = route_source_partitions,
+        max_coerce_na_pct = max_coerce_na_pct,
+        ManifestPath = ManifestPath, Database = Database, TableName = TableName,
+        DuckDBTable = DuckDBTable, SourcePath = SourcePath %||% path,
+        SchemaHash = SchemaHash, MaxFileStemTruncate = MaxFileStemTruncate,
+        reader = reader, reader_options = reader_options, chunk_size = SAV_CHUNK_SIZE,
+        timeout_seconds = FailProbeTimeoutSeconds, source_path = FailProbeSourcePath)
+      if (isTRUE(probe$ok)) return(probe$result)
+      log_msg(sprintf("[FAIL PROBE] Isolated direct worker did not complete for %s: %s -- using adaptive chunked reader in the main process.",
+                      basename(full_path), probe$error %||% "unknown worker failure"))
+      DFTemp <- list(data = NULL, error = TRUE)
+      use_chunked <- TRUE
+    } else if (delimited_reader && FailProbeMode == "disabled") {
+      log_msg(sprintf("[FAIL PROBE] Direct probe disabled for %s -- using adaptive chunked reader.", basename(full_path)))
+      DFTemp <- list(data = NULL, error = TRUE)
+      use_chunked <- TRUE
+    } else {
+      if(PrintStatus){ print("Performing test read") }
+      DFTemp <- tryCatch({
+        df <- call_reader(rd, "read_full", full_path, reader_options = reader_options,
+                          col_classes = col_classes)
+        df <- align_columns(df, all_cols, col_classes, max_coerce_na_pct = max_coerce_na_pct)
+        list(data = df, error = FALSE, pre_aligned = TRUE)
+      }, error = function(e){
+        log_msg(sprintf("[LOAD CHECK COMPLETE] Direct read unsuccessful for %s: %s -- using adaptive chunked reader",
+                        basename(full_path), e$message))
+        list(data = NULL, error = TRUE)
+      })
+      #### A source-defined partition needs the chunked writer even after a  ####
+      #### successful in-process probe so rows reach every Hive partition.   ####
+      use_chunked <- DFTemp$error || route_source_partitions
+      if (!DFTemp$error && route_source_partitions) {
+        log_msg(sprintf("[LOAD CHECK COMPLETE] Direct read succeeded for %s; using the chunked partition writer to route source rows to their Hive partitions.",
+                        basename(full_path)))
+      }
+      log_msg(sprintf("[LOAD CHECK COMPLETE] %s -> %s reader",
+                      basename(full_path), ifelse(use_chunked, "chunked", "direct")))
     }
-    log_msg(sprintf("[LOAD CHECK COMPLETE] %s -> %s reader",
-                    basename(full_path), ifelse(use_chunked, "chunked", "direct")))
   }
   if (route_source_partitions && PartitionBy != "FAIL") use_chunked <- TRUE
   log_msg(sprintf("[READ] %s: %s rows -> %s reader (PartitionBy=%s)", basename(full_path),
@@ -6869,8 +7039,8 @@ discover_schema_relationships <- function(table_schema, include_candidates = TRU
 #' @param SAV_CHUNK_SIZE Integer or NULL. Rows per chunk for SAV file streaming.
 #'   NULL retains the configuration-file value or the default of 1000000L.
 #' @param DelimitedChunkMaxMB Numeric or NULL. Conservative cap on the estimated
-#'   peak memory of each CSV/TSV/TXT chunk for \\code{NRows} and
-#'   \\code{RAMEstimate}. \\code{FAIL} instead starts at \\code{SAV_CHUNK_SIZE}
+#'   peak memory of each CSV/TSV/TXT chunk for \code{NRows} and
+#'   \code{RAMEstimate}. \code{FAIL} instead starts at \code{SAV_CHUNK_SIZE}
 #'   after its direct-read probe and reduces that row chunk after recoverable
 #'   memory-allocation errors. NULL retains the file value or 256.
 #' @param DelimitedPartitionMaxMB Numeric or NULL. Cap on a single source-defined
@@ -6878,6 +7048,14 @@ discover_schema_relationships <- function(table_schema, include_candidates = TRU
 #'   at a time instead of in fixed-size chunks. NULL retains the file value, or
 #'   uses half of the conservative source-route cap derived from
 #'   \code{DelimitedChunkMaxMB} and \code{RAMThreshold}.
+#' @param FailProbeMode Character. For \code{PartitionBy = "FAIL"} delimited
+#'   sources, use \code{"subprocess"} (default) to isolate direct read-and-write,
+#'   \code{"in_process"} for legacy behavior, or \code{"disabled"} to chunk directly.
+#' @param FailProbeTimeoutSeconds Positive number of seconds allowed for an isolated
+#'   direct worker before the parent falls back to adaptive chunking.
+#' @param FailProbeSourcePath Optional source-tree \code{R/repoquet.R} path for
+#'   sourced-development workers. Defaults to \code{REPOQUET_SOURCE}, then the
+#'   current working directory; installed packages load their namespace instead.
 #' @param SAV_ROW_THRESHOLD Integer. Rows above which SAV files stream in chunks.
 #'   NULL retains the configuration-file value or the default of 1000000L.
 #' @param RAMThreshold Numeric. RAM limit in GB for PartitionBy = "RAMEstimate".
@@ -6918,6 +7096,9 @@ load_repository_config <- function(
     SAV_CHUNK_SIZE = NULL,
     DelimitedChunkMaxMB = NULL,
     DelimitedPartitionMaxMB = NULL,
+    FailProbeMode = NULL,
+    FailProbeTimeoutSeconds = NULL,
+    FailProbeSourcePath = NULL,
     SAV_ROW_THRESHOLD = NULL,
     RAMThreshold = NULL,
     PartitionBy = NULL,
@@ -6954,6 +7135,9 @@ load_repository_config <- function(
     SAV_CHUNK_SIZE = 1000000L,
     DelimitedChunkMaxMB = 256L,
     DelimitedPartitionMaxMB = NULL,
+    FailProbeMode = "subprocess",
+    FailProbeTimeoutSeconds = 7200,
+    FailProbeSourcePath = NULL,
     SAV_ROW_THRESHOLD = 1000000L,
     RAMThreshold = 30,
     PartitionBy = "NRows",
@@ -6996,6 +7180,9 @@ load_repository_config <- function(
     SAV_CHUNK_SIZE = SAV_CHUNK_SIZE,
     DelimitedChunkMaxMB = DelimitedChunkMaxMB,
     DelimitedPartitionMaxMB = DelimitedPartitionMaxMB,
+    FailProbeMode = FailProbeMode,
+    FailProbeTimeoutSeconds = FailProbeTimeoutSeconds,
+    FailProbeSourcePath = FailProbeSourcePath,
     SAV_ROW_THRESHOLD = SAV_ROW_THRESHOLD,
     RAMThreshold = RAMThreshold,
     PartitionBy = PartitionBy,
@@ -7048,6 +7235,17 @@ load_repository_config <- function(
         cfg$DelimitedPartitionMaxMB < 1) {
       stop("repository_config DelimitedPartitionMaxMB must be a positive number when set.")
     }
+  }
+  cfg$FailProbeMode <- match.arg(as.character(cfg$FailProbeMode[1]),
+                                   c("subprocess", "in_process", "disabled"))
+  cfg$FailProbeTimeoutSeconds <- suppressWarnings(as.numeric(cfg$FailProbeTimeoutSeconds[1]))
+  if (length(cfg$FailProbeTimeoutSeconds) != 1L || is.na(cfg$FailProbeTimeoutSeconds) ||
+      cfg$FailProbeTimeoutSeconds < 1) {
+    stop("repository_config FailProbeTimeoutSeconds must be a positive number.")
+  }
+  if (!is.null(cfg$FailProbeSourcePath)) {
+    cfg$FailProbeSourcePath <- as.character(cfg$FailProbeSourcePath[1])
+    if (is.na(cfg$FailProbeSourcePath) || !nzchar(trimws(cfg$FailProbeSourcePath))) cfg$FailProbeSourcePath <- NULL
   }
   cfg$SchemaFastReadMaxBytes <- suppressWarnings(as.numeric(cfg$SchemaFastReadMaxBytes))
   if (length(cfg$SchemaFastReadMaxBytes) != 1L || is.na(cfg$SchemaFastReadMaxBytes) ||
@@ -7226,6 +7424,9 @@ create_repository_project <- function(dir, MasterDBPath = file.path(dir, "source
     "                                  SAV_CHUNK_SIZE = cfg$SAV_CHUNK_SIZE,",
     "                                  DelimitedChunkMaxMB = cfg$DelimitedChunkMaxMB,",
     "                                  DelimitedPartitionMaxMB = cfg$DelimitedPartitionMaxMB,",
+    "                                  FailProbeMode = cfg$FailProbeMode,",
+    "                                  FailProbeTimeoutSeconds = cfg$FailProbeTimeoutSeconds,",
+    "                                  FailProbeSourcePath = cfg$FailProbeSourcePath,",
     "                                  MaxFileStemTruncate = TRUE, TerminalHivePartition = FALSE,",
     "                                  SchemaRegistryPath = paths$SchemaRegistryPath,",
     "                                  TableSchemaPath = paths$TableSchemaPath,",
@@ -11208,7 +11409,10 @@ generic_db_loader <- function(files, base_path, db_prefix, completed_checkpoint,
                               comprehensive, col_classes = NULL, reader = NULL,
                               PartitionBy, RAMThreshold, SAV_ROW_THRESHOLD,
                               LogPath, SAV_CHUNK_SIZE, DelimitedChunkMaxMB = 256L,
-                              DelimitedPartitionMaxMB = NULL, PrintStatus = FALSE,
+                              DelimitedPartitionMaxMB = NULL,
+                              FailProbeMode = c("subprocess", "in_process", "disabled"),
+                              FailProbeTimeoutSeconds = 7200, FailProbeSourcePath = NULL,
+                              PrintStatus = FALSE,
                               ManifestPath = NULL, SchemaRegistryPath = NULL, schema_registry = NULL,
                               TerminalHivePartition = FALSE,
                               MaxFileStemTruncate = FALSE,
@@ -11218,6 +11422,7 @@ generic_db_loader <- function(files, base_path, db_prefix, completed_checkpoint,
                               SourceFingerprintMode = c("metadata", "sha256", "none"),
                               RunId = NULL) {
   SourceFingerprintMode <- match.arg(SourceFingerprintMode)
+  FailProbeMode <- match.arg(FailProbeMode)
   MDTSelect <- data.table::as.data.table(MDTSelect)
   MDTSelect[, RepositoryKey := repository_checkpoint_key(
     MDTSelect, MasterDBPath = if (SourceFingerprintMode == "none") NULL else base_path,
@@ -11274,6 +11479,8 @@ generic_db_loader <- function(files, base_path, db_prefix, completed_checkpoint,
                     MDTSelect = row_meta, MasterDBPath = base_path, reader = reader_file, PartitionBy = PartitionBy,
                     SAV_ROW_THRESHOLD = SAV_ROW_THRESHOLD, RAMThreshold = RAMThreshold, SAV_CHUNK_SIZE = SAV_CHUNK_SIZE,
                     DelimitedChunkMaxMB = DelimitedChunkMaxMB, DelimitedPartitionMaxMB = DelimitedPartitionMaxMB,
+                    FailProbeMode = FailProbeMode, FailProbeTimeoutSeconds = FailProbeTimeoutSeconds,
+                    FailProbeSourcePath = FailProbeSourcePath,
                     chunk_size_decrement = chunk_size_decrement, min_chunk_size = min_chunk_size,
                     partition_keys = pspec$keys, partition_values = pspec$values,
                     max_coerce_na_pct = MaxCoerceNAPct,
@@ -11479,6 +11686,8 @@ print.RepositoryRunResult <- function(x, ...) {
 ParquetBackEndCreate <- function(MDT, DBLoad, MasterDBPath, completed_checkpoint, CheckpointPath, ParquetBasePath, SAV_ROW_THRESHOLD = 1000000L,
                                  PartitionBy, RAMThreshold, SAV_CHUNK_SIZE = 1000000L, DelimitedChunkMaxMB = 256L,
                                  DelimitedPartitionMaxMB = NULL,
+                                 FailProbeMode = c("subprocess", "in_process", "disabled"),
+                                 FailProbeTimeoutSeconds = 7200, FailProbeSourcePath = NULL,
                                  LogPath, n_workers = 1, PrintStatus = FALSE,
                                  TerminalHivePartition = FALSE, MaxFileStemTruncate = TRUE,
                                  chunk_size_decrement = NULL, min_chunk_size = NULL,
@@ -11503,6 +11712,7 @@ ParquetBackEndCreate <- function(MDT, DBLoad, MasterDBPath, completed_checkpoint
                                  RemoteDownloadFunction = NULL) {
   PartitionBy <- match.arg(PartitionBy, c("NRows", "RAMEstimate", "FAIL"))
   SourceFingerprintMode <- match.arg(SourceFingerprintMode)
+  FailProbeMode <- match.arg(FailProbeMode)
   CleanupAfterPhase <- match.arg(CleanupAfterPhase, c("all", "database", "none"))
   RemoteDefaultDownloadPolicy <- match.arg(RemoteDefaultDownloadPolicy)
   DelimitedChunkMaxMB <- suppressWarnings(as.numeric(DelimitedChunkMaxMB[1]))
@@ -11679,6 +11889,8 @@ ParquetBackEndCreate <- function(MDT, DBLoad, MasterDBPath, completed_checkpoint
                                                 SAV_CHUNK_SIZE = SAV_CHUNK_SIZE,
                                                 DelimitedChunkMaxMB = DelimitedChunkMaxMB,
                                                 DelimitedPartitionMaxMB = DelimitedPartitionMaxMB,
+                                                FailProbeMode = FailProbeMode, FailProbeTimeoutSeconds = FailProbeTimeoutSeconds,
+                                                FailProbeSourcePath = FailProbeSourcePath,
                                                 chunk_size_decrement = chunk_size_decrement,
                                                 min_chunk_size = min_chunk_size,
                                                 registry_resolved = TRUE,
