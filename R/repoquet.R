@@ -3753,7 +3753,7 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
                                    DuckDBTable = NULL, SourcePath = NULL, SchemaHash = NA_character_,
                                    MaxFileStemTruncate = FALSE, MaxChunkMemoryMB = 256L,
                                    MaxWholeFileMemoryMB = NULL,
-                                   MaxPartitionMemoryMB = MaxWholeFileMemoryMB,
+                                   MaxPartitionMemoryMB = NULL,
                                    reader = "csv", reader_options = list(), RepositoryLock = NULL) {
   partition_keys <- canonical_colnames(partition_keys)
   if (!is.null(col_classes)) names(col_classes) <- canonical_colnames(names(col_classes))
@@ -3777,7 +3777,16 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
       stop("MaxWholeFileMemoryMB must be a positive number when supplied.")
     }
   }
-  if (!is.null(MaxPartitionMemoryMB)) {
+  if (is.null(MaxPartitionMemoryMB)) {
+    #### A one-shot partition read is neither a tiny tight-loop chunk nor a  ####
+    #### full-file read -- reusing either budget is wrong. Reusing the      ####
+    #### whole-file budget let a single ~22 GB partition read through and   ####
+    #### crash the session; reusing the tiny chunk budget makes this tier   ####
+    #### unreachable for any realistically-sized partition. Default to half ####
+    #### the whole-file budget when one is configured, else fall back to    ####
+    #### the chunk budget for standalone/test callers.                      ####
+    MaxPartitionMemoryMB <- if (!is.null(MaxWholeFileMemoryMB)) MaxWholeFileMemoryMB / 2 else MaxChunkMemoryMB
+  } else {
     MaxPartitionMemoryMB <- suppressWarnings(as.numeric(MaxPartitionMemoryMB[1]))
     if (!is.finite(MaxPartitionMemoryMB) || MaxPartitionMemoryMB <= 0) {
       stop("MaxPartitionMemoryMB must be a positive number when supplied.")
@@ -3800,6 +3809,9 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
     read_strategy <- plan$strategy
     chunk_row_plan <- plan$chunk_row_plan
     log_msg(plan$message)
+    #### The narrow partition scan can be large (one value per source row).  ####
+    #### Release it before any wide source read begins.                       ####
+    gc(verbose = FALSE)
   }
   if (identical(read_strategy, "chunked")) {
     chunk_size <- .effective_delimited_chunk_size(
@@ -5762,7 +5774,8 @@ validate_duckdb_table <- function(con, table_name, schema_registry = NULL, stric
 read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL, table_dir = NULL,
                     col_classes = NULL, year_val = NULL, PrintStatus = FALSE, TerminalHivePartition = FALSE,
                     MDTSelect, MasterDBPath, reader, PartitionBy, SAV_ROW_THRESHOLD, RAMThreshold, SAV_CHUNK_SIZE,
-                    DelimitedChunkMaxMB = 256L, chunk_size_decrement = NULL, min_chunk_size = NULL, partition_keys = "YEAR",
+                    DelimitedChunkMaxMB = 256L, DelimitedPartitionMaxMB = NULL,
+                    chunk_size_decrement = NULL, min_chunk_size = NULL, partition_keys = "YEAR",
                     partition_values = NULL, max_coerce_na_pct = NULL,
                      ManifestPath = NULL, Database = NULL, TableName = NULL,
                     DuckDBTable = NULL, SourcePath = NULL, SchemaHash = NA_character_,
@@ -5893,6 +5906,11 @@ read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL, tab
                              DuckDBTable = DuckDBTable, SourcePath = SourcePath %||% path,
                              SchemaHash = SchemaHash, MaxFileStemTruncate = MaxFileStemTruncate,
                              MaxChunkMemoryMB = DelimitedChunkMaxMB,
+                             MaxPartitionMemoryMB = {
+                               part_mb <- if (is.null(DelimitedPartitionMaxMB)) NA_real_ else
+                                 suppressWarnings(as.numeric(DelimitedPartitionMaxMB[1]))
+                               if (is.finite(part_mb) && part_mb > 0) part_mb else NULL
+                             },
                              MaxWholeFileMemoryMB = {
                                ram_mb <- suppressWarnings(as.numeric(RAMThreshold[1])) * 1024
                                if (is.finite(ram_mb) && ram_mb > 0) ram_mb else NULL
@@ -6767,6 +6785,11 @@ discover_schema_relationships <- function(table_schema, include_candidates = TRU
 #'   NULL retains the configuration-file value or the default of 1000000L.
 #' @param DelimitedChunkMaxMB Numeric or NULL. Conservative cap on the estimated
 #'   peak memory of each CSV/TSV/TXT chunk. NULL retains the file value or 256.
+#' @param DelimitedPartitionMaxMB Numeric or NULL. Cap on a single source-defined
+#'   partition's estimated in-memory footprint before reading it one partition
+#'   at a time instead of in fixed-size chunks. NULL retains the file value, or
+#'   (if unset there too) leaves it NULL so \code{ParquetBackEndCreate()}
+#'   derives it from \code{RAMThreshold}.
 #' @param SAV_ROW_THRESHOLD Integer. Rows above which SAV files stream in chunks.
 #'   NULL retains the configuration-file value or the default of 1000000L.
 #' @param RAMThreshold Numeric. RAM limit in GB for PartitionBy = "RAMEstimate".
@@ -6806,6 +6829,7 @@ load_repository_config <- function(
     path,
     SAV_CHUNK_SIZE = NULL,
     DelimitedChunkMaxMB = NULL,
+    DelimitedPartitionMaxMB = NULL,
     SAV_ROW_THRESHOLD = NULL,
     RAMThreshold = NULL,
     PartitionBy = NULL,
@@ -6841,6 +6865,7 @@ load_repository_config <- function(
   defaults <- list(
     SAV_CHUNK_SIZE = 1000000L,
     DelimitedChunkMaxMB = 256L,
+    DelimitedPartitionMaxMB = NULL,
     SAV_ROW_THRESHOLD = 1000000L,
     RAMThreshold = 30,
     PartitionBy = "NRows",
@@ -6882,6 +6907,7 @@ load_repository_config <- function(
   explicit_args <- list(
     SAV_CHUNK_SIZE = SAV_CHUNK_SIZE,
     DelimitedChunkMaxMB = DelimitedChunkMaxMB,
+    DelimitedPartitionMaxMB = DelimitedPartitionMaxMB,
     SAV_ROW_THRESHOLD = SAV_ROW_THRESHOLD,
     RAMThreshold = RAMThreshold,
     PartitionBy = PartitionBy,
@@ -6926,6 +6952,13 @@ load_repository_config <- function(
     cfg[[field]] <- suppressWarnings(as.numeric(cfg[[field]]))
     if (length(cfg[[field]]) != 1L || is.na(cfg[[field]]) || cfg[[field]] < 1) {
       stop(sprintf("repository_config %s must be a positive number.", field))
+    }
+  }
+  if (!is.null(cfg$DelimitedPartitionMaxMB)) {
+    cfg$DelimitedPartitionMaxMB <- suppressWarnings(as.numeric(cfg$DelimitedPartitionMaxMB))
+    if (length(cfg$DelimitedPartitionMaxMB) != 1L || is.na(cfg$DelimitedPartitionMaxMB) ||
+        cfg$DelimitedPartitionMaxMB < 1) {
+      stop("repository_config DelimitedPartitionMaxMB must be a positive number when set.")
     }
   }
   cfg$SchemaFastReadMaxBytes <- suppressWarnings(as.numeric(cfg$SchemaFastReadMaxBytes))
@@ -6996,6 +7029,8 @@ create_repository_project <- function(dir, MasterDBPath = file.path(dir, "source
     "  SAV_ROW_THRESHOLD = 1000000L,    # rows above which files stream in chunks",
     "  SAV_CHUNK_SIZE    = 1000000L,    # requested rows per chunk for SAV files",
     "  DelimitedChunkMaxMB = 256L,      # cap each CSV/TSV chunk's estimated peak memory",
+    "  DelimitedPartitionMaxMB = NULL,  # cap for reading one source-defined partition at a",
+    "                                   # time; NULL derives it from RAMThreshold",
     "  RAMThreshold      = 30,          # GB, for PartitionBy = \"RAMEstimate\"",
     "  MaxCoerceNAPct    = 25,          # fail a file when coercion destroys more than this % of a column",
     "  SourceFingerprintMode = \"metadata\", # metadata | sha256 | none",
@@ -7102,6 +7137,7 @@ create_repository_project <- function(dir, MasterDBPath = file.path(dir, "source
     "                                  SAV_ROW_THRESHOLD = cfg$SAV_ROW_THRESHOLD,",
     "                                  SAV_CHUNK_SIZE = cfg$SAV_CHUNK_SIZE,",
     "                                  DelimitedChunkMaxMB = cfg$DelimitedChunkMaxMB,",
+    "                                  DelimitedPartitionMaxMB = cfg$DelimitedPartitionMaxMB,",
     "                                  MaxFileStemTruncate = TRUE, TerminalHivePartition = FALSE,",
     "                                  SchemaRegistryPath = paths$SchemaRegistryPath,",
     "                                  TableSchemaPath = paths$TableSchemaPath,",
@@ -11083,7 +11119,8 @@ generic_db_loader <- function(files, base_path, db_prefix, completed_checkpoint,
                               CheckpointPath, ParquetBasePath, MDTSelect,
                               comprehensive, col_classes = NULL, reader = NULL,
                               PartitionBy, RAMThreshold, SAV_ROW_THRESHOLD,
-                              LogPath, SAV_CHUNK_SIZE, DelimitedChunkMaxMB = 256L, PrintStatus = FALSE,
+                              LogPath, SAV_CHUNK_SIZE, DelimitedChunkMaxMB = 256L,
+                              DelimitedPartitionMaxMB = NULL, PrintStatus = FALSE,
                               ManifestPath = NULL, SchemaRegistryPath = NULL, schema_registry = NULL,
                               TerminalHivePartition = FALSE,
                               MaxFileStemTruncate = FALSE,
@@ -11148,7 +11185,7 @@ generic_db_loader <- function(files, base_path, db_prefix, completed_checkpoint,
                     all_cols = all_cols_v, col_classes = table_col_classes, year_val = year_val, TerminalHivePartition = TerminalHivePartition,
                     MDTSelect = row_meta, MasterDBPath = base_path, reader = reader_file, PartitionBy = PartitionBy,
                     SAV_ROW_THRESHOLD = SAV_ROW_THRESHOLD, RAMThreshold = RAMThreshold, SAV_CHUNK_SIZE = SAV_CHUNK_SIZE,
-                    DelimitedChunkMaxMB = DelimitedChunkMaxMB,
+                    DelimitedChunkMaxMB = DelimitedChunkMaxMB, DelimitedPartitionMaxMB = DelimitedPartitionMaxMB,
                     chunk_size_decrement = chunk_size_decrement, min_chunk_size = min_chunk_size,
                     partition_keys = pspec$keys, partition_values = pspec$values,
                     max_coerce_na_pct = MaxCoerceNAPct,
@@ -11342,10 +11379,19 @@ print.RepositoryRunResult <- function(x, ...) {
 #' @param RemoteDownloadMethod Method passed to \code{utils::download.file()}.
 #' @param RemoteDownloadTimeout Minimum remote download timeout in seconds.
 #' @param RemoteDownloadFunction Optional caller-managed download function.
+#' @param DelimitedPartitionMaxMB Numeric or NULL. Cap (MB) on a single
+#'   source-defined partition's estimated in-memory footprint before a
+#'   route-eligible delimited file is read one partition at a time instead of
+#'   in fixed-size chunks. When NULL (default), derived internally as half of
+#'   the whole-file budget (\code{RAMThreshold * 1024}). Deliberately distinct
+#'   from \code{DelimitedChunkMaxMB} -- a one-shot partition read is neither a
+#'   tiny tight-loop chunk nor a full-file read, so reusing either budget is
+#'   wrong (see \code{\link{read_delimited_chunked}}).
 #'
 #' @export
 ParquetBackEndCreate <- function(MDT, DBLoad, MasterDBPath, completed_checkpoint, CheckpointPath, ParquetBasePath, SAV_ROW_THRESHOLD = 1000000L,
                                  PartitionBy, RAMThreshold, SAV_CHUNK_SIZE = 1000000L, DelimitedChunkMaxMB = 256L,
+                                 DelimitedPartitionMaxMB = NULL,
                                  LogPath, n_workers = 1, PrintStatus = FALSE,
                                  TerminalHivePartition = FALSE, MaxFileStemTruncate = TRUE,
                                  chunk_size_decrement = NULL, min_chunk_size = NULL,
@@ -11375,6 +11421,12 @@ ParquetBackEndCreate <- function(MDT, DBLoad, MasterDBPath, completed_checkpoint
   DelimitedChunkMaxMB <- suppressWarnings(as.numeric(DelimitedChunkMaxMB[1]))
   if (!is.finite(DelimitedChunkMaxMB) || DelimitedChunkMaxMB <= 0) {
     stop("DelimitedChunkMaxMB must be a positive number.")
+  }
+  if (!is.null(DelimitedPartitionMaxMB)) {
+    DelimitedPartitionMaxMB <- suppressWarnings(as.numeric(DelimitedPartitionMaxMB[1]))
+    if (!is.finite(DelimitedPartitionMaxMB) || DelimitedPartitionMaxMB <= 0) {
+      stop("DelimitedPartitionMaxMB must be a positive number when supplied.")
+    }
   }
   previous_run <- begin_repository_run(LogPath = LogPath, RunId = RunId)
   on.exit(restore_repository_run(previous_run), add = TRUE)
@@ -11539,6 +11591,7 @@ ParquetBackEndCreate <- function(MDT, DBLoad, MasterDBPath, completed_checkpoint
                                                 TerminalHivePartition = TerminalHivePartition,
                                                 SAV_CHUNK_SIZE = SAV_CHUNK_SIZE,
                                                 DelimitedChunkMaxMB = DelimitedChunkMaxMB,
+                                                DelimitedPartitionMaxMB = DelimitedPartitionMaxMB,
                                                 chunk_size_decrement = chunk_size_decrement,
                                                 min_chunk_size = min_chunk_size,
                                                 registry_resolved = TRUE,
