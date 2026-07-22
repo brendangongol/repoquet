@@ -2251,7 +2251,11 @@ fread_col_classes <- function(col_classes, header = NULL) {
   names(col_classes) <- canonical_colnames(names(col_classes))
   if (is.null(header)) header <- names(col_classes)
   canon_header <- canonical_colnames(header)
-  target <- vapply(canon_header, function(nm) normalize_type_name(col_classes[[nm]] %||% ""), character(1))
+  target <- vapply(canon_header, function(nm) {
+    idx <- match(nm, names(col_classes))
+    value <- if (is.na(idx)) "" else col_classes[[idx]]
+    normalize_type_name(value %||% "")
+  }, character(1))
   fread_type <- vapply(target, function(tp) {
     if (grepl("^decimal\\(", tp)) return("numeric")
     switch(tp, character = "character", integer = "integer", int64 = "integer64",
@@ -2740,6 +2744,7 @@ read_delimited_full <- function(path, col_classes = NULL, reader_options = list(
 .read_delimited_chunk <- function(path, offset, n_max, header, col_classes = NULL,
                                   reader_options = list()) {
   reader_options <- .resolve_delimited_reader_options(path, reader_options)
+  header <- unname(as.character(header))
   if (!is.null(.sectioned_delimited_text(path, reader_options))) {
     all_rows <- read_delimited_full(path, col_classes, reader_options)
     if (offset >= nrow(all_rows)) return(all_rows[0])
@@ -3660,11 +3665,11 @@ safe_read_sav_chunked <- function(path, chunk_size = 1000000L, TerminalHiveParti
 #' @keywords internal
 .read_delimited_partition_columns <- function(path, reader_options, header, partition_keys) {
   header_canonical <- canonical_colnames(header)
-  raw_names <- vapply(partition_keys, function(pk) {
+  raw_names <- unname(vapply(partition_keys, function(pk) {
     idx <- match(pk, header_canonical)
     if (is.na(idx)) stop(sprintf("Partition column %s not found in the header of %s.", pk, basename(path)))
     header[idx]
-  }, character(1))
+  }, character(1)))
   args <- delimited_fread_args(reader_options)
   args$select <- raw_names
   df <- .fread_with_structural_errors(c(.delimited_input(path, reader_options), args), path)
@@ -3959,8 +3964,9 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
       PartitionKey = paste(partition_keys, collapse = ";"),
       PartitionValue = paste(actual_values, collapse = ";"),
       Year = as.character(actual_year), Directory = target_dir)
-    log_msg(sprintf("[CHUNKED-DELIM] %s chunk %d: %d rows -> %s", basename(path), chunk_num,
-                    n_written, basename(chunk_file)))
+    partition_label <- paste(paste0(tolower(partition_keys), "=", actual_values), collapse = "/")
+    log_msg(sprintf("[PARQUET WRITE] %s: partition %s, piece %d: %d rows -> %s",
+                    basename(path), partition_label, chunk_num, n_written, basename(chunk_file)))
     touch_repository_lock(RepositoryLock)
     gc(verbose = FALSE)
     invisible(NULL)
@@ -5878,10 +5884,16 @@ validate_duckdb_table <- function(con, table_name, schema_registry = NULL, stric
       stop("Hardened direct mode is unavailable for MalformedRowPolicy='append_previous'; using the logical-record chunked reader preserves its repair semantics.")
     }
     rd <- get_file_reader(payload$reader)
+    log_msg(sprintf("[FAIL PROBE] Worker reading %s directly.", basename(payload$path)))
+    read_started <- Sys.time()
     df <- call_reader(rd, "read_full", payload$path,
                       reader_options = payload$reader_options,
                       col_classes = payload$col_classes)
     if (!is.data.frame(df)) stop("Direct worker reader did not return a data frame.")
+    read_elapsed <- as.numeric(difftime(Sys.time(), read_started, units = "secs"))
+    log_msg(sprintf("[FAIL PROBE] Worker direct read complete for %s: %s rows in %.1f seconds; routing and writing.",
+                    basename(payload$path), formatC(nrow(df), format = "d", big.mark = ","), read_elapsed))
+    write_started <- Sys.time()
     result <- read_delimited_chunked(
       path = payload$path, chunk_size = payload$chunk_size,
       year_dir = payload$year_dir, table_dir = payload$table_dir,
@@ -5898,6 +5910,9 @@ validate_duckdb_table <- function(con, table_name, schema_registry = NULL, stric
       RepositoryLock = NULL, preloaded_data = df)
     rm(df)
     gc(verbose = FALSE)
+    write_elapsed <- as.numeric(difftime(Sys.time(), write_started, units = "secs"))
+    log_msg(sprintf("[FAIL PROBE] Worker write complete for %s in %.1f seconds.",
+                    basename(payload$path), write_elapsed))
     list(ok = TRUE, result = result, error = NA_character_)
   }, error = function(e) {
     list(ok = FALSE, result = NULL, error = conditionMessage(e))
@@ -5955,6 +5970,7 @@ validate_duckdb_table <- function(con, table_name, schema_registry = NULL, stric
   }
   log_msg(sprintf("[FAIL PROBE] Launching isolated direct read-and-write worker for %s (timeout=%ss).",
                   basename(path), format(timeout_seconds, trim = TRUE)))
+  worker_started <- Sys.time()
   # processx::run() receives its timeout in whole seconds. Its internal poll
   # timeout is millisecond-based, so passing seconds * 1000 overflows there.
   timeout_processx <- as.integer(min(.Machine$integer.max,
@@ -5979,7 +5995,9 @@ validate_duckdb_table <- function(con, table_name, schema_registry = NULL, stric
   if (!isTRUE(response$ok)) {
     return(list(ok = FALSE, error = response$error %||% "Hardened FAIL worker failed without a diagnostic."))
   }
-  log_msg(sprintf("[FAIL PROBE] Isolated worker completed direct read-and-write for %s.", basename(path)))
+  worker_elapsed <- as.numeric(difftime(Sys.time(), worker_started, units = "secs"))
+  log_msg(sprintf("[FAIL PROBE] Isolated worker completed direct read-and-write for %s in %.1f seconds.",
+                  basename(path), worker_elapsed))
   list(ok = TRUE, result = response$result)
 }
 read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL, table_dir = NULL,
