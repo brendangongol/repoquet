@@ -195,6 +195,10 @@ reset_table_for_reload(MDT = MDT, Database = "NTDB", TableName = "DEMO",
                        CheckpointPath = RepositoryPaths$CheckpointPath,
                        ManifestPath = RepositoryPaths$ManifestPath, DryRun = FALSE)
 
+reset_table_for_reload(MDT = MDT, Database = "NISBishoy", TableName = "DXDhillon_EGS",
+                       ParquetBasePath = RepositoryPaths$ParquetBasePath,
+                       CheckpointPath = RepositoryPaths$CheckpointPath,
+                       ManifestPath = RepositoryPaths$ManifestPath, DryRun = FALSE)
 
 ################################################################################
 #### 6. Register and strictly validate DuckDB views ############################
