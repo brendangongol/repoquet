@@ -232,11 +232,6 @@ if(exists("con") && DBI::dbIsValid(con)){ DBI::dbDisconnect(con, shutdown = TRUE
 con <- open_duckdb(FormattedDBPath = cfg$FormattedDBPath, DBName = cfg$DBName,
                    TempDirPath = cfg$DuckDBTempPath, GB = cfg$DuckDB_GB, ReadOnly = TRUE)
 
-# Error in `.local()`:
-#   ! {"exception_type":"IO","exception_message":"Cannot open file \"X:\\Brendan\\NationalDatabases\\formattedDatabases\\DuckDBRelationalDatabase.duckdb\": The process cannot access the file because it is being used by another process.\r\n\nFile is already open in \nC:\\Users\\e282219\\AppData\\Local\\Programs\\RStudio\\resources\\app\\bin\\rsession-utf8.exe (PID 30708)"}
-# ℹ Context: rapi_startup
-# Run `rlang::last_trace()` to see where the error occurred.
-
 ################################################################################
 #### Optional dictionary-assisted discovery and decoding. ######################
 ################################################################################
@@ -255,7 +250,7 @@ repo_audit <- audit_repository(MDT = MDT,
                                CheckpointPath = RepositoryPaths$CheckpointPath,
                                ManifestPath = RepositoryPaths$ManifestPath,
                                con = con, verbose = TRUE,
-                               LogPath = LogPath, RunId = RunId)
+                               LogPath = RepositoryPaths$LogPath, RunId = RunId)
 repo_audit$issues
 
 ################################################################################
