@@ -179,10 +179,10 @@ log_msg(sprintf("Checkpoint after load: %d files recorded", length(completed_che
 ################################################################################
 #### Summary & Verification ####################################################
 ################################################################################
-SummaryVerification(MDT = MDT, CheckpointPath = CheckpointPath, LogPath = LogPath,
+SummaryVerification(MDT = MDT, CheckpointPath = RepositoryPaths$CheckpointPath, LogPath = RepositoryPaths$LogPath,
                     logStatus = FALSE, RunId = run_result$run_id,
-                    MasterDBPath = MasterDBPath,
-                    SourceFingerprintMode = SourceFingerprintMode)
+                    MasterDBPath = cfg$MasterDBPath,
+                    SourceFingerprintMode = cfg$SourceFingerprintMode)
 
 ################################################################################
 #### Regenerate RepositoryMetadata.xlsx without reloading data #################
@@ -210,27 +210,32 @@ reset_table_for_reload(MDT = MDT, Database = "NISBishoy", TableName = "FULLDhill
 ################################################################################
 #### 6. Register and strictly validate DuckDB views ############################
 ################################################################################
-con <- open_duckdb(FormattedDBPath = cfg$FormattedDBPath, DBName = cfg$DuckDBName, 
-                   TempDirPath = cfg$DuckDBTempPath, GB = cfg$DuckDB_GB, ReadOnly = FALSE)
-completed_checkpoint <- load_checkpoint(path = CheckpointPath)
+con <- open_duckdb(FormattedDBPath = cfg$FormattedDBPath, DBName = cfg$DBName, 
+                   TempDirPath = DuckDBTempPath, GB = cfg$DuckDB_GB, ReadOnly = FALSE)
+completed_checkpoint <- load_checkpoint(path = RepositoryPaths$CheckpointPath)
 completed_mdt <- MDT[checkpoint_completed_mask(MDT, completed_checkpoint,
-                                               MasterDBPath = MasterDBPath, 
-                                               SourceFingerprintMode = SourceFingerprintMode),]
-register_parquet_view_compile(con = con, ParquetBasePath = ParquetBasePath, verbose = TRUE, logStatus = TRUE,
+                                               MasterDBPath = cfg$MasterDBPath, 
+                                               SourceFingerprintMode = cfg$SourceFingerprintMode),]
+register_parquet_view_compile(con = con, ParquetBasePath = RepositoryPaths$ParquetBasePath, verbose = TRUE, logStatus = TRUE,
                                SchemaRegistryPath = RepositoryPaths$SchemaRegistryPath,
                                TableSchemaPath = RepositoryPaths$TableSchemaPath,
                                validate = TRUE, strict_validation = TRUE,
                                tables_written = unique(repository_table_names(completed_mdt)),
-                               LogPath = LogPath, RunId = RunId )
+                               LogPath = RepositoryPaths$LogPath, RunId = RunId )
 contract_results <- validate_data_contracts(con, RepositoryPaths$DataContractPath, strict = TRUE,
-                                            LogPath = LogPath, RunId = RunId)
+                                            LogPath = RepositoryPaths$LogPath, RunId = RunId)
 
 #####################################################################
 #### Adjust connection to read only, which is faster for queries ####
 #####################################################################
 if(exists("con") && DBI::dbIsValid(con)){ DBI::dbDisconnect(con, shutdown = TRUE) }
-con <- open_duckdb(FormattedDBPath = cfg$FormattedDBPath, DBName = cfg$DuckDBName,
+con <- open_duckdb(FormattedDBPath = cfg$FormattedDBPath, DBName = cfg$DBName,
                    TempDirPath = cfg$DuckDBTempPath, GB = cfg$DuckDB_GB, ReadOnly = TRUE)
+
+# Error in `.local()`:
+#   ! {"exception_type":"IO","exception_message":"Cannot open file \"X:\\Brendan\\NationalDatabases\\formattedDatabases\\DuckDBRelationalDatabase.duckdb\": The process cannot access the file because it is being used by another process.\r\n\nFile is already open in \nC:\\Users\\e282219\\AppData\\Local\\Programs\\RStudio\\resources\\app\\bin\\rsession-utf8.exe (PID 30708)"}
+# ℹ Context: rapi_startup
+# Run `rlang::last_trace()` to see where the error occurred.
 
 ################################################################################
 #### Optional dictionary-assisted discovery and decoding. ######################
