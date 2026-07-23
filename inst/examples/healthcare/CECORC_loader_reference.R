@@ -240,19 +240,19 @@ con <- open_duckdb(FormattedDBPath = cfg$FormattedDBPath, DBName = cfg$DBName,
 ################################################################################
 #### Optional dictionary-assisted discovery and decoding. ######################
 ################################################################################
-describe_column(paths$TableSchemaPath, "SALES", "Orders", "STATUS")
+describe_column(RepositoryPaths$TableSchemaPath, "SALES", "Orders", "STATUS")
 decoded <- decode_column(con = con,
                          table = "SALES_Orders",
                          column = "STATUS",
-                         TableSchemaPath = paths$TableSchemaPath,
+                         TableSchemaPath = RepositoryPaths$TableSchemaPath,
                          limit = 1000L)
 
 ################################################################################
 #### 7. Reconcile repository state #############################################
 ################################################################################
 repo_audit <- audit_repository(MDT = MDT,
-                               ParquetBasePath = ParquetBasePath,
-                               CheckpointPath = CheckpointPath,
+                               ParquetBasePath = RepositoryPaths$ParquetBasePath,
+                               CheckpointPath = RepositoryPaths$CheckpointPath,
                                ManifestPath = RepositoryPaths$ManifestPath,
                                con = con, verbose = TRUE,
                                LogPath = LogPath, RunId = RunId)
