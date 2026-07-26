@@ -36,6 +36,18 @@ if (is.na(repoquet_root)) {
                  REPOQUET_SOURCE_FILE, getwd()))
   }
   suppressPackageStartupMessages(library(repoquet))
+  #### This suite deliberately exercises internal helpers (promote_types,   ####
+  #### enforce_col_classes, checkpoint_completed_mask, etc.), not just the  ####
+  #### exported API -- the same contract the source()-based branch below   ####
+  #### provides. R CMD check runs tests/run_tests.R against the installed  ####
+  #### package from a copy that has no R/repoquet.R on the upward path, so ####
+  #### repoquet_root is NA here even though this is the package's own      ####
+  #### test suite. Attach the full internal namespace (not just exports)   ####
+  #### so bare calls to unexported helpers keep working in that case.      ####
+  if (!"repoquet_internals" %in% search()) {
+    attach(as.list(asNamespace("repoquet"), all.names = TRUE),
+           name = "repoquet_internals", warn.conflicts = FALSE)
+  }
 } else if (!exists(".repoquet_env", inherits = TRUE)) {
   .repoquet_env <- new.env(parent = globalenv())
   src <- file.path(repoquet_root, REPOQUET_SOURCE_FILE)

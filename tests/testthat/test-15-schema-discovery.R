@@ -405,10 +405,13 @@ test_that("schema finalization requires explicit, valid overrides", {
   expect_error(FinalizeRepositorySchema(path, out), "ApprovedType contains blank")
 })
 
-test_that("the healthcare reference stages the reviewed schema workflow", {
-  skip_if(is.na(repoquet_root), "source-package reference file is unavailable")
-  path <- file.path(repoquet_root, "inst", "examples", "healthcare",
-                    "CECORC_loader_reference.R")
+test_that("the HCUP profile's generated runner stages the reviewed schema workflow", {
+  #### The package no longer ships a static HCUP example (moved to the      ####
+  #### user's own private workflow repo); the HCUP profile of the generated ####
+  #### runner is the canonical reference instead. See also test-13.         ####
+  dir <- tempfile("hcup_schema_stage_"); on.exit(unlink(dir, recursive = TRUE))
+  out <- utils::capture.output(paths <- create_repository_project(dir, profile = "hcup"))
+  path <- paths$RunnerPath
   expect_silent(parse(path))
   text <- paste(readLines(path, warn = FALSE), collapse = "\n")
   expect_match(text, "PrepareSchemaRegistry\\(", fixed = FALSE)

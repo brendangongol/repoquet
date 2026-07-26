@@ -1,0 +1,190 @@
+---
+title: "Getting Started with repoquet"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Getting Started with repoquet}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+## What repoquet does
+
+repoquet turns a folder of heterogeneous source files (CSV, Stata, SPSS,
+SAS, Parquet, ...) into a validated, resumable, Hive-partitioned Parquet
+repository queried with DuckDB. A single workbook -- the Master Database
+Table (MDT), conventionally named `DBSetup.xlsx` -- describes every source
+file: which database and table it belongs to, its partition column and
+value, and (optionally) a URL to download it from. The workflow itself has
+seven stages, always run in the same order:
+
+1. **Initialize** paths, configuration, and a traceable run identifier.
+2. **Validate** the MDT structurally, fail fast before any repository write.
+3. **Survey** source evidence and write a compact schema review workbook.
+4. **Review and finalize** that workbook into an approved schema catalog.
+5. **Load** the reviewed schemas into Hive-partitioned, resumable Parquet.
+6. **Register** DuckDB views over the Parquet output and validate them.
+7. **Audit** to reconcile the MDT, checkpoint, files on disk, and the manifest.
+
+This vignette walks through that cycle twice: once against a small,
+fully synthetic repository that runs offline in a few seconds (the part
+of this vignette that actually executes), and once -- shown but not
+run automatically -- against real public health datasets.
+
+## A runnable example: the synthetic quickstart
+
+`generate_example_repository()` builds a complete toy project in one call: a
+year-partitioned `SALES` database, a site-partitioned `SENSORS` database, and
+a labelled Stata `STUDY` file, plus a filled-in `DBSetup.xlsx` describing all
+of them. Nothing here touches the network.
+
+```{r}
+library(repoquet)
+
+project_dir <- tempfile("repoquet_vignette_")
+invisible(generate_example_repository(project_dir))
+list.files(project_dir)
+```
+
+`generate_example_repository()` returns (invisibly) the same scaffold paths
+`create_repository_project()` does -- the config, the MDT, the output
+locations for Parquet, checkpoints, logs, and the schema registry:
+
+```{r}
+cfg <- load_repository_config(file.path(project_dir, "repository_config.R"))
+paths <- RepositoryInitialize(FormattedDBPath = cfg$FormattedDBPath)
+MDT <- openxlsx::read.xlsx(cfg$MDTPath, sheet = "Sheet1")
+MDT[, c("Database", "Path", "PartitionKey", "PartitionValue")]
+```
+
+### 1-2. Initialize and validate
+
+Every stage shares one run identifier so log lines and validation records
+line up across the whole run. Validation here is purely structural -- no
+source file is opened yet.
+
+```{r}
+RunId <- new_repository_run_id()
+ValidateMDTPreflight(MDT, strict = TRUE, ParquetBasePath = paths$ParquetBasePath,
+                      MasterDBPath = cfg$MasterDBPath,
+                      LogPath = paths$LogPath, RunId = RunId)
+```
+
+### 3-4. Survey, review, and finalize the schema
+
+`PrepareSchemaRegistry()` reads a bounded sample of each source, proposes a
+type for every column, and writes a review workbook. In an interactive
+session you would open `SchemaReview.xlsx`'s `StartHere` sheet and resolve
+any decisions it flags; the synthetic sources here are clean enough that
+none are required, so `FinalizeSchemaRegistry()` can run immediately.
+
+```{r}
+invisible(PrepareSchemaRegistry(
+  MDT, DBLoad = sort(unique(MDT$Database)), MasterDBPath = cfg$MasterDBPath,
+  ObservationPath = paths$SchemaObservationPath,
+  SchemaReviewPath = paths$SchemaReviewPath,
+  n_workers = 1L, SchemaRegistryPath = paths$SchemaRegistryPath,
+  LogPath = paths$LogPath, RunId = RunId))
+
+repository_catalog <- FinalizeSchemaRegistry(
+  SchemaReviewPath = paths$SchemaReviewPath,
+  TableSchemaPath = paths$TableSchemaPath, strict = TRUE)
+```
+
+### 5. Load reviewed schemas into Parquet
+
+```{r}
+run_result <- ParquetBackEndCreate(
+  MDT = MDT, DBLoad = sort(unique(MDT$Database)), MasterDBPath = cfg$MasterDBPath,
+  completed_checkpoint = load_checkpoint(paths$CheckpointPath),
+  CheckpointPath = paths$CheckpointPath, ParquetBasePath = paths$ParquetBasePath,
+  LogPath = paths$LogPath, n_workers = 1L, PartitionBy = "NRows",
+  RAMThreshold = 4, SAV_ROW_THRESHOLD = 1000000L, SAV_CHUNK_SIZE = 1000000L,
+  SchemaRegistryPath = paths$SchemaRegistryPath, TableSchemaPath = paths$TableSchemaPath,
+  ManifestPath = paths$ManifestPath, MetadataWorkbookPath = paths$ManifestWorkbookPath,
+  UseSchemaCatalog = TRUE, RunId = RunId)
+run_result
+```
+
+### 6. Register and query DuckDB views
+
+```{r}
+TempDirPath <- file.path(cfg$FormattedDBPath, "duckdb_temp")
+dir.create(TempDirPath, recursive = TRUE, showWarnings = FALSE)
+con <- open_duckdb(FormattedDBPath = cfg$FormattedDBPath, DBName = cfg$DBName,
+                    TempDirPath = TempDirPath, GB = "1GB", ReadOnly = FALSE)
+register_parquet_view_compile(con, ParquetBasePath = paths$ParquetBasePath,
+                               tables_written = unique(repository_table_names(MDT)),
+                               SchemaRegistryPath = paths$SchemaRegistryPath,
+                               TableSchemaPath = paths$TableSchemaPath,
+                               LogPath = paths$LogPath, RunId = RunId)
+
+DBI::dbGetQuery(con, "SELECT year, count(*) AS n_orders FROM SALES_Orders GROUP BY year ORDER BY year")
+```
+
+### 7. Audit
+
+`audit_repository()` non-destructively reconciles the MDT, the checkpoint,
+the files actually on disk, and the manifest -- a healthy repository
+reports zero issues.
+
+```{r}
+repo_audit <- audit_repository(MDT, paths$ParquetBasePath, paths$CheckpointPath,
+                                paths$ManifestPath, con = con,
+                                LogPath = paths$LogPath, RunId = RunId)
+nrow(repo_audit$issues)
+```
+
+```{r, include = FALSE}
+DBI::dbDisconnect(con, shutdown = TRUE)
+unlink(project_dir, recursive = TRUE)
+```
+
+## A richer example: real public health data (not run automatically)
+
+The synthetic repository above is deliberately tiny so this vignette builds
+in seconds with no network access. repoquet also ships a much larger,
+real-data example workbook, `system.file("extdata", "DBSetup.xlsx", package =
+"repoquet")`, describing:
+
+* a demo cut of **MIMIC-III** (de-identified ICU data),
+* **NHANES** Demographics, Examination, and Laboratory components across
+  every cycle since 1999, and
+* dozens of datasets from the **UCI Machine Learning Repository**'s health
+  and medicine category.
+
+Every row declares a `SourceURI`, `SourceLicense`, and `CitationURL` --
+review those before using a dataset, and note that downloading the full
+workbook can mean hundreds of files and a meaningful amount of network
+traffic and disk space. It is driven by the same generic command-line
+script the package ships at `system.file("scripts", "repoquet.R", package =
+"repoquet")`, one subcommand per workflow stage:
+
+```{r, eval = FALSE}
+project_dir <- "my-repoquet-project"
+create_repository_project(project_dir, profile = "generic")
+
+# Point the generated repository_config.R's MDTPath at the packaged catalog,
+# and MasterDBPath/FormattedDBPath at wherever you want the downloads and
+# Parquet output to live, then run each stage from a shell:
+```
+
+```{sh, eval = FALSE}
+Rscript system.file("scripts", "repoquet.R", package = "repoquet") validate my-repoquet-project
+Rscript system.file("scripts", "repoquet.R", package = "repoquet") schema   my-repoquet-project
+# Open SchemaReview.xlsx's StartHere sheet and resolve any flagged decisions, then:
+Rscript system.file("scripts", "repoquet.R", package = "repoquet") finalize my-repoquet-project
+Rscript system.file("scripts", "repoquet.R", package = "repoquet") load     my-repoquet-project
+Rscript system.file("scripts", "repoquet.R", package = "repoquet") audit    my-repoquet-project
+```
+
+`MaterializeRemoteSources()` (called automatically by the `schema`, `load`,
+and `audit` subcommands) downloads each declared source once and caches it
+by content hash, so re-running any stage after the first is fast and
+network-free unless a source's `DownloadPolicy` says otherwise.

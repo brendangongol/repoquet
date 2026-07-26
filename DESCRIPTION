@@ -30,15 +30,20 @@ Imports:
     haven,
     jsonlite,
     openxlsx,
+    parallel,
     processx,
     stringi
 Suggests:
     circlize,
     ComplexHeatmap,
     curl,
+    grid,
+    knitr,
     RColorBrewer,
     R.utils,
     renv,
+    rmarkdown,
     testthat (>= 3.0.0)
 Config/testthat/edition: 3
-RoxygenNote: 7.3.2
+RoxygenNote: 7.3.3
+VignetteBuilder: knitr

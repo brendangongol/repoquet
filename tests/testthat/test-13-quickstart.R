@@ -66,16 +66,15 @@ expect_identical(overridden$DelimitedChunkMaxMB, 64)
   expect_false(any(grepl("HOSP_NIS|DISCWT", reg$ColumnPattern)))
 })
 
-test_that("the HCUP reference follows the canonical seven-stage contract", {
-  installed_reference <- system.file(
-    "examples", "healthcare", "CECORC_loader_reference.R",
-    package = "repoquet"
-  )
-  relative_reference <- file.path("inst", "examples", "healthcare",
-                                  "CECORC_loader_reference.R")
-  candidates <- c(installed_reference, relative_reference,
-                  file.path("..", "..", relative_reference))
-  reference_path <- candidates[file.exists(candidates)][1]
+test_that("the HCUP profile's generated runner follows the canonical seven-stage contract", {
+  #### The package no longer ships a static HCUP example (moved to the      ####
+  #### user's own private workflow repo); the HCUP *profile* of the         ####
+  #### generated runner is the canonical reference instead, and it's        ####
+  #### generated fresh by the package itself rather than a file that can go ####
+  #### stale or disappear.                                                  ####
+  dir <- tempfile("hcup_scaffold_"); on.exit(unlink(dir, recursive = TRUE))
+  out <- utils::capture.output(paths <- create_repository_project(dir, profile = "hcup"))
+  reference_path <- paths$RunnerPath
   expect_true(file.exists(reference_path))
   expect_silent(parse(reference_path))
   reference_lines <- readLines(reference_path, warn = FALSE)

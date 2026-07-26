@@ -1,11 +1,35 @@
 #!/usr/bin/env Rscript
+#### Generic command-line driver for a repoquet project. Every command    ####
+#### below is also directly available from an R session by calling the    ####
+#### same functions; this script exists for scheduled/non-interactive use ####
+#### (e.g. a nightly cron job re-running "load" then "audit").            ####
 
+usage <- paste(
+  "Usage: repoquet.R <command> <project-or-config-path> [profile]",
+  "",
+  "Commands:",
+  "  init      Create a new project scaffold at <path> (see create_repository_project()).",
+  "            Optional [profile] is \"generic\" (default) or \"hcup\".",
+  "  validate  Fail-fast structural check of the MDT workbook (no network access).",
+  "  schema    Survey source files and write the schema review workbook.",
+  "            Open StartHere in SchemaReview.xlsx, resolve its required",
+  "            decisions, then run \"finalize\".",
+  "  finalize  Turn a completed schema review into the table schema catalog.",
+  "  load      Load all reviewed schemas into Hive-partitioned Parquet.",
+  "  audit     Read-only reconciliation of inventory, checkpoint, files, and manifest.",
+  "",
+  "<project-or-config-path> is either a project directory (containing",
+  "repository_config.R) or a direct path to a config file.",
+  sep = "\n"
+)
 args <- commandArgs(trailingOnly = TRUE)
-if (length(args) < 2L) {
-  stop("Usage: repoquet.R <init|validate|schema|finalize|load|audit> <project-or-config-path>", call. = FALSE)
-}
+if (length(args) < 2L) stop(usage, call. = FALSE)
 
 command <- tolower(args[1])
+valid_commands <- c("init", "validate", "schema", "catalog", "finalize", "load", "audit")
+if (!(command %in% valid_commands)) {
+  stop(sprintf("Unknown command: %s\n\n%s", args[1], usage), call. = FALSE)
+}
 target <- normalizePath(args[2], winslash = "/", mustWork = command != "init")
 
 source_path <- Sys.getenv("REPOQUET_SOURCE", unset = "R/repoquet.R")

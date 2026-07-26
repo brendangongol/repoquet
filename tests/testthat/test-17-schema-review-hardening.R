@@ -256,13 +256,16 @@ test_that("legacy compatibility review workbooks still finalize", {
   expect_true(all(final$table_schema[Column == "KEY"]$CanonicalType == "character"))
 })
 
-test_that("clean healthcare schema workflow remains executable", {
-  skip_if(is.na(repoquet_root), "source-package reference file is unavailable")
-  path <- file.path(repoquet_root, "inst", "examples", "healthcare",
-                    "schema_workflow_test.R")
+test_that("the generated runner's schema workflow remains a clean, executable script", {
+  #### The package no longer ships a static HCUP smoke-test script (moved to ####
+  #### the user's own private workflow repo); the generated runner is the   ####
+  #### canonical reference instead. See also test-13 and test-15.          ####
+  dir <- tempfile("hcup_clean_workflow_"); on.exit(unlink(dir, recursive = TRUE))
+  out <- utils::capture.output(paths <- create_repository_project(dir, profile = "hcup"))
+  path <- paths$RunnerPath
   expect_silent(parse(path))
   text <- paste(readLines(path, warn = FALSE), collapse = "\n")
-  expect_match(text, "source(RepoquetSourcePath", fixed = TRUE)
+  expect_match(text, 'source\\("[^"]*repoquet\\.R"\\)')
   expect_false(grepl("library\\(repoquet\\)", text))
   expect_false(grepl("^>", text))
 })
