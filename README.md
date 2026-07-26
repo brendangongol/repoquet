@@ -256,7 +256,7 @@ Credentialed MIMIC-III rows use `DownloadPolicy = "manual"`: users must obtain
 PhysioNet authorization and pre-stage the original `.csv.gz` files in the
 managed cache. repoquet never bypasses access controls or modifies source files.
 To reveal each deterministic cache destination without downloading, call
-`MaterializeRemoteSources(MDT, DownloadCachePath, Offline = TRUE,
+`MaterializeRemoteSources(MDT, paths$DownloadCachePath, Offline = TRUE,
 Strict = FALSE)` and inspect `ResolvedSourcePath` for the credentialed rows.
 Users should review source licenses, citations, download size, and NHANES
 survey-design requirements before analysis. The synthetic generator remains the
@@ -346,14 +346,16 @@ re-ingested. This helper rewrites the affected checkpoint entries (both the
 generalized and legacy key formats) and the manifest's TableName/DuckDBTable
 fields in place, so completed files stay completed under the new name.
 Run it once on the loading machine after editing the workbook; the MDT you
-pass must already carry the NEW TableName. It's recommended to fun with 
+pass must already carry the NEW TableName. It's recommended to run with
 DryRun = TRUE first to monitor what will be changed before running DryRun = FALSE
-to make changes. 
+to make changes. Substitute your own Database/old-name/new-name for the
+placeholders below; a Database/TableName pair that doesn't already exist in
+the MDT under NewTableName stops with an error rather than renaming nothing.
 
 ```r
-rename_checkpoint_table(CheckpointPath, MDT, "NRD", "CORE", "Core", RepositoryPaths$ManifestPath, DryRun = TRUE)
+rename_checkpoint_table(paths$CheckpointPath, MDT, "NRD", "CORE", "Core", paths$ManifestPath, DryRun = TRUE)
 # Optionally, once loaded checkpoints are migrated to generalized keys:
-migrate_checkpoint_keys(CheckpointPath, MDT, DryRun = TRUE)
+migrate_checkpoint_keys(paths$CheckpointPath, MDT, DryRun = TRUE)
 ```
 
 Optional: remote acquisition. 
@@ -667,8 +669,8 @@ paste the rows into DBSetup.xlsx. Nothing is written automatically.
 ```r
 # Propose inventory rows for newly delivered files. Review the workbook output;
 # the helper never edits DBSetup.xlsx or source files.
-new_files <- scan_for_new_source_files(MasterDBPath = MasterDBPath, MDT = MDT,
-                                       OutputPath = file.path(FormattedDBPath, "NewSourceFiles.xlsx"))
+new_files <- scan_for_new_source_files(MasterDBPath = cfg$MasterDBPath, MDT = MDT,
+                                       OutputPath = file.path(paths$FormattedDBPath, "NewSourceFiles.xlsx"))
 ```
 
 Rebuild or re-load tables:
@@ -683,9 +685,9 @@ rebuild the table from source.
 
 ```r
 reset_table_for_reload(MDT = MDT, Database = "NIS", TableName = "Core",
-                       ParquetBasePath = ParquetBasePath,
-                       CheckpointPath = CheckpointPath,
-                       ManifestPath = RepositoryPaths$ManifestPath, DryRun = TRUE)
+                       ParquetBasePath = paths$ParquetBasePath,
+                       CheckpointPath = paths$CheckpointPath,
+                       ManifestPath = paths$ManifestPath, DryRun = TRUE)
 ```
 
 After inspecting a reset preview, use `DryRun = FALSE` and rerun stages 5-7.
