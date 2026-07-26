@@ -41,6 +41,15 @@ install.packages("remotes")
 remotes::install_github("brendangongol/repoquet")
 ```
 
+`remotes::install_github()` does not build vignettes by default. To get the
+"Getting Started" walkthrough, install with `build_vignettes = TRUE` (requires
+pandoc on `PATH`, which most RStudio installs already provide):
+
+```r
+remotes::install_github("brendangongol/repoquet", build_vignettes = TRUE)
+vignette("repoquet", package = "repoquet")
+```
+
 For a reproducible development environment after cloning the repository, run:
 
 ```text
@@ -48,21 +57,25 @@ Rscript tools/bootstrap-renv.R
 R CMD INSTALL .
 ```
 
-During active development, the complete implementation lives in
-`R/repoquet.R`.
+During active development against a cloned checkout without reinstalling,
+`source("R/repoquet.R")` also works and always reflects the latest local
+changes (see the note right after the next example).
 
 ## Create A Project
 
-While the package is under active development, source the current implementation
-from the cloned repository so every workflow run uses the latest functions:
-
 ```r
-source("R/repoquet.R")
+library(repoquet)
 paths <- create_repository_project("~/my_repository", profile = "generic")
 ```
 
-The deployment workflow will switch this line to `library(repoquet)` after the
-package is ready to install and version as a release.
+(Developing against a local checkout instead of an installed copy? Replace
+`library(repoquet)` with `source("R/repoquet.R")` from the repository root.)
+
+`profile` is `"generic"` (no assumptions about column names) or `"hcup"`
+(preloads column-name patterns and survey-weight helpers for the HCUP family
+of hospital discharge databases -- NIS, NEDS, NRD, and similar). Both profiles
+follow the identical seven-stage workflow below; `"hcup"` only changes which
+schema-registry patterns and helper functions are available.
 
 The scaffold creates:
 
@@ -150,10 +163,8 @@ year-partitioned CSV data, site-partitioned CSV data, a labeled Stata source,
 `DBSetup.xlsx`, `repository_config.R`, and the normal repository directory
 structure. It does not read or modify any user source files.
 
-Run this from the root of the cloned repository during development:
-
 ```r
-source("R/repoquet.R")
+library(repoquet)
 
 example <- generate_example_repository("~/repoquet_example")
 cfg <- load_repository_config(example$ConfigPath)
@@ -170,14 +181,39 @@ Schema decisions remain an intentional human review step.
 
 ### Public Real-World Examples
 
-`generate_real_world_repository()` writes a runnable `DBSetup.xlsx` containing
-curated official sources without downloading them by default. Profiles include
-the complete open 26-table MIMIC-III demo, metadata for all 26 tables in the
-credentialed MIMIC-III 1.4 release, all 1,593 public continuous NHANES transport
-files across demographics, dietary, examination, laboratory, and questionnaire
-components, all 58 standardized datasets currently returned by UCI's Health and
-Medicine API catalog, and current ClinVar summaries useful for atherosclerosis
-and cerebral cavernous malformation discovery.
+The package ships a ready-to-use, pre-populated `DBSetup.xlsx` at
+`system.file("extdata", "DBSetup.xlsx", package = "repoquet")` -- no R code
+needed to build it. It covers the open MIMIC-III demo, NHANES Demographics,
+Examination, and Laboratory components across every cycle since 1999, and all
+58 datasets from the UCI Machine Learning Repository's health and medicine
+category. Point a project's `repository_config.R` at it (or copy it over a
+scaffold's empty `DBSetup.xlsx`) and drive the whole workflow with the
+packaged command-line script, one subcommand per stage:
+
+```sh
+Rscript system.file("scripts", "repoquet.R", package = "repoquet") validate my-project
+Rscript system.file("scripts", "repoquet.R", package = "repoquet") schema   my-project
+# Open SchemaReview.xlsx's StartHere sheet, resolve any flagged decisions, then:
+Rscript system.file("scripts", "repoquet.R", package = "repoquet") finalize my-project
+Rscript system.file("scripts", "repoquet.R", package = "repoquet") load     my-project
+Rscript system.file("scripts", "repoquet.R", package = "repoquet") audit    my-project
+```
+
+Every row declares `SourceURI`, `SourceLicense`, and `CitationURL` -- review
+those before use, and note that materializing the full workbook means
+hundreds of files and a meaningful amount of network traffic and disk space.
+
+For programmatic, size-controlled control over the same public sources (or to
+add ClinVar and the credentialed full MIMIC-III release), use
+`generate_real_world_repository()` instead. It writes a runnable `DBSetup.xlsx`
+containing curated official sources without downloading them by default.
+Profiles include the complete open 26-table MIMIC-III demo, metadata for all
+26 tables in the credentialed MIMIC-III 1.4 release, all 1,593 public
+continuous NHANES transport files across demographics, dietary, examination,
+laboratory, and questionnaire components, all 58 standardized datasets
+currently returned by UCI's Health and Medicine API catalog, and current
+ClinVar summaries useful for atherosclerosis and cerebral cavernous
+malformation discovery.
 
 DBSetup.xlsx loaded into `MDT` drives hive partitioning with two columns:
   PartitionKey   -- hive key name(s) for each file's partition dir
@@ -221,11 +257,13 @@ recommended offline smoke test.
 
 ## Canonical Workflow
 
-repoquet follows one seven-step sequence in both the complete generic example
-below and the domain-specific production reference script at
-`inst/examples/healthcare/CECORC_loader_reference.R`.
+repoquet follows one seven-step sequence regardless of profile. Both
+`create_repository_project()` and `generate_example_repository()` write a
+`run_repository.R` that already implements it end to end -- open the
+generated file in a new project for a copy-pasteable starting point tuned to
+that project's own paths.
 
-The two workflows share the same operational contract:
+The generic and `hcup` profiles share the same operational contract:
 
 | Stage | Capability | What makes it useful |
 |---|---|---|
@@ -238,17 +276,18 @@ The two workflows share the same operational contract:
 | 7. Reconcile | Non-destructive comparison of inventory, checkpoint, manifest, Parquet, and DuckDB | Repository drift is visible and repairable instead of silently accumulating |
 
 The generic example derives all behavior from synthetic data and an empty
-policy profile. The healthcare reference follows the same stages but supplies
-HCUP source paths, the opt-in `hcup` policy profile, domain-specific resource
-tuning, data dictionaries, and survey-weighted analysis examples.
+policy profile. Passing `profile = "hcup"` to `create_repository_project()`
+follows the identical seven stages but seeds the schema registry with HCUP
+column-name patterns and enables the `hcup_weighted_count()` /
+`hcup_weighted_mean()` / `hcup_weighted_summary()` survey-weighted analysis
+helpers -- point its generated `DBSetup.xlsx` and `repository_config.R` at
+your own HCUP source paths and domain-specific resource tuning.
 
 ## Complete Workflow Example
 
 This example uses the built-in synthetic repository, but exercises the same
 schema review, Parquet loading, DuckDB registration, and reconciliation path as
-a production repository. During active development, source the implementation
-from the cloned repository; replace that line with `library(repoquet)` after
-installing a released package.
+a production repository.
 
 ### 1. Initialize The Run
 
@@ -259,7 +298,7 @@ called once per execution and the resulting `RunId` passed through the workflow
 so log, manifest, validation, and audit records can be traced to the same run.
 
 ```r
-source("R/repoquet.R")
+library(repoquet)
 example <- generate_example_repository("~/my_repository_example")
 cfg <- load_repository_config(example$ConfigPath)
 paths <- RepositoryInitialize(cfg$FormattedDBPath, profile = "generic")
@@ -644,6 +683,17 @@ reset_table_for_reload(MDT = MDT, Database = "NIS", TableName = "Core",
 After inspecting a reset preview, use `DryRun = FALSE` and rerun stages 5-7.
 State snapshots created by the loader provide an additional recovery record.
 
-The healthcare reference uses the same sequence with domain policies, migration
-helpers, advanced diagnostics, and machine-specific tuning. Those additions
-are intentionally not hard-coded into the generic package workflow.
+Domain-specific policies, migration helpers, advanced diagnostics, and
+machine-specific tuning layer on top of the same seven-stage sequence through
+configuration and the `hcup` profile -- they are intentionally not hard-coded
+into the generic package workflow.
+
+## Learning More
+
+- `vignette("repoquet", package = "repoquet")` walks through the seven-stage
+  workflow end to end against the synthetic example repository.
+- `?repoquet` (or `help(package = "repoquet")`) lists every exported function
+  with runnable examples.
+- `inst/scripts/repoquet.R` is a thin command-line wrapper over the same
+  functions documented above, useful for scheduled/non-interactive runs
+  (`Rscript ... <init|validate|schema|finalize|load|audit> <project-path>`).
