@@ -232,7 +232,14 @@ ValidateMDTPreflight below before anything is written.
 
 ```r
 public_example <- generate_real_world_repository("~/repoquet_public_example", profile = "quick", Download = FALSE)
-# Review DBSetup.xlsx, then materialize its declared sources:
+cfg <- load_repository_config(public_example$ConfigPath)
+paths <- RepositoryInitialize(cfg$FormattedDBPath)
+RunId <- new_repository_run_id()
+
+# Review DBSetup.xlsx, then materialize its declared sources. Passing LogPath
+# and RunId explicitly to every call keeps every log line in this run's
+# actual formatted/Logs/load_log.txt instead of the tempdir() fallback used
+# when no LogPath is in scope.
 MDT <- openxlsx::read.xlsx(public_example$MDTPath, sheet = "Sheet1")
 ValidateMDTPreflight(MDT = MDT, strict = TRUE, logStatus = TRUE,
                      ParquetBasePath = paths$ParquetBasePath,
@@ -240,7 +247,8 @@ ValidateMDTPreflight(MDT = MDT, strict = TRUE, logStatus = TRUE,
                      TerminalHivePartition = FALSE,
                      MasterDBPath = cfg$MasterDBPath,
                      LogPath = paths$LogPath, RunId = RunId)
-MDT <- MaterializeRemoteSources(MDT, public_example$DownloadCachePath)
+MDT <- MaterializeRemoteSources(MDT, paths$DownloadCachePath,
+                                LogPath = paths$LogPath, RunId = RunId)
 ```
 
 Use `profile = "comprehensive"` (or `"all"`) to inventory every source.
