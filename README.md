@@ -251,7 +251,7 @@ MDT <- MaterializeRemoteSources(MDT, paths$DownloadCachePath,
                                 LogPath = paths$LogPath, RunId = RunId)
 ```
 
-Use `profile = "comprehensive"` (or `"all"`) to inventory every source.
+Use `profile = "comprehensive"` to inventory every source.
 Credentialed MIMIC-III rows use `DownloadPolicy = "manual"`: users must obtain
 PhysioNet authorization and pre-stage the original `.csv.gz` files in the
 managed cache. repoquet never bypasses access controls or modifies source files.
@@ -371,7 +371,7 @@ MDT <- MaterializeRemoteSources(MDT = MDT,
                                 DownloadCachePath = paths$DownloadCachePath,
                                 Offline = isTRUE(cfg$RemoteOffline),
                                 DefaultDownloadPolicy = cfg$DownloadPolicy %||% "if_missing",
-                                TimeoutSeconds = cfg$DownloadTimeout %||% 600,
+                                TimeoutSeconds = cfg$DownloadTimeout %||% 1080,
                                 LogPath = paths$LogPath,
                                 RunId = RunId)
 pending <- MDTCompleteStatus(MDT = MDT,

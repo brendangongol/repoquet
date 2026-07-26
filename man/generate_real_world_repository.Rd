@@ -6,7 +6,7 @@
 \usage{
 generate_real_world_repository(
   dir,
-  profile = c("quick", "relational", "schema_drift", "stress", "comprehensive", "all"),
+  profile = c("quick", "relational", "schema_drift", "stress", "comprehensive"),
   IncludeLarge = NULL,
   Download = FALSE,
   overwrite = FALSE

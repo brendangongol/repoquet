@@ -8503,7 +8503,7 @@ load_repository_config <- function(
     SchemaWorkers = min(6L, max(1L, parallel::detectCores() - 1L)),
     RemoteOffline = FALSE,
     DownloadPolicy = "if_missing",
-    DownloadTimeout = 600,
+    DownloadTimeout = 1080,
     DBName = "Repository.duckdb",
     DuckDB_GB = "8GB"
   )
@@ -8685,7 +8685,7 @@ create_repository_project <- function(dir, MasterDBPath = file.path(dir, "source
     "  SchemaWorkers      = min(6L, max(1L, parallel::detectCores() - 1L)),",
     "  RemoteOffline      = FALSE,        # TRUE uses only previously cached remote sources",
     "  DownloadPolicy    = \"if_missing\", # if_missing | if_changed | always | manual",
-    "  DownloadTimeout   = 600,          # seconds",
+    "  DownloadTimeout   = 1080,         # seconds",
     "  n_workers         = max(1L, parallel::detectCores() - 1L),",
     "  DBName            = \"Repository.duckdb\",",
     "  DuckDB_GB         = \"8GB\"        # DuckDB memory limit (~75% of available RAM)",
@@ -8906,11 +8906,11 @@ generate_example_repository <- function(dir, seed = 1) {
 #' Returns workbook rows for public sources chosen to exercise relational
 #' tables, schema drift, archive members, labelled transport files, and
 #' larger-than-memory loading. No network request is made.
-#' @param profile Example profile: quick, relational, schema_drift, stress,
-#'   comprehensive, or all. Comprehensive and all include the packaged full
-#'   NHANES and UCI healthcare catalogs plus credentialed MIMIC-III metadata.
+#' @param profile Example profile: quick, relational, schema_drift, stress, or
+#'   comprehensive. Comprehensive includes the packaged full NHANES and UCI
+#'   healthcare catalogs plus credentialed MIMIC-III metadata.
 #' @param IncludeLarge Include sources flagged as large. Defaults to TRUE for
-#'   stress, comprehensive, and all.
+#'   stress and comprehensive.
 #' @return A data frame ready for DBSetup.xlsx.
 #' @examples
 #' quick <- real_world_source_catalog("quick")
@@ -8918,10 +8918,10 @@ generate_example_repository <- function(dir, seed = 1) {
 #' sort(unique(quick$Database))
 #' @export
 real_world_source_catalog <- function(
-    profile = c("quick", "relational", "schema_drift", "stress", "comprehensive", "all"),
+    profile = c("quick", "relational", "schema_drift", "stress", "comprehensive"),
     IncludeLarge = NULL) {
   profile <- match.arg(profile)
-  if (is.null(IncludeLarge)) IncludeLarge <- profile %in% c("stress", "comprehensive", "all")
+  if (is.null(IncludeLarge)) IncludeLarge <- profile %in% c("stress", "comprehensive")
   row_frame <- function(Database, MDBDir, Path, TableName, FileType, PartitionKey,
                         PartitionValue, SourceURI, DownloadPolicy = "if_missing",
                         ExpectedSHA256 = "", ArchiveType = "", ArchiveMember = "",
@@ -9054,8 +9054,7 @@ real_world_source_catalog <- function(
     relational = all_rows$Group == "mimic_demo",
     schema_drift = all_rows$Group == "nhanes",
     stress = all_rows$Large,
-    comprehensive = rep(TRUE, nrow(all_rows)),
-    all = rep(TRUE, nrow(all_rows)))
+    comprehensive = rep(TRUE, nrow(all_rows)))
   if (!isTRUE(IncludeLarge)) keep <- keep & !all_rows$Large
   out <- all_rows[keep]
   out[, c("Group", "Large") := NULL]
@@ -9077,7 +9076,7 @@ real_world_source_catalog <- function(
 #' unlink(dir, recursive = TRUE)
 #' @export
 generate_real_world_repository <- function(
-    dir, profile = c("quick", "relational", "schema_drift", "stress", "comprehensive", "all"),
+    dir, profile = c("quick", "relational", "schema_drift", "stress", "comprehensive"),
     IncludeLarge = NULL, Download = FALSE, overwrite = FALSE) {
   profile <- match.arg(profile)
   paths <- create_repository_project(dir, profile = "generic", overwrite = overwrite)

@@ -197,7 +197,7 @@ test_that("the synthetic example repository runs the full pipeline end-to-end", 
 })
 
 test_that("real-world source profiles are complete and network-free", {
-  all_sources <- real_world_source_catalog("all")
+  all_sources <- real_world_source_catalog("comprehensive")
   expect_equal(sum(all_sources$Database == "MIMICIII_DEMO"), 26L)
   expect_equal(sum(all_sources$Database == "MIMICIII_FULL"), 26L)
   expect_equal(sum(all_sources$Database == "NHANES"), 1593L)

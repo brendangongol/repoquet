@@ -61,7 +61,7 @@ if (command %in% c("schema", "catalog", "load", "audit")) {
     MDT, DownloadCachePath = paths$DownloadCachePath,
     Offline = isTRUE(cfg$RemoteOffline) || command == "audit",
     DefaultDownloadPolicy = cfg$DownloadPolicy %||% "if_missing",
-    TimeoutSeconds = cfg$DownloadTimeout %||% 600,
+    TimeoutSeconds = cfg$DownloadTimeout %||% 1080,
     Strict = command != "audit",
     LogPath = paths$LogPath, RunId = RunId)
 }

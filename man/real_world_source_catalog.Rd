@@ -5,17 +5,17 @@
 \title{Curated official source inventory for real-world examples}
 \usage{
 real_world_source_catalog(
-  profile = c("quick", "relational", "schema_drift", "stress", "comprehensive", "all"),
+  profile = c("quick", "relational", "schema_drift", "stress", "comprehensive"),
   IncludeLarge = NULL
 )
 }
 \arguments{
-\item{profile}{Example profile: quick, relational, schema_drift, stress,
-comprehensive, or all. Comprehensive and all include the packaged full
-NHANES and UCI healthcare catalogs plus credentialed MIMIC-III metadata.}
+\item{profile}{Example profile: quick, relational, schema_drift, stress, or
+comprehensive. Comprehensive includes the packaged full NHANES and UCI
+healthcare catalogs plus credentialed MIMIC-III metadata.}
 
 \item{IncludeLarge}{Include sources flagged as large. Defaults to TRUE for
-stress, comprehensive, and all.}
+stress and comprehensive.}
 }
 \value{
 A data frame ready for DBSetup.xlsx.
