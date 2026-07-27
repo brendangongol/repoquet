@@ -13,6 +13,7 @@ MaterializeRemoteSources(
   TimeoutSeconds = 600,
   Strict = TRUE,
   DownloadFunction = NULL,
+  Resume = TRUE,
   LogPath = NULL,
   RunId = NULL
 )
@@ -37,6 +38,20 @@ MaterializeRemoteSources(
 \item{DownloadFunction}{Optional function with arguments \code{uri} and
 \code{destination}. It must write the destination file. This supports
 caller-managed authentication and deterministic tests.}
+
+\item{Resume}{Logical. When TRUE (default) and \code{DownloadFunction} is
+NULL, an interrupted download (network drop or exceeded
+\code{TimeoutSeconds}) leaves its partial bytes in a deterministic
+\code{<cache file>.part} file next to the destination, and the next
+attempt continues from that byte offset with an HTTP Range request
+instead of restarting from scratch. Requires the \code{curl} package;
+without it (or with \code{Resume = FALSE}), every attempt restarts from
+byte zero as before. If the server ignores the Range request and returns
+the full file again, the partial file is discarded and the next attempt
+restarts cleanly rather than risk an appended, corrupted file. Partial
+\code{.part} files are never treated as a completed cached copy and are
+not automatically purged; delete them from \code{DownloadCachePath} to
+force a clean restart.}
 
 \item{LogPath, RunId}{Optional repository logging context.}
 }

@@ -146,7 +146,11 @@ extension used by the reader. Before schema discovery,
 with the same direct or chunked readers used for local data. Original sources
 and `DBSetup.xlsx` are never changed. `if_changed` downloads to a temporary
 `.part` file, compares SHA-256, and replaces the cache only when content differs.
-`manual` and `Offline = TRUE` require an existing cache entry. Do not place
+An interrupted download (network drop or an exceeded `TimeoutSeconds`) is
+resumable by default: retrying `MaterializeRemoteSources()` continues a large
+file from its last byte instead of restarting, when `curl` is installed and no
+custom `DownloadFunction` is supplied. Pass `Resume = FALSE` to always restart
+from scratch. `manual` and `Offline = TRUE` require an existing cache entry. Do not place
 passwords or tokens in the workbook; pass a caller-managed `DownloadFunction`
 when authentication is required.
 
@@ -184,8 +188,8 @@ Schema decisions remain an intentional human review step.
 The package ships a ready-to-use, pre-populated `DBSetup.xlsx` at
 `system.file("extdata", "DBSetup.xlsx", package = "repoquet")` -- no R code
 needed to build it. It covers the open MIMIC-III demo, NHANES Demographics,
-Examination, and Laboratory components across every cycle since 1999, and all
-58 datasets from the UCI Machine Learning Repository's health and medicine
+Examination, and Laboratory components across every cycle since 1999, and 55
+datasets from the UCI Machine Learning Repository's health and medicine
 category. Point a project's `repository_config.R` at it (or copy it over a
 scaffold's empty `DBSetup.xlsx`) and drive the whole workflow with the
 packaged command-line script, one subcommand per stage:
@@ -210,7 +214,7 @@ containing curated official sources without downloading them by default.
 Profiles include the complete open 26-table MIMIC-III demo, metadata for all
 26 tables in the credentialed MIMIC-III 1.4 release, all 1,593 public
 continuous NHANES transport files across demographics, dietary, examination,
-laboratory, and questionnaire components, all 58 standardized datasets
+laboratory, and questionnaire components, all 57 standardized datasets
 currently returned by UCI's Health and Medicine API catalog, and current
 ClinVar summaries useful for atherosclerosis and cerebral cavernous
 malformation discovery.

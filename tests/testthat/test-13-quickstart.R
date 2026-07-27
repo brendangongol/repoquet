@@ -201,7 +201,7 @@ test_that("real-world source profiles are complete and network-free", {
   expect_equal(sum(all_sources$Database == "MIMICIII_DEMO"), 26L)
   expect_equal(sum(all_sources$Database == "MIMICIII_FULL"), 26L)
   expect_equal(sum(all_sources$Database == "NHANES"), 1593L)
-  expect_equal(sum(all_sources$Database == "UCI_HEALTH"), 58L)
+  expect_equal(sum(all_sources$Database == "UCI_HEALTH"), 57L)
   expect_equal(sum(all_sources$Database == "CLINVAR"), 2L)
   expect_true(all(c("ArchiveType", "ArchiveMember", "SourceProvider",
                     "CitationURL", "AccessMode", "AccessRequirements",

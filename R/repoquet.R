@@ -483,6 +483,34 @@ source_path_for_row <- function(row_meta, MasterDBPath) {
   list(NotModified = identical(status, 304L), StatusCode = status)
 }
 
+.resumable_curl_download <- function(uri, destination, timeout_seconds) {
+  resumefrom <- if (file.exists(destination)) file.info(destination)$size[1] else 0
+  res <- tryCatch(
+    curl::multi_download(uri, destination, resume = (resumefrom > 0),
+                         progress = FALSE, multi_timeout = as.numeric(timeout_seconds)),
+    error = function(e) NULL)
+  if (is.null(res) || nrow(res) != 1L) {
+    stop("Resumable downloader failed to start the request.")
+  }
+  status <- suppressWarnings(as.integer(res$status_code[1]))
+  err <- as.character(res$error[1])
+  if (resumefrom > 0 && identical(status, 200L)) {
+    #### Server ignored the Range request and re-sent the whole file, which  ####
+    #### would otherwise get appended onto the existing partial bytes.      ####
+    unlink(destination)
+    stop("Server does not support resumable downloads for this URL (received full content instead of a partial range); discarding the partial file so the next attempt restarts cleanly.")
+  }
+  if (!is.na(status) && status >= 400L) {
+    unlink(destination)
+    stop(sprintf("Downloader returned HTTP status %s.", status))
+  }
+  if (!isTRUE(res$success[1])) {
+    stop(if (!is.na(err) && nzchar(err)) err
+         else "Download did not complete; the partial file is retained so the next attempt can resume.")
+  }
+  TRUE
+}
+
 #' Materialize remote source files into the repository cache
 #'
 #' Rows with a non-empty \code{SourceURI} are downloaded to a managed local
@@ -508,6 +536,19 @@ source_path_for_row <- function(row_meta, MasterDBPath) {
 #' @param DownloadFunction Optional function with arguments \code{uri} and
 #'   \code{destination}. It must write the destination file. This supports
 #'   caller-managed authentication and deterministic tests.
+#' @param Resume Logical. When TRUE (default) and \code{DownloadFunction} is
+#'   NULL, an interrupted download (network drop or exceeded
+#'   \code{TimeoutSeconds}) leaves its partial bytes in a deterministic
+#'   \code{<cache file>.part} file next to the destination, and the next
+#'   attempt continues from that byte offset with an HTTP Range request
+#'   instead of restarting from scratch. Requires the \code{curl} package;
+#'   without it (or with \code{Resume = FALSE}), every attempt restarts from
+#'   byte zero as before. If the server ignores the Range request and returns
+#'   the full file again, the partial file is discarded and the next attempt
+#'   restarts cleanly rather than risk an appended, corrupted file. Partial
+#'   \code{.part} files are never treated as a completed cached copy and are
+#'   not automatically purged; delete them from \code{DownloadCachePath} to
+#'   force a clean restart.
 #' @param LogPath,RunId Optional repository logging context.
 #' @return A copy of \code{MDT} with resolved paths and remote provenance.
 #' @examples
@@ -540,6 +581,7 @@ MaterializeRemoteSources <- function(
     TimeoutSeconds = 600,
     Strict = TRUE,
     DownloadFunction = NULL,
+    Resume = TRUE,
     LogPath = NULL,
     RunId = NULL) {
   DefaultDownloadPolicy <- match.arg(DefaultDownloadPolicy)
@@ -604,12 +646,22 @@ MaterializeRemoteSources <- function(
   on.exit(options(timeout = old_timeout), add = TRUE)
   failures <- character(0)
   allowed <- c("if_missing", "if_changed", "always", "manual")
-  downloader <- if (is.null(DownloadFunction)) {
+  use_resume <- is.null(DownloadFunction) && isTRUE(Resume) &&
+    requireNamespace("curl", quietly = TRUE)
+  if (isTRUE(Resume) && is.null(DownloadFunction) && !use_resume) {
+    log_msg("[REMOTE] Package 'curl' is not installed; resumable downloads are disabled and an interrupted download will restart from scratch.",
+            log_path = LogPath)
+  }
+  downloader <- if (!is.null(DownloadFunction)) {
+    DownloadFunction
+  } else if (use_resume) {
+    function(uri, destination) .resumable_curl_download(uri, destination, TimeoutSeconds)
+  } else {
     function(uri, destination) {
       utils::download.file(uri, destination, mode = "wb", quiet = TRUE,
                            method = DownloadMethod)
     }
-  } else DownloadFunction
+  }
   if (!is.function(downloader)) stop("DownloadFunction must be NULL or a function.")
 
   for (i in which(remote)) {
@@ -661,8 +713,14 @@ MaterializeRemoteSources <- function(
       status <- if (isTRUE(Offline)) "offline_cached" else if (policy == "manual") "manual_cached" else "cached"
       if (should_download) {
         dir.create(dirname(download_path), recursive = TRUE, showWarnings = FALSE)
-        tmp <- tempfile(pattern = paste0(basename(download_path), ".part_"),
-                        tmpdir = dirname(download_path))
+        tmp <- if (use_resume) {
+          #### Deterministic name so a later call can find and resume it; ####
+          #### never swept by the abandoned-".part_" cleanup below.       ####
+          paste0(download_path, ".part")
+        } else {
+          tempfile(pattern = paste0(basename(download_path), ".part_"),
+                  tmpdir = dirname(download_path))
+        }
         tryCatch({
           conditional <- if (policy == "if_changed" && cache_exists &&
                              is.null(DownloadFunction)) {
@@ -700,7 +758,11 @@ MaterializeRemoteSources <- function(
             }
           }
         }, finally = {
-          if (exists("tmp", inherits = FALSE) && file.exists(tmp)) unlink(tmp)
+          #### Resumable partials are kept on failure (that's the point); ####
+          #### .resumable_curl_download() already discards them itself   ####
+          #### when the content isn't safely resumable (bad HTTP status  ####
+          #### or a server that ignored the Range request).              ####
+          if (!use_resume && exists("tmp", inherits = FALSE) && file.exists(tmp)) unlink(tmp)
         })
       }
       if (archive$Type == "zip" &&

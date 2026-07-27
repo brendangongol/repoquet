@@ -19,6 +19,14 @@
 - Added optional conditional HTTP revalidation for `if_changed` sources when
   `curl` is available, while preserving full-download hash comparison as the
   compatibility fallback.
+- Added resumable remote downloads: `MaterializeRemoteSources(..., Resume = TRUE)`
+  (the default) now retries an interrupted large download from its last byte
+  offset instead of restarting from scratch, when `curl` is available and no
+  custom `DownloadFunction` is supplied. Partial bytes are kept in a
+  deterministic `<cache file>.part` file distinct from the resolved cache path,
+  so an incomplete download is never mistaken for a completed one. If the
+  server does not honor the Range request, the partial file is discarded and
+  the next attempt restarts cleanly.
 - Redesigned `SchemaReview.xlsx` around a `StartHere` dashboard. Only unresolved
   column and compatibility decisions remain visible; policy results are clearly
   informational and advanced registries/history are hidden by default.
@@ -62,7 +70,7 @@
 * Added curated real-world repository profiles for the MIMIC-III demo, NHANES
   demographic cycles, UCI healthcare datasets, and ClinVar summaries.
 * Expanded the comprehensive real-world catalog to all 1,593 public continuous
-  NHANES XPT files, all 58 standardized UCI Health and Medicine datasets, and
+  NHANES XPT files, all 57 standardized UCI Health and Medicine datasets, and
   all 26 credentialed MIMIC-III 1.4 tables. Access metadata keeps restricted
   MIMIC sources manual and explicit.
 * Added `inst/extdata/DBSetupV2WithInternetDownload.xlsx`, preserving the

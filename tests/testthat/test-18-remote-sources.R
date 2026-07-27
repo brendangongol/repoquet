@@ -236,3 +236,133 @@ test_that("ZIP members materialize atomically and reject traversal paths", {
     unsafe, file.path(root, "unsafe"), DownloadFunction = downloader),
     "safe relative ArchiveMember")
 })
+
+test_that(".resumable_curl_download discards a partial file when the server ignores Range", {
+  skip_if_not_installed("curl")
+  root <- tempfile("resume_ignored_"); dir.create(root)
+  on.exit(unlink(root, recursive = TRUE), add = TRUE)
+  dest <- file.path(root, "target.bin")
+  writeLines("partial-bytes", dest)
+
+  testthat::local_mocked_bindings(
+    multi_download = function(urls, destfiles, resume, progress, multi_timeout, ...) {
+      data.frame(success = TRUE, status_code = 200L, error = NA_character_,
+                stringsAsFactors = FALSE)
+    },
+    .package = "curl")
+
+  expect_error(.resumable_curl_download("https://example.test/big.bin", dest, 60),
+              "does not support resumable downloads")
+  expect_false(file.exists(dest))
+})
+
+test_that(".resumable_curl_download discards content on a definitive HTTP error", {
+  skip_if_not_installed("curl")
+  root <- tempfile("resume_error_"); dir.create(root)
+  on.exit(unlink(root, recursive = TRUE), add = TRUE)
+  dest <- file.path(root, "target.bin")
+
+  testthat::local_mocked_bindings(
+    multi_download = function(urls, destfiles, resume, progress, multi_timeout, ...) {
+      writeLines("error page", destfiles)
+      data.frame(success = TRUE, status_code = 404L, error = NA_character_,
+                stringsAsFactors = FALSE)
+    },
+    .package = "curl")
+
+  expect_error(.resumable_curl_download("https://example.test/missing.bin", dest, 60),
+              "HTTP status 404")
+  expect_false(file.exists(dest))
+})
+
+test_that(".resumable_curl_download preserves partial bytes on a network interruption", {
+  skip_if_not_installed("curl")
+  root <- tempfile("resume_keep_"); dir.create(root)
+  on.exit(unlink(root, recursive = TRUE), add = TRUE)
+  dest <- file.path(root, "target.bin")
+  writeLines("partial-bytes", dest)
+
+  testthat::local_mocked_bindings(
+    multi_download = function(urls, destfiles, resume, progress, multi_timeout, ...) {
+      expect_true(resume)
+      data.frame(success = FALSE, status_code = 206L, error = "Timeout was reached",
+                stringsAsFactors = FALSE)
+    },
+    .package = "curl")
+
+  expect_error(.resumable_curl_download("https://example.test/big.bin", dest, 60),
+              "Timeout was reached")
+  expect_true(file.exists(dest))
+})
+
+test_that(".resumable_curl_download succeeds when the transfer completes", {
+  skip_if_not_installed("curl")
+  root <- tempfile("resume_ok_"); dir.create(root)
+  on.exit(unlink(root, recursive = TRUE), add = TRUE)
+  dest <- file.path(root, "target.bin")
+
+  testthat::local_mocked_bindings(
+    multi_download = function(urls, destfiles, resume, progress, multi_timeout, ...) {
+      writeLines("complete file", destfiles)
+      data.frame(success = TRUE, status_code = 200L, error = NA_character_,
+                stringsAsFactors = FALSE)
+    },
+    .package = "curl")
+
+  expect_true(.resumable_curl_download("https://example.test/small.bin", dest, 60))
+})
+
+test_that("MaterializeRemoteSources resumes an interrupted download on retry", {
+  skip_if_not_installed("curl")
+  root <- tempfile("resume_e2e_"); dir.create(root)
+  on.exit(unlink(root, recursive = TRUE), add = TRUE)
+  cache <- file.path(root, "cache")
+
+  full_content <- c("ID,VALUE", "1,alpha", "2,beta")
+  attempt <- 0L
+  testthat::local_mocked_bindings(
+    multi_download = function(urls, destfiles, resume, progress, multi_timeout, ...) {
+      attempt <<- attempt + 1L
+      if (attempt == 1L) {
+        writeLines(full_content[1], destfiles)
+        return(data.frame(success = FALSE, status_code = NA_integer_,
+                          error = "simulated interruption", stringsAsFactors = FALSE))
+      }
+      expect_true(resume)
+      con <- file(destfiles, open = "ab")
+      writeLines(full_content[-1], con)
+      close(con)
+      data.frame(success = TRUE, status_code = 206L, error = NA_character_,
+                stringsAsFactors = FALSE)
+    },
+    .package = "curl")
+
+  mdt <- remote_mdt(uri = "https://example.test/resume.csv")
+  expect_error(MaterializeRemoteSources(mdt, cache), "simulated interruption")
+
+  partial <- list.files(file.path(cache, "WEB"), pattern = "\\.part$", full.names = TRUE)
+  expect_length(partial, 1L)
+
+  resolved <- MaterializeRemoteSources(mdt, cache)
+  expect_identical(resolved$RemoteCacheStatus, "downloaded")
+  expect_identical(readLines(resolved$ResolvedSourcePath), full_content)
+  expect_length(list.files(file.path(cache, "WEB"), pattern = "\\.part$"), 0L)
+})
+
+test_that("Resume = FALSE always uses the plain downloader, never curl::multi_download", {
+  skip_if_not_installed("curl")
+  root <- tempfile("resume_off_"); dir.create(root)
+  on.exit(unlink(root, recursive = TRUE), add = TRUE)
+  cache <- file.path(root, "cache")
+
+  testthat::local_mocked_bindings(
+    multi_download = function(...) stop("multi_download should not be called when Resume = FALSE"),
+    .package = "curl")
+  testthat::local_mocked_bindings(
+    download.file = function(url, destfile, ...) { writeLines("A,B", destfile); 0L },
+    .package = "utils")
+
+  mdt <- remote_mdt(uri = "https://example.test/resume_off.csv")
+  resolved <- MaterializeRemoteSources(mdt, cache, Resume = FALSE)
+  expect_identical(resolved$RemoteCacheStatus, "downloaded")
+})
