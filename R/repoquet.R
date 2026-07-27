@@ -832,6 +832,39 @@ repository_checkpoint_legacy_key <- function(MDT) {
   paste(MDT$Database, MDT$TableName, vals, MDT$MDBDir, MDT$Path, sep = "||")
 }
 
+#' Flag which MDT rows are already recorded as completed in a checkpoint
+#'
+#' Compares each row's current checkpoint key (see \code{repository_checkpoint_key()})
+#' against a checkpoint's completed-file entries, returning a logical mask over
+#' \code{MDT}. This is the standard way to subset a Master Database Table down
+#' to only the sources a prior run already finished -- for example before
+#' registering DuckDB views for a partially completed load. When
+#' \code{accept_legacy} is \code{TRUE} (default), entries written in older
+#' formats (value-only legacy keys, or bare source paths for a file that is
+#' the only row using that path) are also honored, so switching
+#' \code{SourceFingerprintMode} or upgrading repoquet does not strand
+#' already-completed files.
+#' @param MDT Data frame. Current Master Database Table.
+#' @param completed_checkpoint Character vector of completed-file keys, as
+#'   returned by \code{\link{load_checkpoint}}.
+#' @param accept_legacy Logical. If \code{TRUE} (default), also match legacy
+#'   value-only keys and unambiguous bare paths in \code{completed_checkpoint}.
+#' @param MasterDBPath Character scalar or \code{NULL}. Root directory used to
+#'   resolve each row's source file for fingerprinting. Required when
+#'   \code{SourceFingerprintMode} is not \code{"none"}.
+#' @param SourceFingerprintMode Character scalar, one of \code{"none"}
+#'   (default), \code{"metadata"}, or \code{"sha256"} -- must match the mode
+#'   used when the checkpoint was written. See \code{\link{source_fingerprint}}.
+#' @return Logical vector the same length as \code{nrow(MDT)}; \code{TRUE}
+#'   where that row is already recorded as completed.
+#' @examples
+#' MDT <- data.frame(Database = "DEMO", TableName = "Core", MDBDir = ".",
+#'                   Path = c("a.csv", "b.csv"), PartitionKey = "YEAR",
+#'                   PartitionValue = "2020", stringsAsFactors = FALSE)
+#' # a bare, unambiguous source path also satisfies "already completed"
+#' # via the accept_legacy bare-path match.
+#' checkpoint_completed_mask(MDT, completed_checkpoint = "a.csv")
+#' @export
 checkpoint_completed_mask <- function(MDT, completed_checkpoint, accept_legacy = TRUE,
                                       MasterDBPath = NULL,
                                       SourceFingerprintMode = c("none", "metadata", "sha256")) {
@@ -8799,7 +8832,7 @@ create_repository_project <- function(dir, MasterDBPath = file.path(dir, "source
     "MDT <- MaterializeRemoteSources(MDT, DownloadCachePath = paths$DownloadCachePath,",
     "                                Offline = isTRUE(cfg$RemoteOffline),",
     "                                DefaultDownloadPolicy = cfg$DownloadPolicy %||% \"if_missing\",",
-    "                                TimeoutSeconds = cfg$DownloadTimeout %||% 600,",
+    "                                TimeoutSeconds = cfg$DownloadTimeout %||% 10800,",
     "                                LogPath = paths$LogPath, RunId = RunId)",
     "pending <- MDTCompleteStatus(MDT, paths$CheckpointPath, verbose = TRUE, logStatus = TRUE)",
     "",
