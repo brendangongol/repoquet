@@ -58,7 +58,7 @@ ParquetBackEndCreate(
   RemoteOffline = FALSE,
   RemoteDefaultDownloadPolicy = c("if_missing", "if_changed", "always", "manual"),
   RemoteDownloadMethod = "auto",
-  RemoteDownloadTimeout = 600,
+  RemoteDownloadTimeout = 10800,
   RemoteDownloadFunction = NULL
 )
 }

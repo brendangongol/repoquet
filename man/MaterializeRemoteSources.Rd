@@ -10,7 +10,7 @@ MaterializeRemoteSources(
   Offline = FALSE,
   DefaultDownloadPolicy = c("if_missing", "if_changed", "always", "manual"),
   DownloadMethod = "auto",
-  TimeoutSeconds = 600,
+  TimeoutSeconds = 10800,
   Strict = TRUE,
   DownloadFunction = NULL,
   Resume = TRUE,

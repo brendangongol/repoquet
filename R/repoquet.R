@@ -578,7 +578,7 @@ MaterializeRemoteSources <- function(
     Offline = FALSE,
     DefaultDownloadPolicy = c("if_missing", "if_changed", "always", "manual"),
     DownloadMethod = "auto",
-    TimeoutSeconds = 600,
+    TimeoutSeconds = 10800,
     Strict = TRUE,
     DownloadFunction = NULL,
     Resume = TRUE,
@@ -8565,7 +8565,7 @@ load_repository_config <- function(
     SchemaWorkers = min(6L, max(1L, parallel::detectCores() - 1L)),
     RemoteOffline = FALSE,
     DownloadPolicy = "if_missing",
-    DownloadTimeout = 1080,
+    DownloadTimeout = 10800,
     DBName = "Repository.duckdb",
     DuckDB_GB = "8GB"
   )
@@ -8747,7 +8747,7 @@ create_repository_project <- function(dir, MasterDBPath = file.path(dir, "source
     "  SchemaWorkers      = min(6L, max(1L, parallel::detectCores() - 1L)),",
     "  RemoteOffline      = FALSE,        # TRUE uses only previously cached remote sources",
     "  DownloadPolicy    = \"if_missing\", # if_missing | if_changed | always | manual",
-    "  DownloadTimeout   = 1080,         # seconds",
+    "  DownloadTimeout   = 10800,        # seconds",
     "  n_workers         = max(1L, parallel::detectCores() - 1L),",
     "  DBName            = \"Repository.duckdb\",",
     "  DuckDB_GB         = \"8GB\"        # DuckDB memory limit (~75% of available RAM)",
@@ -14323,7 +14323,7 @@ ParquetBackEndCreate <- function(MDT, DBLoad, MasterDBPath, completed_checkpoint
                                  DownloadCachePath = NULL, MaterializeRemote = TRUE,
                                  RemoteOffline = FALSE,
                                  RemoteDefaultDownloadPolicy = c("if_missing", "if_changed", "always", "manual"),
-                                 RemoteDownloadMethod = "auto", RemoteDownloadTimeout = 600,
+                                 RemoteDownloadMethod = "auto", RemoteDownloadTimeout = 10800,
                                  RemoteDownloadFunction = NULL) {
   PartitionBy <- match.arg(PartitionBy, c("NRows", "RAMEstimate", "FAIL"))
   SourceFingerprintMode <- match.arg(SourceFingerprintMode)
