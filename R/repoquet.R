@@ -2363,6 +2363,30 @@ coerce_to_class <- function(x, target_class) {
   converted
 }
 
+#### Best-effort UTF-8 repair for embedded source metadata (variable/value   ####
+#### labels). haven tags every string it returns -- including labels -- as  ####
+#### UTF-8, but the label section of legacy SAS transport/SPSS/Stata files  ####
+#### sometimes carries a stray extended-ASCII byte (typically a Windows-    ####
+#### 1252 degree sign or curly quote) that makes that tag false. Any later  ####
+#### string op (trimws(), nzchar(), ...) on a CHARSXP marked UTF-8 but not  ####
+#### valid UTF-8 aborts with "invalid UTF-8", which previously took down    ####
+#### the whole source's schema survey over a single mis-decoded label      ####
+#### byte. Unlike .normalize_utf8_vector() (which intentionally stops on    ####
+#### bad column *data* so the caller picks the right encoding), a label is  ####
+#### metadata: a best-effort byte-substituted repair is an acceptable       ####
+#### outcome, so this helper never stops.
+.sanitize_label_text <- function(x) {
+  if (is.null(x)) return(NULL)
+  x <- as.character(x)
+  present <- !is.na(x)
+  if (!any(present)) return(x)
+  Encoding(x[present]) <- "unknown"
+  bad <- present
+  bad[present] <- !validUTF8(x[present])
+  if (any(bad)) x[bad] <- iconv(x[bad], from = "latin1", to = "UTF-8", sub = "byte")
+  x
+}
+
 normalize_character_encoding <- function(df, source_encoding = NULL) {
   if (!data.table::is.data.table(df)) data.table::setDT(df)
   enc <- .canonical_encoding_name(source_encoding)
@@ -2426,7 +2450,16 @@ canonicalize_dataframe_names <- function(df) {
   if (!data.table::is.data.table(df)) data.table::setDT(df)
   old_names <- names(df)
   new_names <- canonical_colnames(old_names)
-  data.table::setnames(df, old_names, new_names)
+  #### Rename by position, not by name: fread() does not dedupe a raw source ####
+  #### header (some real-world CSVs really do repeat a column name, e.g. the ####
+  #### UCI Parkinsons and Diabetic Retinopathy sources), so `old_names` can   ####
+  #### itself already contain duplicates. setnames(df, old_names, new_names) ####
+  #### matches `old` by name and aborts with "Some duplicates exist in       ####
+  #### 'old'" in that case -- before the duplicate-column merge logic below  ####
+  #### ever runs. Position-based renaming is unambiguous regardless of       ####
+  #### whether the duplication is in the raw header or only appears after    ####
+  #### canonicalization collapses two distinct names onto one.               ####
+  data.table::setnames(df, seq_along(new_names), new_names)
   dup_names <- unique(new_names[duplicated(new_names)])
   if (length(dup_names) > 0L) {
     for (nm in dup_names) {
@@ -2447,9 +2480,22 @@ canonicalize_dataframe_names <- function(df) {
           equal[is.na(equal)] <- FALSE
           if (!all(equal)) {
             bad_row <- which(overlap)[which(!equal)[1]]
-            stop(sprintf(paste0("Column-name canonicalization would merge conflicting columns '%s' into '%s'. ",
-                                "The first disagreement is at row %d; rename or reconcile the source columns explicitly."),
-                         paste(old_names[which(new_names == nm)], collapse = "' and '"), nm, bad_row))
+            source_names <- old_names[which(new_names == nm)]
+            same_raw_name <- length(unique(source_names)) == 1L
+            stop(sprintf(paste0(
+              "Column-name canonicalization would merge conflicting columns '%s' into '%s' ",
+              "(columns at position%s %s in the source). The first disagreement is at row %d. %s"),
+              paste(source_names, collapse = "' and '"), nm,
+              if (length(idx) > 2L) "s" else "", paste(idx, collapse = ", "), bad_row,
+              if (same_raw_name) {
+                paste0("These columns already share this exact name in the raw source header ",
+                       "(a distinguishing suffix was likely lost upstream) and hold different ",
+                       "values, so they cannot be safely unified automatically -- rename one of ",
+                       "them in the source file, or register a custom reader for this source that ",
+                       "disambiguates the header, before re-running the survey.")
+              } else {
+                "Rename or reconcile the source columns explicitly."
+              }))
           }
         }
         miss <- is.na(lhs)
@@ -3316,27 +3362,58 @@ register_builtin_file_readers <- function() {
     has_labels  = TRUE,
     read_labels_header = function(p) haven::read_sav(p, n_max = 0L),
     chunkable   = TRUE)
+  #### dta/sas7bdat: haven::read_dta()/read_sas() both accept an `encoding=`  ####
+  #### argument, so (like "sav" above) route every call through call_reader()####
+  #### with reader_options threaded through -- otherwise a ReaderOptions     ####
+  #### Encoding override configured for one of these sources is silently     ####
+  #### ignored, since it never reaches the underlying haven call.           ####
   register_file_reader("dta",
-    read_full   = function(p) read_haven_full(p, haven::read_dta),
-    read_header = function(p) names(haven::read_dta(p, n_max = 0L)),
-    read_sample = function(p) haven::read_dta(p, n_max = 1000L),
+    read_full   = function(p, reader_options = list()) read_haven_full(
+      p, function(path) call_reader(list(type = "dta_inner", read = haven::read_dta), "read", path,
+                                    reader_options = reader_options)),
+    read_header = function(p, reader_options = list()) names(call_reader(
+      list(type = "dta_inner", read = haven::read_dta), "read", p,
+      reader_options = reader_options, n_max = 0L)),
+    read_sample = function(p, reader_options = list()) call_reader(
+      list(type = "dta_inner", read = haven::read_dta), "read", p,
+      reader_options = reader_options, n_max = 1000L),
     count_rows  = function(p) nrow(haven::read_dta(p, col_select = 1L)),
     has_labels  = TRUE,
-    read_labels_header = function(p) haven::read_dta(p, n_max = 0L))
+    read_labels_header = function(p, reader_options = list()) call_reader(
+      list(type = "dta_inner", read = haven::read_dta), "read", p,
+      reader_options = reader_options, n_max = 0L))
   register_file_reader("sas7bdat",
-    read_full   = function(p) read_haven_full(p, haven::read_sas),
-    read_header = function(p) names(haven::read_sas(p, n_max = 0L)),
-    read_sample = function(p) haven::read_sas(p, n_max = 1000L),
+    read_full   = function(p, reader_options = list()) read_haven_full(
+      p, function(path) call_reader(list(type = "sas7bdat_inner", read = haven::read_sas), "read", path,
+                                    reader_options = reader_options)),
+    read_header = function(p, reader_options = list()) names(call_reader(
+      list(type = "sas7bdat_inner", read = haven::read_sas), "read", p,
+      reader_options = reader_options, n_max = 0L)),
+    read_sample = function(p, reader_options = list()) call_reader(
+      list(type = "sas7bdat_inner", read = haven::read_sas), "read", p,
+      reader_options = reader_options, n_max = 1000L),
     count_rows  = function(p) nrow(haven::read_sas(p, col_select = 1L)),
     has_labels  = TRUE,
-    read_labels_header = function(p) haven::read_sas(p, n_max = 0L))
+    read_labels_header = function(p, reader_options = list()) call_reader(
+      list(type = "sas7bdat_inner", read = haven::read_sas), "read", p,
+      reader_options = reader_options, n_max = 0L))
+  #### xpt: haven::read_xpt() has no `encoding=` parameter at all (verified  ####
+  #### against installed haven 2.5.5's formals), so a declared Encoding      ####
+  #### cannot be handed to the read itself. It can still repair the returned####
+  #### *data* values post-hoc via read_haven_full()'s source_encoding, so    ####
+  #### thread ReaderOptions$Encoding through there; reader_options is also   ####
+  #### accepted (but otherwise unused) on the other callbacks purely so a    ####
+  #### caller passing reader_options via call_reader() doesn't silently no- ####
+  #### op. (Embedded variable/value label text is repaired separately and   ####
+  #### unconditionally by .sanitize_label_text(), regardless of Encoding.)   ####
   register_file_reader("xpt",
-    read_full   = function(p) read_haven_full(p, haven::read_xpt),
-    read_header = function(p) names(haven::read_xpt(p, n_max = 0L)),
-    read_sample = function(p) haven::read_xpt(p, n_max = 1000L),
+    read_full   = function(p, reader_options = list()) read_haven_full(
+      p, haven::read_xpt, source_encoding = reader_options$Encoding %||% NULL),
+    read_header = function(p, reader_options = list()) names(haven::read_xpt(p, n_max = 0L)),
+    read_sample = function(p, reader_options = list()) haven::read_xpt(p, n_max = 1000L),
     count_rows  = function(p) nrow(haven::read_xpt(p, col_select = 1L)),
     has_labels  = TRUE,
-    read_labels_header = function(p) haven::read_xpt(p, n_max = 0L))
+    read_labels_header = function(p, reader_options = list()) haven::read_xpt(p, n_max = 0L))
   #### Columnar / serialized inputs (e.g. re-partitioning existing data).   ####
   register_file_reader("parquet",
     read_full   = function(p) data.table::as.data.table(arrow::read_parquet(p)),
@@ -9622,6 +9699,14 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
 
 .schema_observation_issue_row <- function(row_meta, full_path, message, encoding_info = NULL) {
   pspec <- tryCatch(partition_spec_for_row(row_meta), error = function(e) list(keys = NA_character_, values = NA_character_))
+  #### EncodingValidationStatus should reflect encoding outcomes only. A      ####
+  #### schema-survey failure can come from many unrelated causes (duplicate  ####
+  #### column names, a malformed delimited row, ...); only tag this field    ####
+  #### "error" when the failure message itself indicates an encoding        ####
+  #### problem, so a reader triaging by this column isn't misled into       ####
+  #### thinking every failure here was an encoding issue.                    ####
+  encoding_related <- grepl("utf-8|multibyte|unable to translate|encoding",
+                           as.character(message)[1], ignore.case = TRUE)
   data.table::data.table(
     Database = as.character(row_meta$Database[1]),
     TableName = as.character(row_meta$TableName[1]),
@@ -9652,7 +9737,7 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
     EncodingConfidence = encoding_info$EncodingConfidence %||% NA_real_,
     EncodingUsed = encoding_info$EncodingUsed %||% NA_character_,
     EncodingDetectionMethod = encoding_info$DetectionMethod %||% NA_character_,
-    EncodingValidationStatus = "error"
+    EncodingValidationStatus = if (encoding_related) "error" else NA_character_
   )
 }
 
@@ -10159,11 +10244,11 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
     if (!is.null(labeled_header)) {
       for (source_column in names(labeled_header)) {
         column <- canonical_colnames(source_column)
-        variable_label <- attr(labeled_header[[source_column]], "label", exact = TRUE)
+        variable_label <- .sanitize_label_text(attr(labeled_header[[source_column]], "label", exact = TRUE))
         variable_label <- if (is.null(variable_label) ||
-                              !nzchar(trimws(as.character(variable_label)[1]))) {
+                              !nzchar(trimws(variable_label[1]))) {
           NA_character_
-        } else trimws(as.character(variable_label)[1])
+        } else trimws(variable_label[1])
         value_labels <- attr(labeled_header[[source_column]], "labels", exact = TRUE)
         if (!is.na(variable_label)) {
           rows[[length(rows) + 1L]] <- data.table::as.data.table(c(base, list(
@@ -10174,9 +10259,10 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
           )))
         }
         if (!is.null(value_labels) && length(value_labels) > 0L) {
+          value_label_names <- .sanitize_label_text(names(value_labels))
           label_rows <- lapply(seq_along(value_labels), function(label_index) {
             code <- as.character(unname(value_labels)[label_index])
-            label <- as.character(names(value_labels)[label_index])
+            label <- value_label_names[label_index]
             data.table::as.data.table(c(base, list(
               ObservationKind = "value_label", Column = column,
               OriginalColumn = source_column, VariableLabel = variable_label,
@@ -11967,11 +12053,23 @@ FinalizeRepositorySchema <- function(SchemaReviewPath, TableSchemaPath, strict =
     } else logical(0)
     if (any(source_errors, na.rm = TRUE)) {
       error_rows <- which(source_errors %in% TRUE)
-      examples <- utils::head(basename(as.character(source_issues$SourcePath[error_rows])), 5L)
+      n_errors <- length(error_rows)
+      all_names <- basename(as.character(source_issues$SourcePath[error_rows]))
+      examples <- utils::head(all_names, 5L)
+      #### Naming only the first 5 of a longer list with no indication that  ####
+      #### more exist reads as "these 5 are the blockers" -- someone acting  ####
+      #### on the message alone would fix those, rerun, and hit the same     ####
+      #### wall again with the rest still unresolved.                        ####
+      remaining <- n_errors - length(examples)
+      example_text <- if (remaining > 0L) {
+        sprintf("%s, and %d more", paste(examples, collapse = ", "), remaining)
+      } else {
+        paste(examples, collapse = ", ")
+      }
       message <- sprintf(paste0(
         "Schema survey contains %d source error(s) in SourceIssues: %s. Update the MDT or reader configuration, ",
         "then rerun PrepareSchemaRegistry() before finalizing."),
-        sum(source_errors, na.rm = TRUE), paste(examples, collapse = ", "))
+        n_errors, example_text)
       if (isTRUE(strict)) stop(message) else log_msg(paste("[SCHEMA REVIEW WARNING]", message))
     }
   }
@@ -13086,13 +13184,13 @@ harvest_source_labels <- function(files, reader, n_workers = 1) {
       hdr <- read_labels_header(p)
       cols <- names(hdr)
       var_lab <- vapply(cols, function(cn) {
-        lb <- attr(hdr[[cn]], "label", exact = TRUE)
-        if (is.null(lb) || !nzchar(trimws(as.character(lb)[1]))) NA_character_ else trimws(as.character(lb)[1])
+        lb <- .sanitize_label_text(attr(hdr[[cn]], "label", exact = TRUE))
+        if (is.null(lb) || !nzchar(trimws(lb[1]))) NA_character_ else trimws(lb[1])
       }, character(1))
       val_lab <- vapply(cols, function(cn) {
         lv <- attr(hdr[[cn]], "labels", exact = TRUE)
         if (is.null(lv) || length(lv) == 0L) return(NA_character_)
-        out <- paste(sprintf("%s = %s", as.character(unname(lv)), names(lv)), collapse = "; ")
+        out <- paste(sprintf("%s = %s", as.character(unname(lv)), .sanitize_label_text(names(lv))), collapse = "; ")
         if (nchar(out) > 5000L) out <- paste0(substr(out, 1L, 5000L), " ...")
         out
       }, character(1))
