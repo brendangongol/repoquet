@@ -1968,6 +1968,7 @@ register_parquet_view_compile <- function(con, ParquetBasePath, tables_written, 
 #' @return \code{invisible(NULL)}.  Called for its side effects.
 #' @seealso \code{\link{MDTCompleteStatus}}, \code{\link{load_checkpoint}}
 #' @keywords internal
+#' @export
 SummaryVerification <- function(MDT, CheckpointPath, LogPath, logStatus = TRUE,
                                 RunId = NULL, MasterDBPath = NULL,
                                 SourceFingerprintMode = c("none", "metadata", "sha256")){
@@ -8091,6 +8092,7 @@ ColumnAvailabilityView <- function(SupportingInfoPath, table_name){
 #' @return \code{invisible(NULL)}.  Called for its side effects.
 #' @seealso \code{\link{ColumnAvailabilityCompile}}
 #' @keywords internal
+#' @export
 WorkbookUpdateopenxlsx <- function(WBPath, DTAdd, SheetName){
   dir.create(dirname(WBPath), recursive = TRUE, showWarnings = FALSE)
   wb <- if (file.exists(WBPath)) openxlsx::loadWorkbook(WBPath) else openxlsx::createWorkbook()
