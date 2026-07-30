@@ -2123,6 +2123,38 @@ canonical_colnames <- function(x) {
   x[x == ""] <- "X"
   x
 }
+#' Canonicalize column names while retaining every physical source column
+#'
+#' Exact duplicate raw headers are disambiguated deterministically with
+#' \code{__2}, \code{__3}, and so on. This preserves the data without changing
+#' the source file. Distinct raw headers that only collide after canonicalization
+#' remain available to \code{canonicalize_dataframe_names()} for its existing
+#' compatibility merge/conflict check.
+canonical_unique_colnames <- function(x) {
+  raw <- trimws(as.character(x))
+  base <- canonical_colnames(raw)
+  out <- base
+  seen <- character(0)
+  prior_raw <- character(0)
+  for (i in seq_along(base)) {
+    candidate <- base[i]
+    # Only literal duplicate source headers are disambiguated. Distinct source
+    # names that collide after canonicalization remain available for the
+    # compatibility merge/conflict check in canonicalize_dataframe_names().
+    if (!is.na(raw[i]) && raw[i] %in% prior_raw) {
+      suffix <- 2L
+      candidate <- paste0(base[i], "__", suffix)
+      while (candidate %in% seen) {
+        suffix <- suffix + 1L
+        candidate <- paste0(base[i], "__", suffix)
+      }
+    }
+    out[i] <- candidate
+    seen <- c(seen, candidate)
+    prior_raw <- c(prior_raw, raw[i])
+  }
+  out
+}
 
 normalize_type_name <- function(x) {
   x <- trimws(as.character(x)[1])
@@ -2449,7 +2481,7 @@ normalize_character_encoding <- function(df, source_encoding = NULL) {
 canonicalize_dataframe_names <- function(df) {
   if (!data.table::is.data.table(df)) data.table::setDT(df)
   old_names <- names(df)
-  new_names <- canonical_colnames(old_names)
+  new_names <- canonical_unique_colnames(old_names)
   #### Rename by position, not by name: fread() does not dedupe a raw source ####
   #### header (some real-world CSVs really do repeat a column name, e.g. the ####
   #### UCI Parkinsons and Diabetic Retinopathy sources), so `old_names` can   ####
@@ -2803,7 +2835,7 @@ reader_options_for_row <- function(row_meta) {
   fields <- c("Encoding", "Delimiter", "Quote", "NAStrings", "DecimalMark",
               "DateFormat", "DateTimeFormat", "Timezone", "ReadMode",
               "KeepLeadingZeros", "MalformedRowPolicy", "ContinuationColumn",
-              "ContinuationJoin")
+              "ContinuationJoin", "HeaderDuplicatePolicy")
   for (field in fields) {
     if (!field %in% names(row_meta)) next
     value <- row_meta[[field]][1]
@@ -2826,7 +2858,7 @@ fread_col_classes <- function(col_classes, header = NULL) {
   if (is.null(col_classes) || length(col_classes) == 0L) return(NULL)
   names(col_classes) <- canonical_colnames(names(col_classes))
   if (is.null(header)) header <- names(col_classes)
-  canon_header <- canonical_colnames(header)
+  canon_header <- canonical_unique_colnames(header)
   target <- vapply(canon_header, function(nm) {
     idx <- match(nm, names(col_classes))
     value <- if (is.na(idx)) "" else col_classes[[idx]]
@@ -2857,7 +2889,7 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
                encoding = "unknown",
                colClasses = fread_col_classes(col_classes, header),
                keepLeadingZeros = isTRUE(keep_leading_zeros))
-  header_mode <- reader_options$Header %||% NULL
+  header_mode <- reader_options[["Header"]] %||% NULL
   if (!is.null(header_mode)) {
     if (is.character(header_mode)) {
       key <- tolower(trimws(header_mode[1]))
@@ -2918,8 +2950,10 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
   policy <- tolower(trimws(as.character(reader_options$MalformedRowPolicy %||% "error")[1]))
   policy <- gsub("-", "_", policy, fixed = TRUE)
   if (policy %in% c("append", "append_to_previous")) policy <- "append_previous"
-  if (!policy %in% c("error", "append_previous")) {
-    stop("MalformedRowPolicy must be 'error' or 'append_previous'.")
+  if (policy %in% c("trim", "trim_missing", "trim_trailing_na")) policy <- "trim_trailing_missing"
+  if (!policy %in% c("error", "append_previous", "trim_trailing_missing")) {
+    stop(paste0("MalformedRowPolicy must be 'error', 'append_previous', or ",
+                "'trim_trailing_missing'."))
   }
   column <- trimws(as.character(reader_options$ContinuationColumn %||% "")[1])
   if (policy == "append_previous" && !nzchar(column)) {
@@ -2930,8 +2964,20 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
   list(Policy = policy, Column = column, Join = join)
 }
 
+.header_duplicate_settings <- function(reader_options = list()) {
+  policy <- tolower(trimws(as.character(reader_options$HeaderDuplicatePolicy %||% "error")[1]))
+  policy <- gsub("-", "_", policy, fixed = TRUE)
+  if (policy %in% c("drop", "drop_duplicate", "drop_duplicates")) policy <- "drop_redundant"
+  if (!policy %in% c("error", "drop_redundant")) {
+    stop("HeaderDuplicatePolicy must be 'error' or 'drop_redundant'.")
+  }
+  policy
+}
+
 .uses_delimited_logical_stream <- function(reader_options = list()) {
-  identical(.delimited_repair_settings(reader_options)$Policy, "append_previous")
+  .delimited_repair_settings(reader_options)$Policy %in%
+    c("append_previous", "trim_trailing_missing") ||
+    identical(.header_duplicate_settings(reader_options), "drop_redundant")
 }
 
 .fread_with_structural_errors <- function(args, path) {
@@ -2940,7 +2986,7 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
     do.call(data.table::fread, args),
     warning = function(w) {
       message <- conditionMessage(w)
-      if (grepl("Stopped early on line [0-9]+\\. Expected [0-9]+ fields", message, perl = TRUE)) {
+      if (grepl("Stopped early on line [0-9]+\\. Expected [0-9]+ fields|Discarded single-line footer|Detected [0-9]+ column names but the data has [0-9]+ columns\\. Filling rows automatically", message, perl = TRUE)) {
         structural_warning <<- message
         invokeRestart("muffleWarning")
       }
@@ -2949,7 +2995,7 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
   if (!is.null(structural_warning)) {
     stop(sprintf(paste0("Delimited structure error in %s: %s. The source was not modified. ",
                         "For a verified continuation line, set MalformedRowPolicy='append_previous' ",
-                        "and ContinuationColumn in ReaderOptions."),
+                        "and ContinuationColumn in ReaderOptions. For surplus missing fields, use MalformedRowPolicy='trim_trailing_missing'; for redundant duplicate headers, use HeaderDuplicatePolicy='drop_redundant'."),
                  basename(path), structural_warning), call. = FALSE)
   }
   out
@@ -2962,6 +3008,7 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
   quote_char <- if (quote_enabled) substr(as.character(quote_char[1]), 1L, 1L) else ""
   n <- nchar(record, type = "chars")
   fields <- 1L
+  delimiters <- integer(0)
   in_quotes <- FALSE
   field_start <- TRUE
   i <- 1L
@@ -2983,15 +3030,39 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
       }
     } else if (!in_quotes && ch == delimiter) {
       fields <- fields + 1L
+      delimiters <- c(delimiters, i)
       field_start <- TRUE
     } else if (in_quotes || !ch %in% c(" ", "\t")) {
       field_start <- FALSE
     }
     i <- i + 1L
   }
-  list(Fields = fields, Balanced = !in_quotes)
+  list(Fields = fields, Balanced = !in_quotes, Delimiters = delimiters)
 }
 
+.trim_trailing_missing_delimited_record <- function(record, shape, expected_fields,
+                                                    header_info, path) {
+  if (shape$Fields <= expected_fields || length(shape$Delimiters) < expected_fields) {
+    return(list(Record = record, Trimmed = FALSE))
+  }
+  args <- delimited_fread_args(header_info$ReaderOptions)
+  args$sep <- header_info$Delimiter
+  args$colClasses <- "character"
+  args$fill <- TRUE
+  parsed <- .fread_with_structural_errors(
+    c(list(text = record, header = FALSE, nrows = 1L), args), path)
+  if (nrow(parsed) != 1L || ncol(parsed) < expected_fields) {
+    stop("Unable to inspect surplus fields in malformed delimited record.")
+  }
+  surplus <- unlist(parsed[1L, seq.int(expected_fields + 1L, ncol(parsed)), with = FALSE],
+                    use.names = FALSE)
+  missing_tokens <- unique(tolower(trimws(c("", "NA", "N/A", "NULL", "NAN",
+                                               header_info$ReaderOptions$NAStrings %||% character()))))
+  all_missing <- all(is.na(surplus) | tolower(trimws(as.character(surplus))) %in% missing_tokens)
+  if (!all_missing) return(list(Record = record, Trimmed = FALSE))
+  cutoff <- shape$Delimiters[expected_fields]
+  list(Record = substr(record, 1L, cutoff - 1L), Trimmed = TRUE)
+}
 .detect_delimited_separator <- function(header_line, path, reader_options = list()) {
   configured <- reader_options$Delimiter %||% NULL
   if (identical(configured, "\\t")) configured <- "\t"
@@ -3054,10 +3125,58 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
   header_df <- normalize_character_encoding(header_df, "UTF-8")
   header <- names(header_df)
   if (length(header) < 1L) stop("Delimited source header contains no columns: ", path)
+
+  header_policy <- .header_duplicate_settings(reader_options)
+  if (identical(header_policy, "drop_redundant")) {
+    first_record <- NULL
+    repeat {
+      line <- readLines(con, n = 1L, warn = FALSE)
+      if (length(line) == 0L) break
+      if (is.null(first_record) && !nzchar(trimws(line[1]))) next
+      first_record <- if (is.null(first_record)) line[1] else paste(first_record, line[1], sep = "\n")
+      shape <- .delimited_record_shape(first_record, delimiter, reader_options$Quote %||% "\"")
+      if (shape$Balanced) break
+    }
+    if (is.null(first_record)) {
+      stop(sprintf("Cannot validate redundant headers in empty source %s.", basename(path)))
+    }
+    data_fields <- .delimited_record_shape(first_record, delimiter, reader_options$Quote %||% "\"")$Fields
+    redundant <- which(duplicated(trimws(header)))
+    n_drop <- length(header) - data_fields
+    if (n_drop < 0L || n_drop > length(redundant)) {
+      stop(sprintf(paste0("HeaderDuplicatePolicy='drop_redundant' cannot reconcile %d header field(s) ",
+                          "with %d data field(s) in %s."),
+                   length(header), data_fields, basename(path)))
+    }
+    if (n_drop > 0L) header <- header[-tail(redundant, n_drop)]
+  }
+  configured_names <- reader_options$ColumnNames %||% NULL
+  if (!is.null(configured_names)) {
+    configured_names <- as.character(unlist(configured_names, use.names = FALSE))
+    if (length(configured_names) != length(header)) {
+      stop(sprintf("ReaderOptions$ColumnNames has %d names but %s has %d logical columns.",
+                   length(configured_names), basename(path), length(header)))
+    }
+    header <- configured_names
+  }
   list(Header = header, HeaderLine = header_line, HeaderPhysicalLine = physical_line,
        Delimiter = delimiter, ReaderOptions = reader_options)
 }
 
+.encode_delimited_header <- function(header, delimiter, quote_char = "\"") {
+  quote_enabled <- !is.null(quote_char) && length(quote_char) > 0L &&
+    !is.na(quote_char[1]) && nzchar(quote_char[1])
+  values <- as.character(header)
+  if (!quote_enabled) {
+    if (any(grepl(delimiter, values, fixed = TRUE))) {
+      stop("A repaired delimited header contains the delimiter but ReaderOptions$Quote is disabled.")
+    }
+    return(paste(values, collapse = delimiter))
+  }
+  quote_char <- substr(as.character(quote_char[1]), 1L, 1L)
+  escaped <- gsub(quote_char, paste0(quote_char, quote_char), values, fixed = TRUE)
+  paste0(quote_char, escaped, quote_char, collapse = delimiter)
+}
 .decode_continuation_value <- function(record, delimiter, reader_options, path) {
   args <- delimited_fread_args(reader_options)
   args$sep <- delimiter
@@ -3083,8 +3202,12 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
   args <- delimited_fread_args(options, col_classes = parse_classes,
                                header = header_info$Header)
   args$sep <- header_info$Delimiter
-  text <- paste(c(header_info$HeaderLine, records), collapse = "\n")
-  df <- .fread_with_structural_errors(c(list(text = text, header = TRUE), args), path)
+  args$header <- TRUE
+  args$col.names <- NULL
+  repaired_header <- .encode_delimited_header(header_info$Header, header_info$Delimiter,
+                                              options$Quote %||% "\"")
+  text <- paste(c(repaired_header, records), collapse = "\n")
+  df <- .fread_with_structural_errors(c(list(text = text), args), path)
   if (nrow(df) != length(records)) {
     stop(sprintf("Logical-record parser produced %d rows from %d assembled records in %s.",
                  nrow(df), length(records), basename(path)))
@@ -3189,6 +3312,15 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
       current_record <- NULL
       current_start <- NA_integer_
 
+      if (shape$Fields > expected_fields && repair$Policy == "trim_trailing_missing") {
+        trimmed <- .trim_trailing_missing_delimited_record(
+          complete, shape, expected_fields, header_info, path)
+        if (isTRUE(trimmed$Trimmed)) {
+          complete <- trimmed$Record
+          shape$Fields <- expected_fields
+          repair_lines <- c(repair_lines, start_line)
+        }
+      }
       if (shape$Fields == expected_fields) {
         finalize_pending()
         if (done) break
@@ -3202,8 +3334,11 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
       } else {
         suffix <- if (repair$Policy == "append_previous") {
           " Automatic repair only accepts a one-field continuation following a complete record."
+        } else if (repair$Policy == "trim_trailing_missing") {
+          " Automatic repair only removes surplus fields that are all configured missing-value tokens."
         } else {
-          " Set MalformedRowPolicy='append_previous' with a ContinuationColumn only when this is a verified continuation line."
+          paste0(" Set MalformedRowPolicy='append_previous' with a ContinuationColumn for a verified continuation, ",
+                 "or 'trim_trailing_missing' only when every surplus field is missing.")
         }
         stop(sprintf("Malformed delimited record at physical line %d in %s: expected %d fields, found %d.%s",
                      start_line, basename(path), expected_fields, shape$Fields, suffix), call. = FALSE)
@@ -4809,10 +4944,16 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
         col_classes = col_classes, callback = process_chunk)
       total_rows <- diagnostics$LogicalRows
       if (diagnostics$RepairCount > 0L) {
-        log_msg(sprintf("[DELIMITED REPAIR] %s: appended %d continuation line(s) to %s (physical lines: %s)",
-                        basename(path), as.integer(diagnostics$RepairCount),
-                        diagnostics$ContinuationColumn,
-                        paste(diagnostics$RepairLines, collapse = ",")))
+        if (identical(diagnostics$RepairPolicy, "trim_trailing_missing")) {
+          log_msg(sprintf("[DELIMITED REPAIR] %s: trimmed surplus missing field sequence(s) from %d record(s) (physical lines: %s)",
+                          basename(path), as.integer(diagnostics$RepairCount),
+                          paste(diagnostics$RepairLines, collapse = ",")))
+        } else {
+          log_msg(sprintf("[DELIMITED REPAIR] %s: appended %d continuation line(s) to %s (physical lines: %s)",
+                          basename(path), as.integer(diagnostics$RepairCount),
+                          diagnostics$ContinuationColumn,
+                          paste(diagnostics$RepairLines, collapse = ",")))
+        }
       }
     } else if (identical(read_strategy, "whole_file")) {
       df_whole <- if (is.null(preloaded_data)) {
@@ -5046,7 +5187,7 @@ build_comprehensive <- function(files, base_path, suffixes, uni_suffixes, reader
     # available in clean multisession R processes.
     register_builtin_file_readers()
     rd <- reader_callbacks[[i]]
-    header <- canonical_colnames(call_reader(rd, "read_header", all_paths[i],
+    header <- canonical_unique_colnames(call_reader(rd, "read_header", all_paths[i],
                                              reader_options = reader_options[[i]]))
     list(ok = TRUE, path = all_paths[i], header = header, error = NA_character_)
   }, error = function(e) {
@@ -8876,7 +9017,8 @@ create_repository_project <- function(dir, MasterDBPath = file.path(dir, "source
                              NAStrings = character(), DecimalMark = character(),
                               DateFormat = character(), DateTimeFormat = character(), Timezone = character(),
                               MalformedRowPolicy = character(), ContinuationColumn = character(),
-                              ContinuationJoin = character(), ReaderOptions = character(),
+                              ContinuationJoin = character(), HeaderDuplicatePolicy = character(),
+                              ReaderOptions = character(),
                               ReadMode = character(), AcceptPartial = logical())
   wb <- openxlsx::createWorkbook(); openxlsx::addWorksheet(wb, "Sheet1")
   openxlsx::writeData(wb, "Sheet1", mdt_template)
@@ -9686,8 +9828,13 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
     return(list(Text = NA_character_, Class = NA_character_, Severity = NA_character_))
   }
   if (all(startsWith(warnings, "[READER REPAIR]"))) {
+    repair_class <- if (any(grepl("Trimmed surplus missing", warnings, fixed = TRUE))) {
+      "trailing_missing_trimmed"
+    } else {
+      "continuation_repaired"
+    }
     return(list(Text = paste(warnings, collapse = " | "),
-                Class = "continuation_repaired", Severity = "info"))
+                Class = repair_class, Severity = "info"))
   }
   if (any(grepl("Stopped early on line [0-9]+\\. Expected [0-9]+ fields", warnings))) {
     return(list(Text = paste(warnings, collapse = " | "),
@@ -9878,7 +10025,7 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
   }
   reader_options <- .resolve_delimited_reader_options(path, reader_options)
   header <- call_reader(reader, "read_header", path, reader_options = reader_options)
-  columns <- canonical_colnames(header)
+  columns <- canonical_unique_colnames(header)
   accumulators <- stats::setNames(vector("list", length(columns)), columns)
   update_profile <- function(df) {
     if (!is.data.frame(df)) stop("Delimited schema profiler received a non-tabular chunk.")
@@ -10166,19 +10313,22 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
           !isTRUE(merge_key_name_candidate(column)))
     }
     if (!is.null(repair_info) && isTRUE(repair_info$RepairCount > 0L)) {
-      warnings_seen <- unique(c(
-        warnings_seen,
+      repair_message <- if (identical(repair_info$RepairPolicy, "trim_trailing_missing")) {
+        sprintf("[READER REPAIR] Trimmed surplus missing field sequence(s) from %d record(s) at physical line(s): %s",
+                as.integer(repair_info$RepairCount), paste(repair_info$RepairLines, collapse = ","))
+      } else {
         sprintf("[READER REPAIR] Appended %d continuation line(s) to %s at physical line(s): %s",
                 as.integer(repair_info$RepairCount), repair_info$ContinuationColumn,
                 paste(repair_info$RepairLines, collapse = ","))
-      ))
+      }
+      warnings_seen <- unique(c(warnings_seen, repair_message))
     }
     warning_info <- .classify_schema_reader_warnings(warnings_seen, sample_rows)
     pspec <- partition_spec_for_row(row_meta)
     ptypes <- partition_types_for_row(row_meta)
     fingerprint <- source_fingerprint(full_path, mode = SourceFingerprintMode)
     original_header <- as.character(original_header)
-    header_map <- split(original_header, canonical_colnames(original_header))
+    header_map <- split(original_header, canonical_unique_colnames(original_header))
     confidence <- if (delimited) profile$Confidence else "declared_or_stored"
     warning_text <- warning_info$Text
     base <- list(

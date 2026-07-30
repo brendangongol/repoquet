@@ -121,7 +121,10 @@ Optional general-purpose columns include:
 - `Encoding`, `Delimiter`, `Quote`, `NAStrings`, and `DecimalMark`
 - `DateFormat`, `DateTimeFormat`, and `Timezone`
 - `MalformedRowPolicy`, `ContinuationColumn`, and `ContinuationJoin` for an
-  explicitly verified unquoted continuation line
+  explicitly verified unquoted continuation line; `trim_trailing_missing` removes
+  only surplus fields that are all missing-value tokens
+- `HeaderDuplicatePolicy = "drop_redundant"` when a repeated literal header is
+  demonstrably redundant because data records have the corresponding smaller width
 - `ReaderOptions`: a JSON object passed to the selected reader
 - `AcceptPartial`: explicit acceptance of a verified truncated SAV source
 - `SourceURI`: optional direct HTTP/HTTPS file or API download URL

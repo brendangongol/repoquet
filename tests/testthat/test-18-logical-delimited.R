@@ -105,3 +105,55 @@ test_that("quoted multiline records and repaired continuations share bounded str
   expect_identical(diagnostics$LogicalRows, 3)
   expect_identical(diagnostics$RepairCount, 1)
 })
+
+test_that("duplicate literal headers are retained without source modification", {
+  path <- tempfile(fileext = ".csv")
+  on.exit(unlink(path), add = TRUE)
+  writeLines(c("ID,VALUE,VALUE", "1,first,second"), path, useBytes = TRUE)
+  before <- digest::digest(file = path, algo = "sha256")
+
+  out <- read_delimited_full(path)
+  expect_identical(names(out), c("ID", "VALUE", "VALUE__2"))
+  expect_identical(as.character(out$VALUE), "first")
+  expect_identical(as.character(out$VALUE__2), "second")
+  expect_identical(digest::digest(file = path, algo = "sha256"), before)
+})
+
+test_that("trailing missing fields can be trimmed only by explicit policy", {
+  path <- tempfile(fileext = ".csv")
+  on.exit(unlink(path), add = TRUE)
+  writeLines(c("A,B,C", "1,2,3", "4,5,6,NaN"), path, useBytes = TRUE)
+  before <- digest::digest(file = path, algo = "sha256")
+
+  expect_error(read_delimited_full(path), "Delimited structure error")
+  options <- list(MalformedRowPolicy = "trim_trailing_missing")
+  out <- read_delimited_full(path, reader_options = options)
+  diagnostics <- attr(out, "repoquet_delimited_diagnostics")
+  expect_equal(nrow(out), 2L)
+  expect_identical(as.character(out$C), c("3", "6"))
+  expect_identical(diagnostics$RepairCount, 1)
+  expect_identical(diagnostics$RepairLines, 3L)
+  expect_identical(digest::digest(file = path, algo = "sha256"), before)
+
+  writeLines(c("A,B,C", "1,2,3", "4,5,6,NOT_MISSING"), path, useBytes = TRUE)
+  expect_error(read_delimited_full(path, reader_options = options), "Malformed delimited record")
+})
+
+test_that("redundant duplicate headers can be dropped only by explicit policy", {
+  path <- tempfile(fileext = ".csv")
+  on.exit(unlink(path), add = TRUE)
+  writeLines(c("A,B,B,C", "1,2,3"), path, useBytes = TRUE)
+  before <- digest::digest(file = path, algo = "sha256")
+
+  expect_error(read_delimited_full(path), "Delimited structure error")
+  out <- read_delimited_full(path,
+                             reader_options = list(HeaderDuplicatePolicy = "drop_redundant"))
+  expect_identical(names(out), c("A", "B", "C"))
+  expect_identical(as.character(out[1, ]), c("1", "2", "3"))
+  expect_identical(digest::digest(file = path, algo = "sha256"), before)
+
+  writeLines(c("A,B,B,C", "1,2,3,4,5"), path, useBytes = TRUE)
+  expect_error(read_delimited_full(path,
+                                   reader_options = list(HeaderDuplicatePolicy = "drop_redundant")),
+               "cannot reconcile")
+})
