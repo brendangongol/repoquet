@@ -2376,12 +2376,24 @@ coerce_to_class <- function(x, target_class) {
   reader_options
 }
 
-.normalize_utf8_vector <- function(x, source_encoding = "UTF-8", context = "character data") {
+.normalize_utf8_vector <- function(x, source_encoding = "UTF-8", context = "character data",
+                                   legacy_fallback_encoding = NULL) {
   if (!is.character(x)) return(x)
   from <- .canonical_encoding_name(source_encoding)
   if (from == "auto") stop("An unresolved 'auto' encoding reached UTF-8 normalization.")
   converted <- suppressWarnings(iconv(x, from = from, to = "UTF-8", sub = NA_character_))
   failed <- !is.na(x) & is.na(converted)
+
+  # Some legacy XPT payloads are marked UTF-8 but contain isolated CP-1252 bytes.
+  if (any(failed) && !is.null(legacy_fallback_encoding)) {
+    fallback_from <- .canonical_encoding_name(legacy_fallback_encoding)
+    if (fallback_from == "auto") stop("An unresolved legacy fallback encoding reached UTF-8 normalization.")
+    idx <- which(failed)
+    repaired <- suppressWarnings(iconv(x[idx], from = fallback_from, to = "UTF-8", sub = NA_character_))
+    repairable <- !is.na(repaired) & validUTF8(repaired)
+    if (any(repairable)) converted[idx[repairable]] <- repaired[repairable]
+    failed <- !is.na(x) & is.na(converted)
+  }
   if (any(failed)) {
     first <- which(failed)[1]
     stop(sprintf("UTF-8 conversion failed for %s at value %d using source encoding %s.",
@@ -2419,14 +2431,16 @@ coerce_to_class <- function(x, target_class) {
   x
 }
 
-normalize_character_encoding <- function(df, source_encoding = NULL) {
+normalize_character_encoding <- function(df, source_encoding = NULL,
+                                         legacy_fallback_encoding = NULL) {
   if (!data.table::is.data.table(df)) data.table::setDT(df)
   enc <- .canonical_encoding_name(source_encoding)
   if (enc == "auto") enc <- "UTF-8"
   char_cols <- names(df)[vapply(df, is.character, logical(1))]
   new_names <- .normalize_utf8_vector(names(df), enc, "column names")
   converted <- lapply(char_cols, function(col) {
-    .normalize_utf8_vector(df[[col]], enc, sprintf("column %s", col))
+    .normalize_utf8_vector(df[[col]], enc, sprintf("column %s", col),
+                           legacy_fallback_encoding = legacy_fallback_encoding)
   })
   names(converted) <- char_cols
   names(df) <- new_names
@@ -3388,10 +3402,12 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
 #### Shared implementations ##################################################
 #### Haven-family full read: strip label classes, sanitize encodings. Errors ####
 #### propagate to the caller.                                                ####
-read_haven_full <- function(path, read_fun, source_encoding = NULL) {
+read_haven_full <- function(path, read_fun, source_encoding = NULL,
+                            legacy_fallback_encoding = NULL) {
   df <- read_fun(path)
   df <- strip_haven(df)
-  normalize_character_encoding(df, source_encoding)
+  normalize_character_encoding(df, source_encoding,
+                               legacy_fallback_encoding = legacy_fallback_encoding)
 }
 
 read_sav_with_options <- function(path, reader_options = list(), ...) {
@@ -3543,7 +3559,9 @@ register_builtin_file_readers <- function() {
   #### unconditionally by .sanitize_label_text(), regardless of Encoding.)   ####
   register_file_reader("xpt",
     read_full   = function(p, reader_options = list()) read_haven_full(
-      p, haven::read_xpt, source_encoding = reader_options$Encoding %||% NULL),
+      p, haven::read_xpt, source_encoding = reader_options$Encoding %||% NULL,
+      legacy_fallback_encoding = if (isFALSE(reader_options$LegacyEncodingFallback)) NULL else
+        reader_options$LegacyEncodingFallback %||% "windows-1252"),
     read_header = function(p, reader_options = list()) names(haven::read_xpt(p, n_max = 0L)),
     read_sample = function(p, reader_options = list()) haven::read_xpt(p, n_max = 1000L),
     count_rows  = function(p) nrow(haven::read_xpt(p, col_select = 1L)),
@@ -7504,7 +7522,7 @@ read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL, tab
     df <- tryCatch(call_reader(rd, "read_full", full_path, reader_options = reader_options,
                                col_classes = col_classes), error = function(e) {
       log_msg(sprintf("[ERROR] %s read failed for %s: %s", reader, basename(full_path), conditionMessage(e)))
-      data.frame()
+      structure(data.frame(), repoquet_read_error = conditionMessage(e))
     })
     if (!is.data.frame(df) || nrow(df) == 0L) return(df)
     df <- align_columns(df, all_cols, col_classes, max_coerce_na_pct = max_coerce_na_pct)
@@ -7659,7 +7677,7 @@ read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL, tab
       tryCatch(call_reader(rd, "read_full", full_path, reader_options = reader_options,
                            col_classes = col_classes), error = function(e) {
         log_msg(sprintf("[ERROR] %s read failed for %s: %s", reader, basename(full_path), conditionMessage(e)))
-        data.frame()
+        structure(data.frame(), repoquet_read_error = conditionMessage(e))
       })
     }
   }
@@ -14220,7 +14238,11 @@ generic_db_loader <- function(files, base_path, db_prefix, completed_checkpoint,
         } else {
           pre_aligned <- FALSE
         }
+        reader_error <- attr(df, "repoquet_read_error", exact = TRUE)
         if (!is.data.frame(df) || nrow(df) == 0) {
+          if (is.character(reader_error) && length(reader_error) > 0L && nzchar(reader_error[1])) {
+            stop(reader_error[1])
+          }
           full_source_path <- source_path_for_row(row_meta, base_path)
           if (is.data.frame(df) && verify_source_empty(
               full_source_path, reader_file, reader_options_for_row(row_meta))) {

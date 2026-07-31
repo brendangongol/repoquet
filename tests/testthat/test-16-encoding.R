@@ -131,3 +131,17 @@ test_that("chunked repository loading writes only UTF-8 text and leaves legacy s
   expect_identical(readBin(source, what = "raw", n = file.info(source)$size), before_raw)
   expect_identical(digest::digest(file = source, algo = "sha256"), before_hash)
 })
+
+test_that("Haven XPT legacy bytes are repaired internally without relaxing strict delimited reads", {
+  bytes <- iconv("children\u2019s", from = "UTF-8", to = "windows-1252", toRaw = TRUE)[[1]]
+  legacy <- rawToChar(bytes)
+  Encoding(legacy) <- "UTF-8"
+  input <- data.table::data.table(TEXT = c("ASCII", legacy))
+
+  expect_error(normalize_character_encoding(data.table::copy(input), "UTF-8"),
+               "UTF-8 conversion failed")
+  repaired <- normalize_character_encoding(data.table::copy(input), "UTF-8",
+                                            legacy_fallback_encoding = "windows-1252")
+  expect_identical(repaired$TEXT, c("ASCII", "children\u2019s"))
+  expect_true(all(validUTF8(repaired$TEXT)))
+})
