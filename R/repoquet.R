@@ -9268,7 +9268,7 @@ real_world_source_catalog <- function(
       if (identical(parent, d)) break
       d <- parent
     }
-    candidates <- unique(c(installed, dev_candidate))
+    candidates <- unique(c(dev_candidate, installed))
     candidates <- candidates[!is.na(candidates) & nzchar(candidates) & file.exists(candidates)]
     if (!length(candidates)) {
       stop(sprintf("Packaged source catalog is unavailable: %s", file))
