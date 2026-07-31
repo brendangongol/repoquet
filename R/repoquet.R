@@ -10107,7 +10107,7 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
   repair <- .delimited_repair_settings(reader_options)
   source_size <- suppressWarnings(as.numeric(file.info(path)$size[1]))
   compressed_source <- grepl("\\.(gz|bz2)$", path, ignore.case = TRUE)
-  clean_source <- identical(repair$Policy, "error")
+  clean_source <- !.uses_delimited_logical_stream(reader_options)
   use_fast_full <- clean_source && !compressed_source && SchemaSurveyMode != "sample" &&
     !is.na(source_size) && source_size <= FastReadMaxBytes
   use_sample <- SchemaSurveyMode == "sample" ||
