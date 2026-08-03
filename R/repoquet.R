@@ -1504,6 +1504,15 @@ table_partition_keys <- function(rows_tbl) {
 #'   of already-completed files.
 #' @param logStatus Logical. If \code{TRUE} (default), messages are written via
 #'   \code{\link{log_msg}}; otherwise they are printed to the console.
+#' @param MasterDBPath Character scalar or \code{NULL} (default). Root
+#'   directory used to resolve each row's source file for fingerprinting.
+#'   Required when \code{SourceFingerprintMode} is not \code{"none"}; forwarded
+#'   to \code{\link{repository_checkpoint_key}} and
+#'   \code{\link{checkpoint_completed_mask}}.
+#' @param SourceFingerprintMode Character scalar, one of \code{"none"}
+#'   (default), \code{"metadata"}, or \code{"sha256"} -- must match the mode
+#'   used when the checkpoint was written, or a completed source can be
+#'   reported as pending (or vice versa). See \code{\link{source_fingerprint}}.
 #' @return A data frame: the subset of \code{MDT} rows whose \code{Path} has
 #'   not yet appeared in the checkpoint (i.e. files still pending).
 #' @seealso \code{\link{load_checkpoint}}, \code{\link{SummaryVerification}}
@@ -1520,8 +1529,12 @@ table_partition_keys <- function(rows_tbl) {
 #' unlink(tmp_cp)
 #' }
 #' @export
-MDTCompleteStatus <- function(MDT, CheckpointPath, verbose = TRUE, logStatus = TRUE){
-  t <- repository_checkpoint_key(MDT)
+MDTCompleteStatus <- function(MDT, CheckpointPath, verbose = TRUE, logStatus = TRUE,
+                              MasterDBPath = NULL,
+                              SourceFingerprintMode = c("none", "metadata", "sha256")){
+  SourceFingerprintMode <- match.arg(SourceFingerprintMode)
+  t <- repository_checkpoint_key(MDT, MasterDBPath = MasterDBPath,
+                                 SourceFingerprintMode = SourceFingerprintMode)
   print(paste("There are", length(t[duplicated(t)]), "name duplications in MDT"))
   if(length(t[duplicated(t)]) > 0){
     print(t[duplicated(t)])
@@ -1536,7 +1549,9 @@ MDTCompleteStatus <- function(MDT, CheckpointPath, verbose = TRUE, logStatus = T
       }
       }
   }
-  completed_mask <- checkpoint_completed_mask(MDT, completed_checkpoint)
+  completed_mask <- checkpoint_completed_mask(MDT, completed_checkpoint,
+                                              MasterDBPath = MasterDBPath,
+                                              SourceFingerprintMode = SourceFingerprintMode)
   print(paste("There are", nrow(MDT[!completed_mask,]), "files in MDT that have not been completed"))
   Missing <- MDT[!completed_mask,];
   return(Missing)
