@@ -17,7 +17,12 @@ Useful links:
 
 }
 \author{
-\strong{Maintainer}: Brendan Gongol \email{b.gongol@ruhealth.org}
+\strong{Maintainer}: repoquet maintainers \email{repoquet@users.noreply.github.com}
+
+Authors:
+\itemize{
+  \item Brendan Gongol
+}
 
 }
 \keyword{internal}

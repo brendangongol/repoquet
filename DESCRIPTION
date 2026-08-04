@@ -2,8 +2,9 @@ Package: repoquet
 Type: Package
 Title: Build Self-Auditing Parquet Data Repositories
 Version: 0.1.0
-Authors@R: person("Brendan", "Gongol",
-    email = "", role = c("aut", "cre"))
+Authors@R: c(
+    person("Brendan", "Gongol", role = "aut"),
+    person("repoquet", "maintainers", email = "repoquet@users.noreply.github.com", role = "cre"))
 Description: A schema-aware, self-auditing engine that transforms heterogeneous
     source files into refreshable, query-ready Parquet repositories for
     larger-than-memory analytics. A metadata-driven workflow combines
