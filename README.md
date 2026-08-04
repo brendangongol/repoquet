@@ -189,24 +189,16 @@ Schema decisions remain an intentional human review step.
 ### Public Real-World Examples
 
 The package ships a ready-to-use, pre-populated `DBSetup.xlsx` at
-`system.file("extdata", "DBSetup.xlsx", package = "repoquet")` -- no R code
-needed to build it. It covers the open MIMIC-III demo, NHANES Demographics,
+`system.file("extdata", "DBSetup.xlsx", package = "repoquet")`. 
+It covers the open MIMIC-III demo, NHANES Demographics,
 Examination, and Laboratory components across every cycle since 1999, and 55
 datasets from the UCI Machine Learning Repository's health and medicine
 category. Point a project's `repository_config.R` at it (or copy it over a
 scaffold's empty `DBSetup.xlsx`) and drive the whole workflow with the
-packaged command-line script, one subcommand per stage:
+packaged command-line script.
 
-```sh
-Rscript system.file("scripts", "repoquet.R", package = "repoquet") validate my-project
-Rscript system.file("scripts", "repoquet.R", package = "repoquet") schema   my-project
-# Open SchemaReview.xlsx's StartHere sheet, resolve any flagged decisions, then:
-Rscript system.file("scripts", "repoquet.R", package = "repoquet") finalize my-project
-Rscript system.file("scripts", "repoquet.R", package = "repoquet") load     my-project
-Rscript system.file("scripts", "repoquet.R", package = "repoquet") audit    my-project
-```
-
-Every row declares `SourceURI`, `SourceLicense`, and `CitationURL` -- review
+When executing this workflow, every row in `DBSetup.xlsx` declares 
+`SourceURI`, `SourceLicense`, and `CitationURL`. Review
 those before use, and note that materializing the full workbook means
 hundreds of files and a meaningful amount of network traffic and disk space.
 
@@ -223,8 +215,8 @@ ClinVar summaries useful for atherosclerosis and cerebral cavernous
 malformation discovery.
 
 DBSetup.xlsx loaded into `MDT` drives hive partitioning with two columns:
-  PartitionKey   -- hive key name(s) for each file's partition dir
-  PartitionValue -- the value(s) that file belongs to the PartitionKey
+  PartitionKey: hive key name(s) for each file's partition dir
+  PartitionValue: the value(s) that file belongs to the PartitionKey
 These columns are required on every row. 
 Example year partitioning: 
   PartitionKey = "year", PartitionValue = "2019" -> parquet/<DB>_<Table>/year=2019/*.parquet
@@ -243,10 +235,7 @@ cfg <- load_repository_config(public_example$ConfigPath)
 paths <- RepositoryInitialize(cfg$FormattedDBPath)
 RunId <- new_repository_run_id()
 
-# Review DBSetup.xlsx, then materialize its declared sources. Passing LogPath
-# and RunId explicitly to every call keeps every log line in this run's
-# actual formatted/Logs/load_log.txt instead of the tempdir() fallback used
-# when no LogPath is in scope.
+# Review DBSetup.xlsx, then materialize its declared sources. 
 MDT <- openxlsx::read.xlsx(public_example$MDTPath, sheet = "Sheet1")
 ValidateMDTPreflight(MDT = MDT, strict = TRUE, logStatus = TRUE,
                      ParquetBasePath = paths$ParquetBasePath,
@@ -266,8 +255,7 @@ To reveal each deterministic cache destination without downloading, call
 `MaterializeRemoteSources(MDT, paths$DownloadCachePath, Offline = TRUE,
 Strict = FALSE)` and inspect `ResolvedSourcePath` for the credentialed rows.
 Users should review source licenses, citations, download size, and NHANES
-survey-design requirements before analysis. The synthetic generator remains the
-recommended offline smoke test.
+survey-design requirements before analysis.
 
 
 ## Canonical Workflow
@@ -335,16 +323,14 @@ Between those steps, `MaterializeRemoteSources()` resolves optional direct
 HTTP/HTTPS sources to the managed cache; local rows pass through unchanged.
 
 ```r
-ValidateMDTPreflight(
-  MDT = MDT,
-  strict = TRUE,
-  ParquetBasePath = paths$ParquetBasePath,
-  MaxFileStemTruncate = TRUE,
-  TerminalHivePartition = FALSE,
-  MasterDBPath = cfg$MasterDBPath,
-  LogPath = paths$LogPath,
-  RunId = RunId
-)
+ValidateMDTPreflight(MDT = MDT,
+                     strict = TRUE,
+                     ParquetBasePath = paths$ParquetBasePath,
+                     MaxFileStemTruncate = TRUE,
+                     TerminalHivePartition = FALSE,
+                     MasterDBPath = cfg$MasterDBPath,
+                     LogPath = paths$LogPath,
+                     RunId = RunId)
 ```
 
 Changing a row's \code{TableName} in the workbook (e.g. after a case-collision preflight error)
@@ -432,7 +418,6 @@ prepared <- PrepareSchemaRegistry(MDT = MDT,
                                   SchemaProfile = "generic",
                                   LogPath = paths$LogPath,
                                   RunId = RunId )
-
 # Optional bounded issue preview; this query does not load all observations.
 schema_issues <- GetSchemaObservations(ObservationPath = paths$SchemaObservationPath,
                                        IssuesOnly = TRUE, Limit = 100L)
@@ -472,8 +457,8 @@ DictionaryReview contains code meanings such as 1 = Yes:
   Ignore   = omit a conflicting mapping from the finalized dictionary. 
 PolicyPattern/PolicyType show every SchemaRegistry.xlsx match, including 
 cases where the observed data makes the policy potentially lossy. 
-After review, run FinalizeSchemaRegistry below; a second survey is not 
-needed. Rerun the survey after fixing SourceIssues or changing sources. 
+After review, run FinalizeSchemaRegistry below. Rerun the survey 
+after fixing SourceIssues or changing sources. 
 Existing decisions survive only while their observation signature is 
 unchanged; changed evidence returns to the appropriate decision sheet. 
 Finalization stops here until all required decisions are complete, then 
@@ -576,16 +561,16 @@ variable labels and exact code-to-label metadata without modifying the source.
 `DictionaryReview` auto-approves stable source meanings, requires a decision
 when labels change across partitions, and offers blank labels as optional
 documentation. Finalization writes approved mappings to the partition-aware
-`ColumnDictionary` sheet in `TableSchemas.xlsx`; observed evidence remains
+`ColumnDictionary` sheet in `TableSchemas.xlsx`. Observed evidence remains
 separate in `ValueDictionary`.
 
 `SchemaRegistryPath` is an optional reusable policy-pattern file. A generic
 project creates an empty template, so no meaning is inferred from names such as
-`ID`, `KEY`, or `CODE`; domain rules are opt-in. `SchemaReviewPath` is the
+`ID`, `KEY`, or `CODE`. `SchemaReviewPath` is the
 user-facing proposal, and finalization writes the concrete approved schema to
 `TableSchemaPath`, which is the authoritative catalog consumed by the Parquet
 writer. When both paths are passed to `ParquetBackEndCreate()`, reviewed columns
-come from `TableSchemaPath`; `SchemaRegistryPath` is retained only for policy
+come from `TableSchemaPath`. `SchemaRegistryPath` is retained only for policy
 metadata and for genuinely new columns absent from the finalized catalog.
 
 ### 6. Register And Validate DuckDB
@@ -682,8 +667,8 @@ new_files <- scan_for_new_source_files(MasterDBPath = cfg$MasterDBPath, MDT = MD
 
 Rebuild or re-load tables:
 Force one table to rebuild under the current schema
-Parquet already on disk keeps the column types it was written with; 
-changes approved in SchemaReview.xlsx and finalized to 
+Parquet already on disk keeps the column types it was written with. 
+Approved changes in SchemaReview.xlsx and finalized to 
 TableSchemas.xlsx affect only future writes. To apply them to an 
 existing table, clear and reload it. DryRun = TRUE (the default) 
 only reports what would be removed; once it looks right, set 
@@ -702,8 +687,7 @@ State snapshots created by the loader provide an additional recovery record.
 
 Domain-specific policies, migration helpers, advanced diagnostics, and
 machine-specific tuning layer on top of the same seven-stage sequence through
-configuration and the `hcup` profile -- they are intentionally not hard-coded
-into the generic package workflow.
+configuration and the `hcup` profile. 
 
 ## Learning More
 
