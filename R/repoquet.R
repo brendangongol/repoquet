@@ -758,10 +758,6 @@ MaterializeRemoteSources <- function(
             }
           }
         }, finally = {
-          #### Resumable partials are kept on failure (that's the point); ####
-          #### .resumable_curl_download() already discards them itself   ####
-          #### when the content isn't safely resumable (bad HTTP status  ####
-          #### or a server that ignored the Range request).              ####
           if (!use_resume && exists("tmp", inherits = FALSE) && file.exists(tmp)) unlink(tmp)
         })
       }
@@ -1281,13 +1277,6 @@ cleanup_temp_files <- function(parent_dir, pattern = "^.*\\.tmp_.*\\.parquet$",
 ################################################################################
 #### Hive partition specification ##############################################
 ################################################################################
-#### Each MDT row declares its hive partition keys and an anchor value. A      ####
-#### source without physical partition columns is written to that directory.  ####
-#### A chunkable delimited source containing every configured key can span    ####
-#### multiple values and is routed directly to the corresponding directories; ####
-#### the declared anchor must be present. Multi-level partitions use ";" in   ####
-#### both fields ("SITE;YEAR" / "MGH;2019").                                  ####
-
 #' Sanitize a value for use in a hive partition directory name
 #'
 #' Coerces \code{x} to character and replaces every character that is not a
@@ -2153,9 +2142,6 @@ canonical_unique_colnames <- function(x) {
   prior_raw <- character(0)
   for (i in seq_along(base)) {
     candidate <- base[i]
-    # Only literal duplicate source headers are disambiguated. Distinct source
-    # names that collide after canonicalization remain available for the
-    # compatibility merge/conflict check in canonicalize_dataframe_names().
     if (!is.na(raw[i]) && raw[i] %in% prior_raw) {
       suffix <- 2L
       candidate <- paste0(base[i], "__", suffix)
@@ -2212,12 +2198,6 @@ promote_types <- function(types, col_name = NULL) {
   types <- types[!is.na(types) & nzchar(types) & types != "unknown"]
   if (length(types) == 0L) return("character")
   if ("character" %in% types) return("character")
-  #### A pure-logical vote almost always means every sampled file saw only ####
-  #### NA/blank values for this column (fread defaults all-NA columns to  ####
-  #### logical) rather than a genuinely boolean column. Trusting it as    ####
-  #### "logical" causes real, rare text/code values encountered later in  ####
-  #### a full-file read to be destroyed by coercion, so fall back to the  ####
-  #### safe universal type instead.                                      ####
   if (all(types == "logical")) return("character")
   if (all(types %in% c("integer", "int64"))) return(if ("int64" %in% types) "int64" else "integer")
   decimal_types <- types[grepl("^decimal\\([0-9]+,[0-9]+\\)$", types)]
@@ -2399,7 +2379,6 @@ coerce_to_class <- function(x, target_class) {
   converted <- suppressWarnings(iconv(x, from = from, to = "UTF-8", sub = NA_character_))
   failed <- !is.na(x) & is.na(converted)
 
-  # Some legacy XPT payloads are marked UTF-8 but contain isolated CP-1252 bytes.
   if (any(failed) && !is.null(legacy_fallback_encoding)) {
     fallback_from <- .canonical_encoding_name(legacy_fallback_encoding)
     if (fallback_from == "auto") stop("An unresolved legacy fallback encoding reached UTF-8 normalization.")
@@ -2422,18 +2401,6 @@ coerce_to_class <- function(x, target_class) {
   converted
 }
 
-#### Best-effort UTF-8 repair for embedded source metadata (variable/value   ####
-#### labels). haven tags every string it returns -- including labels -- as  ####
-#### UTF-8, but the label section of legacy SAS transport/SPSS/Stata files  ####
-#### sometimes carries a stray extended-ASCII byte (typically a Windows-    ####
-#### 1252 degree sign or curly quote) that makes that tag false. Any later  ####
-#### string op (trimws(), nzchar(), ...) on a CHARSXP marked UTF-8 but not  ####
-#### valid UTF-8 aborts with "invalid UTF-8", which previously took down    ####
-#### the whole source's schema survey over a single mis-decoded label      ####
-#### byte. Unlike .normalize_utf8_vector() (which intentionally stops on    ####
-#### bad column *data* so the caller picks the right encoding), a label is  ####
-#### metadata: a best-effort byte-substituted repair is an acceptable       ####
-#### outcome, so this helper never stops.
 .sanitize_label_text <- function(x) {
   if (is.null(x)) return(NULL)
   x <- as.character(x)
@@ -2511,15 +2478,6 @@ canonicalize_dataframe_names <- function(df) {
   if (!data.table::is.data.table(df)) data.table::setDT(df)
   old_names <- names(df)
   new_names <- canonical_unique_colnames(old_names)
-  #### Rename by position, not by name: fread() does not dedupe a raw source ####
-  #### header (some real-world CSVs really do repeat a column name, e.g. the ####
-  #### UCI Parkinsons and Diabetic Retinopathy sources), so `old_names` can   ####
-  #### itself already contain duplicates. setnames(df, old_names, new_names) ####
-  #### matches `old` by name and aborts with "Some duplicates exist in       ####
-  #### 'old'" in that case -- before the duplicate-column merge logic below  ####
-  #### ever runs. Position-based renaming is unambiguous regardless of       ####
-  #### whether the duplication is in the raw header or only appears after    ####
-  #### canonicalization collapses two distinct names onto one.               ####
   data.table::setnames(df, seq_along(new_names), new_names)
   dup_names <- unique(new_names[duplicated(new_names)])
   if (length(dup_names) > 0L) {
@@ -2572,10 +2530,6 @@ canonicalize_dataframe_names <- function(df) {
 ################################################################################
 #### Coercion damage accounting ################################################
 ################################################################################
-#### Run-scoped collector: every NA-introducing coercion is recorded here    ####
-#### (in addition to the log line, which scrolls away on long runs) so       ####
-#### ParquetBackEndCreate can write one reviewable per-column report at the  ####
-#### end of the run.                                                         ####
 .coerce_env <- new.env(parent = emptyenv())
 .coerce_env$records <- list()
 
@@ -2685,21 +2639,6 @@ enforce_col_classes <- function(df, col_classes = NULL, max_coerce_na_pct = NULL
 ################################################################################
 #### Pluggable file readers ####################################################
 ################################################################################
-#### FileType in the workbook selects a reader from this registry, so the    ####
-#### pipeline is not tied to SPSS+CSV: Stata, SAS, transport files, Parquet, ####
-#### RDS, and gzipped delimited files ship as built-ins, and a user can      ####
-#### register their own with register_file_reader(). Contract:               ####
-####   read_full(path)   -> data.frame/data.table; MUST error on failure     ####
-####                        (dispatch strategies rely on the error signal).  ####
-####   read_header(path) -> character vector of raw column names.            ####
-####   read_sample(path) -> data.frame of the first rows for type inference  ####
-####                        (declared-type formats need few rows; delimited  ####
-####                        formats sample deep).                            ####
-####   count_rows(path)  -> integer row count (may error; treated as NA).    ####
-####   has_labels        -> TRUE when read_labels_header(path) returns a     ####
-####                        0-row frame carrying variable/value label attrs. ####
-####   chunkable         -> TRUE when the loader may stream the file in      ####
-####                        memory-bounded chunks.                           ####
 .reader_registry <- new.env(parent = emptyenv())
 
 #' Register a file reader for a workbook FileType
@@ -3108,8 +3047,6 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
   }, integer(1))
   best <- which.max(counts)
   if (counts[best] <= 1L) {
-    # A legitimate one-column file has no delimiter in its header. Use the
-    # format convention so its later rows can still be shape-validated.
     if (grepl("\\.tsv(?:\\.(?:gz|gzip))?$", path, ignore.case = TRUE)) return("\t")
     if (grepl("\\.(?:csv|txt)(?:\\.(?:gz|gzip))?$|\\.(?:gz|gzip)$", path,
               ignore.case = TRUE)) return(",")
@@ -3414,9 +3351,7 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
   out
 }
 
-#### Shared implementations ##################################################
-#### Haven-family full read: strip label classes, sanitize encodings. Errors ####
-#### propagate to the caller.                                                ####
+
 read_haven_full <- function(path, read_fun, source_encoding = NULL,
                             legacy_fallback_encoding = NULL) {
   df <- read_fun(path)
@@ -3528,11 +3463,6 @@ register_builtin_file_readers <- function() {
     has_labels  = TRUE,
     read_labels_header = function(p) haven::read_sav(p, n_max = 0L),
     chunkable   = TRUE)
-  #### dta/sas7bdat: haven::read_dta()/read_sas() both accept an `encoding=`  ####
-  #### argument, so (like "sav" above) route every call through call_reader()####
-  #### with reader_options threaded through -- otherwise a ReaderOptions     ####
-  #### Encoding override configured for one of these sources is silently     ####
-  #### ignored, since it never reaches the underlying haven call.           ####
   register_file_reader("dta",
     read_full   = function(p, reader_options = list()) read_haven_full(
       p, function(path) call_reader(list(type = "dta_inner", read = haven::read_dta), "read", path,
@@ -3563,15 +3493,6 @@ register_builtin_file_readers <- function() {
     read_labels_header = function(p, reader_options = list()) call_reader(
       list(type = "sas7bdat_inner", read = haven::read_sas), "read", p,
       reader_options = reader_options, n_max = 0L))
-  #### xpt: haven::read_xpt() has no `encoding=` parameter at all (verified  ####
-  #### against installed haven 2.5.5's formals), so a declared Encoding      ####
-  #### cannot be handed to the read itself. It can still repair the returned####
-  #### *data* values post-hoc via read_haven_full()'s source_encoding, so    ####
-  #### thread ReaderOptions$Encoding through there; reader_options is also   ####
-  #### accepted (but otherwise unused) on the other callbacks purely so a    ####
-  #### caller passing reader_options via call_reader() doesn't silently no- ####
-  #### op. (Embedded variable/value label text is repaired separately and   ####
-  #### unconditionally by .sanitize_label_text(), regardless of Encoding.)   ####
   register_file_reader("xpt",
     read_full   = function(p, reader_options = list()) read_haven_full(
       p, haven::read_xpt, source_encoding = reader_options$Encoding %||% NULL,
@@ -3582,7 +3503,6 @@ register_builtin_file_readers <- function() {
     count_rows  = function(p) nrow(haven::read_xpt(p, col_select = 1L)),
     has_labels  = TRUE,
     read_labels_header = function(p, reader_options = list()) haven::read_xpt(p, n_max = 0L))
-  #### Columnar / serialized inputs (e.g. re-partitioning existing data).   ####
   register_file_reader("parquet",
     read_full   = function(p) data.table::as.data.table(arrow::read_parquet(p)),
     read_header = function(p) names(arrow::read_parquet(p, as_data_frame = FALSE)$schema),
@@ -3683,9 +3603,6 @@ align_columns <- function(df, all_cols, comprehensive_sample = NULL, max_coerce_
 ################################################################################
 #### Column-class inference ####################################################
 ################################################################################
-# Run independent metadata scans in parallel, then retry only worker failures
-# in the main R process. This protects mapped/network drives that are visible
-# to the interactive session but not inherited by multisession workers.
 .format_scan_duration <- function(seconds) {
   seconds <- max(0, as.numeric(seconds))
   if (!is.finite(seconds)) return("unknown")
@@ -3886,11 +3803,6 @@ build_col_classes <- function(files, base_path, n_workers = 1, reader = "sav",
   }
   reader_callbacks <- lapply(readers, get_file_reader)
   scan_one <- function(i) {
-    # Multisession workers receive the reader registry as a serialized
-    # environment, but future's global discovery cannot see private helpers
-    # referenced only from callbacks stored inside that environment. Calling
-    # the built-in initializer here makes those callback dependencies explicit
-    # globals on the worker before the selected reader is invoked.
     register_builtin_file_readers()
     p <- all_paths[i]
     tryCatch({
@@ -4768,13 +4680,6 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
     }
   }
   if (is.null(MaxPartitionMemoryMB)) {
-    #### A one-shot partition read is neither a tiny tight-loop chunk nor a  ####
-    #### full-file read -- reusing either budget is wrong. Reusing the      ####
-    #### whole-file budget let a single ~22 GB partition read through and   ####
-    #### crash the session; reusing the tiny chunk budget makes this tier   ####
-    #### unreachable for any realistically-sized partition. Default to half ####
-    #### the whole-file budget when one is configured, else fall back to    ####
-    #### the chunk budget for standalone/test callers.                      ####
     MaxPartitionMemoryMB <- if (!is.null(MaxWholeFileMemoryMB)) MaxWholeFileMemoryMB / 2 else MaxChunkMemoryMB
   } else {
     MaxPartitionMemoryMB <- suppressWarnings(as.numeric(MaxPartitionMemoryMB[1]))
@@ -4799,10 +4704,6 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
   }
   if (chunk_floor > requested_chunk_size) chunk_floor <- requested_chunk_size
   current_chunk_size <- requested_chunk_size
-  #### Cheapest-first: try a whole-file read, then a partition-aligned read, ####
-  #### before falling back to fixed-size memory-capped chunking. Only       ####
-  #### meaningful when routing to source-defined partitions -- a plain      ####
-  #### single-partition file has no "per-partition" tier to try.           ####
   read_strategy <- if (!is.null(preloaded_data)) "whole_file" else "chunked"
   chunk_row_plan <- NULL
   if (is.null(preloaded_data) && route_source_partitions && !logical_stream && is.finite(total_rows) && total_rows > 0 &&
@@ -4815,8 +4716,6 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
     read_strategy <- plan$strategy
     chunk_row_plan <- plan$chunk_row_plan
     log_msg(plan$message)
-    #### The narrow partition scan can be large (one value per source row).  ####
-    #### Release it before any wide source read begins.                       ####
     gc(verbose = FALSE)
   }
   if (identical(read_strategy, "chunked") && !adaptive_chunking) {
@@ -5001,9 +4900,6 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
       gc(verbose = FALSE)
       offset <- total_rows
     } else if (!is.null(chunk_row_plan)) {
-      #### Tier 2: one read per partition run, sized from the file's actual  ####
-      #### layout rather than a fixed step -- reuses the same read_chunk/    ####
-      #### process_chunk machinery as the fixed-size fallback below.        ####
       for (n_this in chunk_row_plan) {
         touch_repository_lock(RepositoryLock)
         log_msg(sprintf("[CHUNKED-DELIM] %s: reading rows %s-%s of %s", basename(path),
@@ -5216,8 +5112,6 @@ build_comprehensive <- function(files, base_path, suffixes, uni_suffixes, reader
   }
   reader_callbacks <- lapply(readers, get_file_reader)
   scan_one <- function(i) tryCatch({
-    # See build_col_classes(): make nested reader callback dependencies
-    # available in clean multisession R processes.
     register_builtin_file_readers()
     rd <- reader_callbacks[[i]]
     header <- canonical_unique_colnames(call_reader(rd, "read_header", all_paths[i],
@@ -7273,8 +7167,6 @@ validate_duckdb_table <- function(con, table_name, schema_registry = NULL, stric
   log_msg(sprintf("[FAIL PROBE] Launching isolated direct read-and-write worker for %s (timeout=%ss).",
                   basename(path), format(timeout_seconds, trim = TRUE)))
   worker_started <- Sys.time()
-  # processx::run() receives its timeout in whole seconds. Its internal poll
-  # timeout is millisecond-based, so passing seconds * 1000 overflows there.
   timeout_processx <- as.integer(min(.Machine$integer.max,
                                      max(1, ceiling(timeout_seconds))))
   proc <- tryCatch(
@@ -7616,8 +7508,6 @@ read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL, tab
                         basename(full_path), e$message))
         list(data = NULL, error = TRUE)
       })
-      #### A source-defined partition needs the chunked writer even after a  ####
-      #### successful in-process probe so rows reach every Hive partition.   ####
       use_chunked <- DFTemp$error || route_source_partitions
       if (!DFTemp$error && route_source_partitions) {
         log_msg(sprintf("[LOAD CHECK COMPLETE] Direct read succeeded for %s; using the chunked partition writer to route source rows to their Hive partitions.",
@@ -7667,9 +7557,6 @@ read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL, tab
                                if (is.finite(part_mb) && part_mb > 0) part_mb else NULL
                              },
                              MaxWholeFileMemoryMB = {
-                               #### Source-defined partition routing can briefly retain the ####
-                               #### input, normalized frame, partition slices, and Arrow table.####
-                               #### A full RAMThreshold is therefore not a safe one-shot cap.  ####
                                ram_mb <- suppressWarnings(as.numeric(RAMThreshold[1])) * 1024
                                route_cap_mb <- DelimitedChunkMaxMB * 4
                                if (is.finite(ram_mb) && ram_mb > 0) {
@@ -9289,9 +9176,6 @@ real_world_source_catalog <- function(
   }
   read_packaged_catalog <- function(file) {
     installed <- system.file("extdata", file, package = "repoquet")
-    #### Not-yet-installed dev checkouts (e.g. testthat, which runs each test ####
-    #### file with the working directory set to tests/testthat) may start   ####
-    #### below the repo root, so walk upward looking for inst/extdata/.     ####
     dev_candidate <- NA_character_
     d <- normalizePath(getwd(), winslash = "/", mustWork = FALSE)
     for (i in 1:8) {
@@ -9879,12 +9763,6 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
 
 .schema_observation_issue_row <- function(row_meta, full_path, message, encoding_info = NULL) {
   pspec <- tryCatch(partition_spec_for_row(row_meta), error = function(e) list(keys = NA_character_, values = NA_character_))
-  #### EncodingValidationStatus should reflect encoding outcomes only. A      ####
-  #### schema-survey failure can come from many unrelated causes (duplicate  ####
-  #### column names, a malformed delimited row, ...); only tag this field    ####
-  #### "error" when the failure message itself indicates an encoding        ####
-  #### problem, so a reader triaging by this column isn't misled into       ####
-  #### thinking every failure here was an encoding issue.                    ####
   encoding_related <- grepl("utf-8|multibyte|unable to translate|encoding",
                            as.character(message)[1], ignore.case = TRUE)
   data.table::data.table(
@@ -9947,9 +9825,6 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
     out$ValueProfileStatus <- "suppressed_identifier"
     return(out)
   }
-  # Most identifier-like columns are suppressed by the caller. This bounded
-  # probe catches other high-cardinality fields before unique() allocates a
-  # vector proportional to the complete source column.
   probe_size <- min(length(values), max(1000L, max_distinct * 4L))
   probe <- unique(values[seq_len(probe_size)])
   if (length(probe) > max_distinct) {
@@ -10168,9 +10043,6 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
          EncodingInfo = reader_options$.EncodingInfo,
          ProfileMode = if (SchemaSurveyMode == "sample") "sample" else "adaptive_sample")
   } else {
-    # Large exhaustive scans and repair-configured files retain the sequential
-    # logical-record reader so memory remains bounded and verified continuation
-    # records are interpreted identically during schema discovery and loading.
     result <- .stream_delimited_logical_records(
       path, reader_options = reader_options, chunk_size = chunk_size,
       callback = profile_chunk)
@@ -12239,10 +12111,6 @@ FinalizeRepositorySchema <- function(SchemaReviewPath, TableSchemaPath, strict =
       n_errors <- length(error_rows)
       all_names <- basename(as.character(source_issues$SourcePath[error_rows]))
       examples <- utils::head(all_names, 5L)
-      #### Naming only the first 5 of a longer list with no indication that  ####
-      #### more exist reads as "these 5 are the blockers" -- someone acting  ####
-      #### on the message alone would fix those, rerun, and hit the same     ####
-      #### wall again with the rest still unresolved.                        ####
       remaining <- n_errors - length(examples)
       example_text <- if (remaining > 0L) {
         sprintf("%s, and %d more", paste(examples, collapse = ", "), remaining)
@@ -13172,10 +13040,6 @@ search_labels <- function(pattern, TableSchemaPath, search_in = c("label", "colu
   out[]
 }
 
-#### Parse a serialized value-label string ("0 = Did not die; 1 = Died")     ####
-#### back into its code set. Returns NULL when the domain is unknowable      ####
-#### (truncated during harvest), so callers skip validation rather than      ####
-#### false-flagging.                                                         ####
 parse_value_label_codes <- function(x) {
   x <- as.character(x)[1]
   if (is.na(x) || !nzchar(x)) return(character(0))
@@ -14665,14 +14529,6 @@ ParquetBackEndCreate <- function(MDT, DBLoad, MasterDBPath, completed_checkpoint
   RunId <- resolve_run_id()
   run_started_at <- format(Sys.time(), "%Y-%m-%dT%H:%M:%S%z")
   coercion_report_reset()
-  #### data.table::fread() memory-maps the source file by default. Memory-  ####
-  #### mapped reads of very large files on network-mounted drives are a    ####
-  #### known crash vector on Windows (the whole R session dies with no     ####
-  #### catchable error, mid-read, with no diagnostic). Force fread's       ####
-  #### buffered (non-mmap) read path for this run unless the caller has    ####
-  #### already set a preference, so multi-GB sources on a mapped drive     ####
-  #### (e.g. X:\...) don't take the session down. See data.table's         ####
-  #### R_DATATABLE_NOMMAP option.                                          ####
   if (is.na(Sys.getenv("R_DATATABLE_NOMMAP", unset = NA))) {
     Sys.setenv(R_DATATABLE_NOMMAP = "true")
     on.exit(Sys.unsetenv("R_DATATABLE_NOMMAP"), add = TRUE)
