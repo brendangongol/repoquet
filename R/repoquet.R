@@ -796,6 +796,38 @@ MaterializeRemoteSources <- function(
   out[]
 }
 
+#' Build the checkpoint key(s) for MDT rows
+#'
+#' Constructs the canonical checkpoint identity used to record and look up
+#' completed loads for each row of a Master Database Table (MDT). The base
+#' key combines \code{Database}, \code{TableName}, the row's partition
+#' identity, \code{MDBDir}, and \code{Path}; when \code{SourceFingerprintMode}
+#' is not \code{"none"}, a content fingerprint of the row's resolved source
+#' file (see \code{\link{source_fingerprint}}) is appended, so a source file
+#' that changes on disk produces a different key even though its declared
+#' path did not change. \code{\link{checkpoint_completed_mask}} uses this
+#' function internally to compare \code{MDT} against a stored checkpoint; it
+#' is exported separately because it is also useful on its own for
+#' diagnosing why a row is (or is not) being recognized as already
+#' completed -- for example, printing the computed key for a row alongside
+#' the closest matching entry actually stored in the checkpoint.
+#' @param MDT Data frame. Must include \code{Database}, \code{TableName},
+#'   \code{MDBDir}, \code{Path}, \code{PartitionKey}, and \code{PartitionValue}
+#'   columns.
+#' @param MasterDBPath Character. Root directory used to resolve each row's
+#'   source file. Required when \code{SourceFingerprintMode} is not
+#'   \code{"none"}; ignored otherwise.
+#' @param SourceFingerprintMode One of \code{"none"}, \code{"metadata"}, or
+#'   \code{"sha256"}. Controls whether (and how) a content fingerprint of the
+#'   resolved source file is appended to the base key.
+#' @return Character vector, one checkpoint key per row of \code{MDT}.
+#' @seealso \code{\link{checkpoint_completed_mask}}, \code{\link{source_fingerprint}}
+#' @examples
+#' MDT <- data.frame(Database = "DEMO", TableName = "Core", MDBDir = ".",
+#'                   Path = "demo.csv", PartitionKey = "YEAR",
+#'                   PartitionValue = "2020", stringsAsFactors = FALSE)
+#' repository_checkpoint_key(MDT, SourceFingerprintMode = "none")
+#' @export
 repository_checkpoint_key <- function(MDT, MasterDBPath = NULL,
                                       SourceFingerprintMode = c("none", "metadata", "sha256")) {
   SourceFingerprintMode <- match.arg(SourceFingerprintMode)

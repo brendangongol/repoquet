@@ -4,7 +4,14 @@
 \alias{MDTCompleteStatus}
 \title{Check MDT completion status against the loaded checkpoint}
 \usage{
-MDTCompleteStatus(MDT, CheckpointPath, verbose = TRUE, logStatus = TRUE)
+MDTCompleteStatus(
+  MDT,
+  CheckpointPath,
+  verbose = TRUE,
+  logStatus = TRUE,
+  MasterDBPath = NULL,
+  SourceFingerprintMode = c("none", "metadata", "sha256")
+)
 }
 \arguments{
 \item{MDT}{Data frame. Master Database Table with at minimum columns
@@ -19,6 +26,17 @@ of already-completed files.}
 
 \item{logStatus}{Logical. If \code{TRUE} (default), messages are written via
 \code{\link{log_msg}}; otherwise they are printed to the console.}
+
+\item{MasterDBPath}{Character scalar or \code{NULL} (default). Root
+directory used to resolve each row's source file for fingerprinting.
+Required when \code{SourceFingerprintMode} is not \code{"none"}; forwarded
+to \code{\link{repository_checkpoint_key}} and
+\code{\link{checkpoint_completed_mask}}.}
+
+\item{SourceFingerprintMode}{Character scalar, one of \code{"none"}
+(default), \code{"metadata"}, or \code{"sha256"} -- must match the mode
+used when the checkpoint was written, or a completed source can be
+reported as pending (or vice versa). See \code{\link{source_fingerprint}}.}
 }
 \value{
 A data frame: the subset of \code{MDT} rows whose \code{Path} has
