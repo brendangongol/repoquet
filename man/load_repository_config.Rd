@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{load_repository_config}
 \alias{load_repository_config}
-\title{Load a repository configuration file}
+\title{Loads a repository configuration file}
 \usage{
 load_repository_config(
   path,
@@ -37,103 +37,142 @@ load_repository_config(
 )
 }
 \arguments{
-\item{path}{Character. Path to the repository configuration file (R script
-that defines \code{repository_config} list).}
+\item{path}{Character scalar. Path to the repository configuration
+file, an R script that defines a \code{repository_config} list.}
 
-\item{SAV_CHUNK_SIZE}{Integer or NULL. Rows per chunk for SAV file streaming.
-NULL retains the configuration-file value or the default of 1000000L.}
+\item{SAV_CHUNK_SIZE}{Integer. Rows per chunk for streaming a SAV
+file. Accepts \code{NULL}, which keeps the configuration file's
+value, or the default of \code{1000000}.}
 
-\item{DelimitedChunkMaxMB}{Numeric or NULL. Conservative cap on the estimated
-peak memory of each CSV/TSV/TXT chunk for \code{NRows} and
-\code{RAMEstimate}. \code{FAIL} instead starts at \code{SAV_CHUNK_SIZE}
-after its direct-read probe and reduces that row chunk after recoverable
-memory-allocation errors. NULL retains the file value or 256.}
+\item{DelimitedChunkMaxMB}{Numeric scalar. Conservative cap on the
+estimated peak memory of each CSV, TSV, or TXT chunk, for
+\code{NRows} and \code{RAMEstimate}. Under \code{FAIL}, the row
+chunk instead starts at \code{SAV_CHUNK_SIZE} after its direct
+read probe, and is reduced after a recoverable memory allocation
+error. Accepts \code{NULL}, which keeps the file's value, or the
+default of \code{256}.}
 
-\item{DelimitedPartitionMaxMB}{Numeric or NULL. Cap on a single source-defined
-partition's estimated in-memory footprint before reading it one partition
-at a time instead of in fixed-size chunks. NULL retains the file value, or
-uses half of the conservative source-route cap derived from
+\item{DelimitedPartitionMaxMB}{Numeric scalar. Cap on the estimated
+memory footprint of a single source defined partition before it
+is read one partition at a time instead of in fixed size chunks.
+Accepts \code{NULL}, which keeps the file's value, or uses half
+of the conservative source route cap derived from
 \code{DelimitedChunkMaxMB} and \code{RAMThreshold}.}
 
-\item{FailProbeMode}{Character. For \code{PartitionBy = "FAIL"} delimited
-sources, use \code{"subprocess"} (default) to isolate direct read-and-write,
-\code{"in_process"} for legacy behavior, or \code{"disabled"} to chunk directly.}
+\item{FailProbeMode}{Character scalar. For a delimited source under
+\code{PartitionBy = "FAIL"}. Accepts \code{"subprocess"}, which
+isolates the direct read and write. Accepts \code{"in_process"},
+for legacy behavior. Accepts \code{"disabled"}, which chunks
+directly. Defaults to \code{"subprocess"}.}
 
-\item{FailProbeTimeoutSeconds}{Positive number of seconds allowed for an isolated
-direct worker before the parent falls back to adaptive chunking.}
+\item{FailProbeTimeoutSeconds}{Numeric scalar. Positive number of
+seconds allowed for an isolated direct worker before the parent
+falls back to adaptive chunking.}
 
-\item{FailProbeSourcePath}{Optional source-tree \code{R/repoquet.R} path for
-sourced-development workers. Defaults to \code{REPOQUET_SOURCE}, then the
-current working directory; installed packages load their namespace instead.}
+\item{FailProbeSourcePath}{Character scalar. Path to the source
+tree's \code{R/repoquet.R}, for a worker running from source
+rather than an installed package. Defaults to
+\code{REPOQUET_SOURCE}, then the current working directory. An
+installed package loads its namespace instead.}
 
-\item{SAV_ROW_THRESHOLD}{Integer. Rows above which SAV files stream in chunks.
-NULL retains the configuration-file value or the default of 1000000L.}
+\item{SAV_ROW_THRESHOLD}{Integer. Row count above which a SAV file
+streams in chunks. Accepts \code{NULL}, which keeps the
+configuration file's value, or the default of \code{1000000}.}
 
-\item{RAMThreshold}{Numeric. RAM limit in GB for PartitionBy = "RAMEstimate".
-NULL retains the configuration-file value or the default of 30.}
+\item{RAMThreshold}{Numeric scalar. Memory limit, in gigabytes, for
+\code{PartitionBy = "RAMEstimate"}. Accepts \code{NULL}, which
+keeps the configuration file's value, or the default of \code{30}.}
 
-\item{PartitionBy}{Character. Partitioning strategy: "NRows" (default),
-"RAMEstimate", or "FAIL". NULL retains the configuration-file value.}
+\item{PartitionBy}{Character scalar. Partitioning strategy. Accepts
+one of three values: \code{"NRows"}, \code{"RAMEstimate"}, or
+\code{"FAIL"}. Defaults to \code{"NRows"}. Accepts \code{NULL},
+which keeps the configuration file's value.}
 
-\item{n_workers}{Integer or NULL. Number of parallel workers. The default is
-max(1L, detectCores() - 1L) when the file does not define it.}
+\item{n_workers}{Integer. Number of parallel workers. Accepts
+\code{NULL}, which uses \code{max(1L, detectCores() - 1L)} when
+the file does not define it.}
 
-\item{MaxCoerceNAPct}{Numeric. Fail file when coercion destroys more than
-this percent of a column. NULL retains the file value or the default of 25.}
+\item{MaxCoerceNAPct}{Numeric scalar. Stops the file when type
+coercion destroys more than this percentage of a column. Accepts
+\code{NULL}, which keeps the file's value, or the default of
+\code{25}.}
 
-\item{SourceFingerprintMode}{Character. Source file fingerprinting mode:
-"metadata" (default), "sha256", or "none". NULL retains the file value.}
+\item{SourceFingerprintMode}{Character scalar. Source file
+fingerprinting mode. Accepts one of three values:
+\code{"metadata"}, \code{"sha256"}, or \code{"none"}. Defaults to
+\code{"metadata"}. Accepts \code{NULL}, which keeps the file's
+value.}
 
-\item{SchemaSurveyMode}{Character. "adaptive" (default), "full", or "sample".}
+\item{SchemaSurveyMode}{Character scalar. Accepts one of three
+values: \code{"adaptive"}, \code{"full"}, or \code{"sample"}.
+Defaults to \code{"adaptive"}.}
 
-\item{SchemaFastReadMaxBytes}{Numeric maximum source bytes for the bounded
-in-memory fread schema fast path.}
+\item{SchemaFastReadMaxBytes}{Numeric scalar. Maximum source size,
+in bytes, for the schema fast path bounded in memory with
+\code{fread}.}
 
-\item{SchemaChunkSize}{Integer rows per exhaustive schema-stream chunk.}
+\item{SchemaChunkSize}{Integer. Rows per chunk for an exhaustive
+schema stream.}
 
-\item{SchemaAdaptiveSampleRows}{Integer rows retained for adaptive/sample mode.}
+\item{SchemaAdaptiveSampleRows}{Integer. Rows retained for adaptive
+or sample mode.}
 
-\item{SchemaFutureGlobalsMaxSizeMB}{Numeric future worker-export allowance.}
+\item{SchemaFutureGlobalsMaxSizeMB}{Numeric scalar. Allowance, in
+megabytes, for what a future worker exports.}
 
-\item{SchemaReuseCache}{Logical. Reuse unchanged per-source observations.}
+\item{SchemaReuseCache}{Logical. Accepts \code{TRUE}, which reuses
+an unchanged source's earlier observation. Accepts \code{FALSE},
+which does not.}
 
-\item{SchemaWorkers}{Integer worker count used by schema discovery.}
+\item{SchemaWorkers}{Integer. Worker count used by schema discovery.}
 
-\item{RemoteOffline}{Logical. If TRUE, remote rows must use cached copies.}
+\item{RemoteOffline}{Logical. Accepts \code{TRUE}, which requires a
+remote row to use its cached copy. Accepts \code{FALSE}, which
+allows network access.}
 
-\item{DownloadPolicy}{Character default remote refresh policy.}
+\item{DownloadPolicy}{Character scalar. Default remote refresh
+policy.}
 
-\item{DownloadTimeout}{Numeric remote download timeout in seconds.}
+\item{DownloadTimeout}{Numeric scalar. Remote download timeout, in
+seconds.}
 
-\item{DBName}{Character or NULL. DuckDB database file name.}
+\item{DBName}{Character scalar. DuckDB database file name. Accepts
+\code{NULL}, which keeps the configuration file's value.}
 
-\item{DuckDB_GB}{Character or NULL. DuckDB memory limit (for example, "8GB").}
+\item{DuckDB_GB}{Character scalar. DuckDB memory limit, for example
+\code{"8GB"}. Accepts \code{NULL}, which keeps the configuration
+file's value.}
 
-\item{MasterDBPath, FormattedDBPath, MDTPath}{Character or NULL. Optional
-runtime overrides for the three required paths.}
+\item{MasterDBPath, FormattedDBPath, MDTPath}{Character scalars.
+Runtime overrides for the three required paths. Accepts
+\code{NULL}, which keeps the configuration file's value.}
 
-\item{overrides}{Named list of configuration values to apply at runtime.
-Explicit function arguments take precedence over this list. Names must
-already exist in the package defaults or the configuration file.}
+\item{overrides}{Named list of configuration values to apply at
+runtime. An explicit function argument takes precedence over this
+list. A name must already exist in the package defaults or the
+configuration file.}
 }
 \value{
-List containing all configuration keys (required + optional with defaults).
-  Runtime overrides do not modify the configuration file.
+A list containing every configuration key, both required
+  and optional with a default. A runtime override does not modify
+  the configuration file.
 }
 \description{
-Loads the machine-specific repository configuration from a file and merges
-it with optional runtime overrides. Configuration precedence, from lowest to
-highest, is package defaults, values in the configuration file, the named
-\code{overrides} list, and explicit function arguments. This lets users
-change settings for one run without modifying the configuration file.
+Loads the machine specific repository configuration from a file and
+merges it with optional runtime overrides. Configuration precedence,
+from lowest to highest, is the package defaults, the values in the
+configuration file, the named \code{overrides} list, and an explicit
+function argument. This lets a person change a setting for one run
+without modifying the configuration file.
 }
 \details{
-The configuration file must define a list named \code{repository_config}
-with required paths and optional performance thresholds. See
-\code{\link{create_repository_project}}: an R file that defines a list
-named \code{repository_config} with the paths and thresholds the loader
-needs. Keeping configuration in one reviewable file removes every
-hard-coded machine path from the run script.
+The configuration file must define a list named
+\code{repository_config} with the required paths and optional
+performance thresholds. See \code{\link{create_repository_project}}:
+an R file that defines a list named \code{repository_config} with
+the paths and thresholds the loader needs. Keeping the configuration
+in one reviewable file removes every machine path that would
+otherwise be hard coded into the run script.
 }
 \examples{
 config_path <- tempfile(fileext = ".R")

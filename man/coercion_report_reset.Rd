@@ -2,20 +2,17 @@
 % Please edit documentation in R/repoquet.R
 \name{coercion_report_reset}
 \alias{coercion_report_reset}
-\title{Clear the in-session coercion-damage record}
+\title{Clears the coercion damage record for the session}
 \usage{
 coercion_report_reset()
 }
 \value{
-\code{invisible(NULL)}. Called for its side effect of clearing
-  the internal record.
+\code{invisible(NULL)}.
 }
 \description{
-Resets the run-scoped collector that accumulates per-column
-type-coercion damage (NA values introduced when a column is coerced to
-its agreed schema class). Typically called once at the start of a
-repository run so \code{\link{coercion_report_write}} reports only that
-run's coercions.
+Resets the collector that accumulates, for the current run, the number
+of \code{NA} values introduced in each column by coercing it to its
+agreed schema class.
 }
 \examples{
 coercion_report_reset()

@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{write_year_parquet}
 \alias{write_year_parquet}
-\title{Write a data frame to a hive-partitioned Parquet file}
+\title{Writes a data frame to a hive partitioned Parquet file}
 \usage{
 write_year_parquet(
   df,
@@ -18,65 +18,63 @@ write_year_parquet(
 )
 }
 \arguments{
-\item{df}{A data frame or data.table to write.}
+\item{df}{Data frame or data.table to write.}
 
-\item{ParquetBasePath}{Character. Root directory of the Parquet store.}
+\item{ParquetBasePath}{Character scalar. Root directory of the Parquet
+store.}
 
-\item{table_name}{Character. Table name used as the first directory level
-(e.g. \code{"NIS_Core"}).}
+\item{table_name}{Character scalar. Table name used as the first
+directory level, for example \code{"NIS_Core"}.}
 
-\item{year_val}{Integer or character. Derived year value retained for
-backward compatibility with callers; partition placement is controlled by
-\code{partition_keys} and \code{partition_values} (which default to
-\code{"YEAR"} / \code{as.character(year_val)}).}
+\item{year_val}{Integer or character scalar. Year value retained for
+compatibility with earlier callers. Partition placement is controlled
+by \code{partition_keys} and \code{partition_values}, which default to
+\code{"YEAR"} and \code{as.character(year_val)}.}
 
-\item{source_path}{Character. Original source file path; used to derive
-the output filename.}
+\item{source_path}{Character scalar. Original source file path, used to
+derive the output filename.}
 
-\item{col_classes}{Named list (optional). Maps column names to their
-agreed R class strings (e.g. \code{list(AGE = "integer")}).}
+\item{col_classes}{Named list. Maps column names to their agreed R class
+strings, for example \code{list(AGE = "integer")}. Defaults to
+\code{NULL}.}
 
-\item{MaxFileStemTruncate}{Logical. If \code{TRUE}, truncate the derived
-output filename stem so the full path stays within filesystem
-path-length limits. Default \code{FALSE}.}
+\item{MaxFileStemTruncate}{Logical. Accepts \code{TRUE}, which truncates
+the derived output filename so the full path stays within the file
+system's path length limit. Accepts \code{FALSE}, which does not
+truncate it. Defaults to \code{FALSE}.}
 
-\item{partition_keys}{Character vector. Hive partition key name(s) for
-the output directory (canonicalized and lower-cased for the directory,
-e.g. \code{"year"}). Defaults to \code{"YEAR"}.}
+\item{partition_keys}{Character vector. Hive partition key names for the
+output directory, canonicalized and lowercased for the directory name,
+for example \code{"year"}. Defaults to \code{"YEAR"}.}
 
-\item{partition_values}{Character vector, same length as
-\code{partition_keys}. The value(s) for each partition key. Defaults to
+\item{partition_values}{Character vector, the same length as
+\code{partition_keys}. The value for each partition key. Defaults to
 \code{as.character(year_val)}.}
 
-\item{max_coerce_na_pct}{Numeric (optional). Maximum percentage of
-present values a single column's type coercion is allowed to destroy
-(turn into \code{NA}) before the coercion step aborts with an error.
-\code{NULL} (default) disables the check.}
+\item{max_coerce_na_pct}{Numeric scalar. Maximum percentage of present
+values that a single column's type coercion is allowed to turn into
+\code{NA} before the coercion step stops with an error. Defaults to
+\code{NULL}, which disables the check.}
 }
 \value{
-\code{invisible(out_path)} where \code{out_path} is the full path
-  of the written Parquet file.
+\code{invisible(out_path)}, where \code{out_path} is the full
+  path of the written Parquet file.
 }
 \description{
 Writes \code{df} to a Parquet file under the explicit Hive partition
 directory defined by \code{partition_keys} and \code{partition_values}.
-The output
-filename is derived from \code{source_path} with non-alphanumeric characters
-replaced by underscores, so each source SAV/CSV file produces a uniquely
-named Parquet file.
-Before writing, the function:
-\enumerate{
-  \item Converts \code{df} to a \code{data.table} in-place via
-    \code{strip_haven()} if needed.
-  \item Validates that any partition column present in \code{df} agrees
-    with \code{partition_values} (see
-    \code{\link{validate_partition_column_values}}), then drops it --
-    Hive injects the value back from the directory name at read time.
-  \item Coerces columns to \code{col_classes} via \code{enforce_col_classes()},
-    subject to \code{max_coerce_na_pct}.
-  \item Replaces \code{Inf} / \code{-Inf} values in numeric columns with
-    \code{NA_real_} (Arrow cannot serialise non-finite doubles).
-}
+The output filename is derived from \code{source_path}, with characters
+that are not letters or digits replaced by underscores, so that each
+source SAV or CSV file produces a uniquely named Parquet file. Before
+writing, the function converts \code{df} to a \code{data.table} in place
+with \code{strip_haven()} when needed, validates that a partition column
+present in \code{df} agrees with \code{partition_values} (see
+\code{\link{validate_partition_column_values}}) and then drops it, since
+Hive supplies the value back from the directory name when the file is
+read, coerces columns to \code{col_classes} with
+\code{enforce_col_classes()}, subject to \code{max_coerce_na_pct}, and
+replaces \code{Inf} and \code{-Inf} values in numeric columns with
+\code{NA_real_}, because Arrow cannot store a non finite double value.
 }
 \examples{
 tmp_base <- tempfile("parquet_demo_")

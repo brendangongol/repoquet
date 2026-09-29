@@ -2,23 +2,25 @@
 % Please edit documentation in R/repoquet.R
 \name{read_parquet_manifest}
 \alias{read_parquet_manifest}
-\title{Read the Parquet manifest from CSV or its transactional DuckDB store}
+\title{Reads the Parquet manifest from CSV or its transactional DuckDB store}
 \usage{
 read_parquet_manifest(ManifestPath)
 }
 \arguments{
-\item{ManifestPath}{Character. Path to the manifest file. \code{NULL}, an
-empty string, or a path that does not exist returns an empty
-\code{data.table} rather than raising an error.}
+\item{ManifestPath}{Character scalar. Path to the manifest file.
+Accepts such a path. Accepts \code{NULL}, an empty string, or a
+path that does not exist, each of which returns an empty
+data.table rather than raising an error.}
 }
 \value{
-A \code{data.table} with one row per manifest record (empty, with
-  no columns, if the manifest is missing or has no records yet).
+A data.table with one row per manifest record. Empty, with
+  no columns, when the manifest is missing or has no record yet.
 }
 \description{
-Reads the full contents of the repository's manifest, transparently
-handling both storage formats: a transactional DuckDB database (opened
-read-only and disconnected before returning) or a legacy flat CSV file.
+Reads the full contents of the repository's manifest, handling both
+storage formats transparently: a transactional DuckDB database,
+opened restricted to reading and disconnected before returning, or a
+legacy flat CSV file.
 }
 \examples{
 tmp <- tempfile(fileext = ".csv")

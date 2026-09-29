@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{read_delimited_chunked}
 \alias{read_delimited_chunked}
-\title{Stream a large delimited file to hive-partitioned Parquet in chunks}
+\title{Streams a large delimited file to hive partitioned Parquet in chunks}
 \usage{
 read_delimited_chunked(
   path,
@@ -37,159 +37,184 @@ read_delimited_chunked(
 )
 }
 \arguments{
-\item{path}{Character. Full path to the delimited (csv/tsv/txt/gz) file.}
+\item{path}{Character scalar. Full path to the delimited file, in csv,
+tsv, txt, or gz format.}
 
-\item{chunk_size}{Integer. Requested rows per chunk. In ordinary
-memory-capped mode this is capped by \code{.effective_delimited_chunk_size}
-using \code{MaxChunkMemoryMB} and the source's average bytes/row; under
-\code{adaptive_chunking = TRUE} it is instead used as-is and only reduced
-after a chunk actually fails.}
+\item{chunk_size}{Integer. Requested rows per chunk. In the ordinary
+mode capped by memory, this is capped by
+\code{.effective_delimited_chunk_size}, using \code{MaxChunkMemoryMB}
+and the source's average bytes per row. When \code{adaptive_chunking}
+is \code{TRUE}, it is instead used as given, and reduced only after a
+chunk actually fails.}
 
-\item{year_dir}{Character. Hive-partitioned output directory used when
-\code{route_source_partitions = FALSE} (e.g.
-\code{".../NIS_Core/year=2019"}).}
+\item{year_dir}{Character scalar. Hive partitioned output directory,
+used when \code{route_source_partitions} is \code{FALSE}, for
+example \code{".../NIS_Core/year=2019"}.}
 
-\item{all_cols}{Character vector (optional). Union of all columns for this
-table, passed to \code{\link{align_columns}} for every written piece.}
+\item{all_cols}{Character vector. Union of every column for this
+table, passed to \code{\link{align_columns}} for every piece
+written. Defaults to \code{NULL}.}
 
-\item{col_classes}{Named list (optional). Column class map from
-\code{\link{build_col_classes}}; used for per-piece type enforcement,
-for the typed \code{colClasses} passed to the delimited reader's
-\code{read_chunk}/\code{read_full}, and to derive the reference Arrow
-schema.}
+\item{col_classes}{Named list. Column class map from
+\code{\link{build_col_classes}}, used to enforce the type of each
+piece, for the typed \code{colClasses} passed to the delimited
+reader's \code{read_chunk} and \code{read_full}, and to derive the
+reference Arrow schema. Defaults to \code{NULL}.}
 
-\item{year_val}{Integer or character (optional). Fallback \code{Year} value
-recorded in the manifest when \code{"YEAR"} is not among
-\code{partition_keys} (or is not present in the actual partition values).}
+\item{year_val}{Integer or character scalar. Fallback \code{Year}
+value recorded in the manifest when \code{"YEAR"} is not among
+\code{partition_keys}, or is not present in the actual partition
+values. Defaults to \code{NULL}.}
 
-\item{TerminalHivePartition}{Logical. If \code{TRUE}, each written piece
-goes to a \code{batch_id=<stem>_<NNNNN>/data.parquet} subdirectory
-instead of a flat \code{<stem>_<NNNNN>.parquet} file. Default
+\item{TerminalHivePartition}{Logical. Accepts \code{TRUE}, which
+writes each piece to a \code{batch_id=<stem>_<NNNNN>/data.parquet}
+subdirectory instead of a flat \code{<stem>_<NNNNN>.parquet} file.
+Accepts \code{FALSE}, which does not. Defaults to \code{FALSE}.}
+
+\item{partition_keys}{Character vector. Canonical hive partition
+column names, for example \code{"YEAR"}. Defaults to \code{"YEAR"}.}
+
+\item{partition_values}{Named list, or one row of a data frame.
+Declared partition value for this file, used, and validated against
+the data, when \code{route_source_partitions} is \code{FALSE}.
+Defaults to \code{NULL}.}
+
+\item{route_source_partitions}{Logical. Accepts \code{TRUE}, which,
+when the file's header already contains every column named in
+\code{partition_keys}, groups rows by their own partition key values
+and writes them directly to their respective hive partition
+directories under \code{table_dir}, for example a single file
+spanning several years writes to \code{year=2020/},
+\code{year=2021/}, and so on, in one pass, instead of writing
+everything under one \code{year_dir}. Accepts \code{FALSE}, which
+does not. Defaults to \code{FALSE}.}
+
+\item{table_dir}{Character scalar. Table level directory above the
+partition directories, used when \code{route_source_partitions} is
+\code{TRUE}. Defaults to \code{NULL}, which derives it from
+\code{year_dir} by removing one directory level for each entry of
+\code{partition_keys}.}
+
+\item{max_coerce_na_pct}{Numeric scalar. Passed to
+\code{\link{align_columns}}. Stops the file when type coercion turns
+more than this percentage of a column's values into \code{NA}.
+Defaults to \code{NULL}.}
+
+\item{ManifestPath, Database, TableName, DuckDBTable, SourcePath, SchemaHash}{Used for manifest bookkeeping, passed through to
+\code{\link{update_parquet_manifest}} for each piece written, and
+used to remove a stale chunk row, with
+\code{\link{remove_parquet_manifest_rows}}, keyed on
+\code{SourcePath}, which defaults to \code{path}, before the read
+loop starts.}
+
+\item{MaxFileStemTruncate}{Logical. Accepts \code{TRUE}, which
+shortens a chunk file's stem to reduce a Windows path length
+failure. Accepts \code{FALSE}, which does not. Defaults to
 \code{FALSE}.}
 
-\item{partition_keys}{Character vector. Canonical Hive partition column
-name(s), e.g. \code{"YEAR"}. Default \code{"YEAR"}.}
+\item{MaxChunkMemoryMB}{Numeric. Memory cap, in megabytes, per chunk,
+used to derive the effective chunk row count with
+\code{.effective_delimited_chunk_size} in the ordinary mode, that
+is, when \code{adaptive_chunking} is \code{FALSE}, and used as the
+fallback budget per partition, \code{MaxPartitionMemoryMB}, when
+neither it nor \code{MaxWholeFileMemoryMB} is supplied. Defaults to
+\code{256}.}
 
-\item{partition_values}{Named list or data frame row (optional). Declared
-partition value(s) for this file, used (and validated against the data)
-when \code{route_source_partitions = FALSE}.}
+\item{MaxWholeFileMemoryMB}{Numeric scalar. Memory budget, in
+megabytes, for the whole file, for the \code{"whole_file"} read
+strategy tier, used when \code{route_source_partitions} is
+\code{TRUE}. Defaults to \code{NULL}, which disables that tier, and
+also disables the \code{"partition_aligned"} tier, which is
+attempted only when a whole file budget is configured.}
 
-\item{route_source_partitions}{Logical. If \code{TRUE} and the file's
-header already contains every column named in \code{partition_keys},
-rows are grouped by their own partition-key values and written straight
-to their respective Hive partition directories under \code{table_dir}
-(e.g. a single combined multi-year file writes to \code{year=2020/},
-\code{year=2021/}, ... in one pass) instead of all being written under
-one \code{year_dir}. Default \code{FALSE}.}
+\item{MaxPartitionMemoryMB}{Numeric scalar. Memory budget, in
+megabytes, per partition, for the \code{"partition_aligned"} tier.
+Defaults to half of \code{MaxWholeFileMemoryMB} when that is
+supplied, and otherwise to \code{MaxChunkMemoryMB}.}
 
-\item{table_dir}{Character (optional). Table-level directory above the
-partition directories, used when \code{route_source_partitions = TRUE}.
-Derived from \code{year_dir} by stripping one directory level per entry
-in \code{partition_keys} when not supplied.}
+\item{chunk_size_decrement}{Integer. Number of rows subtracted from
+the chunk size after a chunk fails with a recoverable memory error,
+relevant when \code{adaptive_chunking} is \code{TRUE} or in the
+fixed size fallback tier. Defaults to 10 percent of the, possibly
+memory capped, chunk size.}
 
-\item{max_coerce_na_pct}{Numeric (optional). Passed to
-\code{\link{align_columns}}; fails the file when type coercion turns
-more than this percentage of a column's values into \code{NA}.}
-
-\item{ManifestPath, Database, TableName, DuckDBTable, SourcePath, SchemaHash}{Manifest bookkeeping passed through to \code{\link{update_parquet_manifest}}
-for each written piece, and used to remove stale chunk rows (via
-\code{\link{remove_parquet_manifest_rows}}, keyed on \code{SourcePath}
-defaulting to \code{path}) before the read loop starts.}
-
-\item{MaxFileStemTruncate}{Logical. If \code{TRUE}, chunk file stems are
-shortened to reduce Windows path-length failures.}
-
-\item{MaxChunkMemoryMB}{Numeric. Per-chunk memory cap (MB) used to derive
-the effective chunk row count via
-\code{.effective_delimited_chunk_size} in ordinary (non-adaptive)
-mode, and as the fallback per-partition budget
-(\code{MaxPartitionMemoryMB}) when neither it nor
-\code{MaxWholeFileMemoryMB} is supplied. Default \code{256L}.}
-
-\item{MaxWholeFileMemoryMB}{Numeric (optional). Whole-file memory budget
-(MB) for the \code{"whole_file"} read-strategy tier under
-\code{route_source_partitions = TRUE}. \code{NULL} disables that tier
-(and the \code{"partition_aligned"} tier, which is only attempted when a
-whole-file budget is configured).}
-
-\item{MaxPartitionMemoryMB}{Numeric (optional). Per-partition memory
-budget (MB) for the \code{"partition_aligned"} tier. Defaults to half of
-\code{MaxWholeFileMemoryMB} when that is supplied, else
-\code{MaxChunkMemoryMB}.}
-
-\item{chunk_size_decrement}{Integer (optional). Rows to subtract from the
-chunk size after a chunk fails with a recoverable memory error (relevant
-to \code{adaptive_chunking = TRUE} or the fixed-size fallback tier).
-Defaults to 10\% of the (possibly memory-capped) chunk size.}
-
-\item{min_chunk_size}{Integer (optional). Smallest chunk size that will be
-attempted before giving up and propagating the error. Defaults to
+\item{min_chunk_size}{Integer. Smallest chunk size that is attempted
+before the function gives up and signals the error. Defaults to
 \code{chunk_size_decrement}.}
 
-\item{adaptive_chunking}{Logical. If \code{TRUE}, skip the
-\code{MaxChunkMemoryMB}-based sizing and instead start at the requested
-\code{chunk_size}, reducing it only after a chunk read actually fails
-with a recoverable memory-allocation error (the \code{PartitionBy =
-"FAIL"} fallback behavior). Default \code{FALSE}.}
+\item{adaptive_chunking}{Logical. Accepts \code{TRUE}, which skips the
+sizing based on \code{MaxChunkMemoryMB} and instead starts at the
+requested \code{chunk_size}, reducing it only after a chunk read
+actually fails with a recoverable memory allocation error, the
+fallback behavior for \code{PartitionBy = "FAIL"}. Accepts
+\code{FALSE}, which does not. Defaults to \code{FALSE}.}
 
-\item{preloaded_data}{Data frame (optional). A whole-file read already
-performed by the caller (e.g. the isolated-subprocess direct-read probe
-under \code{FailProbeMode = "subprocess"}); when supplied, the file is
-not read again -- \code{preloaded_data} is processed directly via the
-\code{"whole_file"} strategy (partition routing/validation and Parquet
-writing still happen normally).}
+\item{preloaded_data}{Data frame. A whole file read already performed
+by the caller, for example the isolated subprocess direct read
+probe under \code{FailProbeMode = "subprocess"}. Accepts such a
+data frame, which is processed directly with the \code{"whole_file"}
+strategy, so that the file is not read again, while partition
+routing, validation, and writing to Parquet still happen normally.
+Accepts \code{NULL}, which reads the file. Defaults to \code{NULL}.}
 
-\item{reader}{Character. Registered delimited reader name (see
-\code{\link{get_file_reader}}), e.g. \code{"csv"} (default). Must have a
-\code{read_chunk} callback.}
+\item{reader}{Character scalar. Registered delimited reader name, as
+registered with \code{\link{get_file_reader}}, for example
+\code{"csv"}. Must have a \code{read_chunk} callback. Defaults to
+\code{"csv"}.}
 
 \item{reader_options}{List. Reader options forwarded to the reader's
-\code{read_header}/\code{count_rows}/\code{read_full}/\code{read_chunk}
-callbacks (e.g. \code{Encoding}, \code{Delimiter}). Default
-\code{list()}.}
+\code{read_header}, \code{count_rows}, \code{read_full}, and
+\code{read_chunk} callbacks, for example \code{Encoding} and
+\code{Delimiter}. Defaults to \code{list()}.}
 
-\item{RepositoryLock}{Repository lock handle (optional), from
-\code{\link{acquire_repository_lock}}, touched via
-\code{\link{touch_repository_lock}} periodically during long reads so
-the lock does not expire mid-file.}
+\item{RepositoryLock}{Repository lock handle, from
+\code{\link{acquire_repository_lock}}. Touched with
+\code{\link{touch_repository_lock}} periodically during a long
+read, so the lock does not expire partway through the file.
+Defaults to \code{NULL}.}
 }
 \value{
-A list with \code{written = TRUE}, \code{n_rows} (total rows
-  written), \code{status = "completed"}, and \code{partitions} (a
-  data.table of the distinct partition key/value/directory combinations
-  written to, one row per partition when \code{route_source_partitions =
-  TRUE}). A fatal read, schema, or row-count error stops the load (after
-  removing any partial chunk output already written) so the source is not
+A list with \code{written = TRUE}, \code{n_rows}, the total
+  rows written, \code{status = "completed"}, and \code{partitions}, a
+  data.table of the distinct combinations of partition key, value,
+  and directory written to, one row per partition, when
+  \code{route_source_partitions = TRUE}. A read, schema, or row count
+  error that is not recovered stops the load, after removing any
+  partial chunk output already written, so that the source is not
   checkpointed.
 }
 \description{
-Memory-bounded counterpart of \code{\link{safe_read_sav_chunked}} for the
-delimited family (csv/tsv/txt/gz). Reuses the same machinery: stale-chunk
-cleanup, per-chunk alignment against the agreed schema, partition-column
-validation, a reference Arrow schema so every chunk writes identical
-physical types, atomic writes, and per-chunk manifest rows. In ordinary
-memory-capped mode, the input size is used to derive a conservative row
-chunk. In \code{PartitionBy = "FAIL"} mode, the caller instead requests a
-direct-read probe followed by SAV-style adaptive chunk retries: the initial
-requested row chunk is attempted and is reduced only after a recoverable
-memory-allocation error.
+The counterpart of \code{\link{safe_read_sav_chunked}}, bounded by
+memory, for the delimited family of formats, csv, tsv, txt, and gz.
+Uses the same mechanisms: removing a stale chunk, aligning each chunk
+against the agreed schema, validating the partition columns, using one
+reference Arrow schema so that every chunk writes identical physical
+types, writing atomically, and recording one manifest row per chunk.
+In the ordinary mode capped by memory, the input size is used to
+derive a conservative row chunk. In \code{PartitionBy = "FAIL"} mode,
+the caller instead requests a direct read probe followed by adaptive
+chunk retries in the manner of \code{\link{safe_read_sav_chunked}}:
+the initially requested row chunk is attempted, and is reduced only
+after a recoverable memory allocation error.
 }
 \details{
-Sources configured with \code{MalformedRowPolicy="append_previous"} use the
-same logical-record stream as schema discovery. When a large source-defined
-partition cannot be read as a whole or by partition run, that one-pass stream
-is also used for the fixed-size fallback. This avoids repeatedly rescanning a
-growing prefix of the source with \code{fread(skip=...)}.
+A source configured with \code{MalformedRowPolicy = "append_previous"}
+uses the same logical record stream used for schema discovery. When a
+large source defined partition cannot be read as a whole or by
+partition run, that same single pass stream is also used for the
+fixed size fallback, rather than repeatedly rescanning a growing
+prefix of the source with \code{fread(skip = ...)}.
 }
-\section{Read strategy tiers (when \code{route_source_partitions = TRUE})}{
+\section{Read strategy tiers (used when \code{route_source_partitions} is \code{TRUE})}{
 
-Decided by \code{\link{.plan_partition_aligned_read}}, cheapest first: (1)
-\code{"whole_file"} if the estimated in-memory footprint fits
-\code{MaxWholeFileMemoryMB}; (2) \code{"partition_aligned"} if every
-contiguous partition run (in file order) fits \code{MaxPartitionMemoryMB};
-(3) \code{"chunked"}, the fixed-size memory-capped fallback. When
-\code{preloaded_data} is supplied, the \code{"whole_file"} tier is used
-directly without re-reading the file.
+Decided by \code{\link{.plan_partition_aligned_read}}, cheapest first.
+\code{"whole_file"} is used when the estimated memory footprint fits
+\code{MaxWholeFileMemoryMB}. \code{"partition_aligned"} is used when
+every contiguous partition run, in file order, fits
+\code{MaxPartitionMemoryMB}. \code{"chunked"}, the fixed size fallback
+capped by memory, is used otherwise. When \code{preloaded_data} is
+supplied, the \code{"whole_file"} tier is used directly, without
+reading the file again.
 }
 
 \examples{

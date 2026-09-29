@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{ValidateMDTPreflight}
 \alias{ValidateMDTPreflight}
-\title{Validate MDT structure and output safety before schema discovery or loading}
+\title{Validates MDT structure and output safety before schema discovery or loading}
 \usage{
 ValidateMDTPreflight(
   MDT,
@@ -19,52 +19,63 @@ ValidateMDTPreflight(
 \arguments{
 \item{MDT}{Data frame. Master Database Table to validate.}
 
-\item{strict}{Logical. If \code{TRUE} (default), throws an error if any
-issue with \code{Severity == "error"} was found (after logging all
-issues). If \code{FALSE}, issues are only logged/returned.}
+\item{strict}{Logical. Accepts \code{TRUE}, which stops with an
+error when an issue with \code{Severity == "error"} was found,
+after logging every issue. Accepts \code{FALSE}, which only logs
+or returns the issue. Defaults to \code{TRUE}.}
 
-\item{logStatus}{Logical. If \code{TRUE} (default), each issue is logged
-via \code{\link{log_msg}} as it is found.}
+\item{logStatus}{Logical. Accepts \code{TRUE}, which logs each
+issue with \code{\link{log_msg}} as it is found. Accepts
+\code{FALSE}, which does not. Defaults to \code{TRUE}.}
 
-\item{ParquetBasePath}{Character (optional). Root directory of the
-Parquet store, used to compute realistic output paths when checking for
-filename/chunk-stem collisions. If \code{NULL}, collisions are still
-checked using the partition directory alone.}
+\item{ParquetBasePath}{Character scalar. Root directory of the
+Parquet store, used to compute a realistic output path when
+checking for a file name or chunk stem collision. Defaults to
+\code{NULL}, which still checks for a collision, using the
+partition directory alone.}
 
-\item{MaxFileStemTruncate}{Logical. If \code{TRUE} (default), simulates
-the filename truncation \code{\link{write_year_parquet}} would apply
-when computing output stems for collision detection.}
+\item{MaxFileStemTruncate}{Logical. Accepts \code{TRUE}, which
+simulates the file name truncation \code{\link{write_year_parquet}}
+would apply when computing an output stem for collision
+detection. Accepts \code{FALSE}, which does not. Defaults to
+\code{TRUE}.}
 
-\item{TerminalHivePartition}{Logical. If \code{TRUE}, treats
-\code{PartitionKey} value \code{"BATCH_ID"} as reserved (since the
-chunked writer creates \code{batch_id=} directories itself) and flags
-its use as an error. Default \code{FALSE}.}
+\item{TerminalHivePartition}{Logical. Accepts \code{TRUE}, which
+treats the \code{PartitionKey} value \code{"BATCH_ID"} as
+reserved, since the chunked writer creates a \code{batch_id=}
+directory itself, and flags its use as an error. Accepts
+\code{FALSE}, which does not. Defaults to \code{FALSE}.}
 
-\item{MasterDBPath}{Character (optional). Accepted for backward
-compatibility; not inspected by this function.}
+\item{MasterDBPath}{Character scalar. Accepted for compatibility
+with an earlier version. Not inspected by this function.}
 
-\item{LogPath, RunId}{Optional repository logging context, active for the
-duration of the call (see \code{\link{begin_repository_run}}).}
+\item{LogPath, RunId}{Optional repository logging context, active
+for the duration of the call, see
+\code{\link{begin_repository_run}}.}
 }
 \value{
-Invisibly, a \code{data.table} of issues with columns
-  \code{Check}, \code{Severity} (\code{"error"} or \code{"warning"}),
-  \code{Message}, and \code{N} (count of affected rows/values). Empty
-  (zero rows) if no issues were found.
+Invisibly, a data.table of issues with columns
+  \code{Check}, \code{Severity}, one of \code{"error"} or
+  \code{"warning"}, \code{Message}, and \code{N}, the count of
+  affected rows or values. Empty, with zero rows, when no issue was
+  found.
 }
 \description{
-This preflight deliberately does not open source files or execute reader
-options. Those checks belong to \code{\link{SurveyRepositorySchema}}, which
-records the detailed evidence and errors in the schema artifacts. Keeping
-this function structural avoids reading every large/network source twice.
-\code{MasterDBPath} remains accepted for backward compatibility but is not
-inspected. Checks performed include: required columns present and
-non-blank; physical table names safe and free of case/logical
-collisions; \code{FileType} values registered; remote-source
-(\code{SourceURI}/\code{ArchiveType}/etc.) fields well-formed; partition
-specifications parseable and consistent within a table; no duplicate
-repository checkpoint identities; and no two source files that would
-collide on the same output Parquet filename or chunk stem.
+This preflight deliberately does not open a source file or run a
+reader option. Those checks belong to
+\code{\link{SurveyRepositorySchema}}, which records the detailed
+evidence and error in the schema artifacts. Keeping this function
+structural avoids reading every large or networked source twice.
+\code{MasterDBPath} remains accepted for compatibility with an
+earlier version, but is not inspected. The checks performed include:
+the required columns are present and not blank; a physical table
+name is safe and free of a collision in case or in logic; a
+\code{FileType} value is registered; a remote source field, such as
+\code{SourceURI} or \code{ArchiveType}, is well formed; a partition
+specification can be parsed and is consistent within a table; there
+is no duplicate repository checkpoint identity; and no two source
+files would collide on the same output Parquet file name or chunk
+stem.
 }
 \examples{
 MDT <- data.frame(

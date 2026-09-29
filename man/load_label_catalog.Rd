@@ -2,24 +2,26 @@
 % Please edit documentation in R/repoquet.R
 \name{load_label_catalog}
 \alias{load_label_catalog}
-\title{Read the data-dictionary (Labels) catalog back from disk}
+\title{Reads the data dictionary Labels catalog back from disk}
 \usage{
 load_label_catalog(TableSchemaPath)
 }
 \arguments{
-\item{TableSchemaPath}{Character. Path to the schema catalog written by
-\code{\link{write_table_schema_catalog}} (\code{.xlsx} or \code{.csv}).}
+\item{TableSchemaPath}{Character scalar. Path to the schema
+catalog written by \code{\link{write_table_schema_catalog}},
+accepting either an \code{.xlsx} or a \code{.csv} extension.}
 }
 \value{
-A data.table with (at least) \code{Column}, \code{VariableLabel},
-  \code{ValueLabels}, and \code{SourceFile}, or \code{NULL} when
-  \code{TableSchemaPath} is missing, does not exist, has no \code{Labels}
-  sheet/sibling file, or the sheet/file is empty.
+A data.table with at least \code{Column},
+  \code{VariableLabel}, \code{ValueLabels}, and \code{SourceFile},
+  or \code{NULL} when \code{TableSchemaPath} is missing, does not
+  exist, has no \code{Labels} sheet or sibling file, or that sheet
+  or file is empty.
 }
 \description{
-Companion reader for the \code{Labels} sheet of \code{TableSchemas.xlsx}
-(or the \code{*_Labels.csv} sibling when the catalog is CSV). Returns NULL
-when absent.
+A companion reader for the \code{Labels} sheet of
+\code{TableSchemas.xlsx}, or the \code{*_Labels.csv} sibling file
+when the catalog is CSV. Returns \code{NULL} when absent.
 }
 \examples{
 tmp <- tempfile(fileext = ".csv")

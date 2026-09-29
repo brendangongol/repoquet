@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{build_comprehensive}
 \alias{build_comprehensive}
-\title{Build the union of column names for each table across all source files}
+\title{Builds the union of column names for each table across all source files}
 \usage{
 build_comprehensive(
   files,
@@ -16,52 +16,56 @@ build_comprehensive(
 )
 }
 \arguments{
-\item{files}{Character vector of file paths (full paths when
-\code{base_path = ""}, relative otherwise).}
+\item{files}{Character vector of file paths. Full paths when
+\code{base_path} is \code{""}, and relative to \code{base_path}
+otherwise.}
 
 \item{base_path}{Character scalar. Prepended to each element of
-\code{files} when non-empty.  Pass \code{""} when \code{files} already
-contains full paths.}
+\code{files} when not empty. Pass \code{""} when \code{files}
+already contains full paths.}
 
-\item{suffixes}{Character vector (parallel to \code{files}). Table-name
-suffix for each file (e.g. \code{"Core"}, \code{"Severity"}).}
+\item{suffixes}{Character vector, parallel to \code{files}. Table
+name suffix for each file, for example \code{"Core"} or
+\code{"Severity"}.}
 
-\item{uni_suffixes}{Character vector. Unique values of \code{suffixes};
+\item{uni_suffixes}{Character vector. Unique values of \code{suffixes},
 used as the names of the returned list.}
 
-\item{reader}{Character scalar or vector. Registered reader name(s)
-(see \code{\link{get_file_reader}}), e.g. \code{"sav"} or \code{"csv"}. A
-single value is recycled across all \code{files}; otherwise it must have
-one entry per file.}
+\item{reader}{Character scalar or vector. Registered reader name, or
+one name per file, as registered with \code{\link{get_file_reader}},
+for example \code{"sav"} or \code{"csv"}. A single value is
+recycled across every file.}
 
 \item{n_workers}{Integer. Number of parallel \code{future::multisession}
-workers to use for the header scan. \code{1} (the default) scans
-serially in the current process.}
+workers to use for the header scan. Accepts \code{1}, which scans
+serially in the current process. Defaults to \code{1}.}
 
-\item{reader_options}{List (optional). One reader-options list per file
-(recycled as an empty list per file when \code{NULL}), forwarded to
-each reader's \code{read_header} callback.}
+\item{reader_options}{List. One reader options list per file, forwarded
+to each reader's \code{read_header} callback. Defaults to \code{NULL},
+which uses an empty list for every file.}
 
-\item{strict_read}{Logical. If \code{TRUE} (default), a header-scan
-failure for any file stops with an error. If \code{FALSE}, failed files
-are logged and skipped (contributing no columns) so the union can still
-be built from the readable files.}
+\item{strict_read}{Logical. Accepts \code{TRUE}, which stops with an
+error when the header scan fails for any file. Accepts \code{FALSE},
+which logs and skips a failed file, contributing no columns from it,
+so the union can still be built from the readable files. Defaults to
+\code{TRUE}.}
 }
 \value{
-A named list where each element is a character vector of column
-  names (the union across all files for that table suffix).
+A named list where each element is a character vector of
+  column names, the union across every file for that table suffix.
 }
 \description{
-Reads only the column headers (zero rows) from every file in parallel and
-groups the results by table suffix.  The output is a named list where each
-element is the union of all column names seen across every year-file for
-that table.  This union is used by \code{\link{align_columns}} to ensure
-that all year-files for a table share the same column set when row-bound
-together.
+Reads only the column headers, with zero rows, from every file, in
+parallel, and groups the results by table suffix. The output is a
+named list where each element is the union of every column name seen
+across every year file for that table, used by
+\code{\link{align_columns}} to give every year file of a table the
+same column set before they are row bound together.
 }
 \details{
-Parallelism is scoped within this function (see
-\code{\link{build_col_classes}} for details).
+A parallel scan activates a \code{multisession} plan only for the
+duration of the scan, and restores the previous plan immediately
+afterward, in the manner of \code{\link{build_col_classes}}.
 }
 \examples{
 \dontrun{

@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{cleanup_temp_files}
 \alias{cleanup_temp_files}
-\title{Clean up temporary Parquet write files}
+\title{Removes old temporary Parquet write files}
 \usage{
 cleanup_temp_files(
   parent_dir,
@@ -13,38 +13,34 @@ cleanup_temp_files(
 )
 }
 \arguments{
-\item{parent_dir}{Character. Root directory to scan for temporary files.}
+\item{parent_dir}{Character scalar. Root directory to scan for temporary
+files.}
 
-\item{pattern}{Character. Regular expression to match temporary files
-(default matches `*.tmp_*.parquet`).}
+\item{pattern}{Character scalar. Regular expression matching temporary
+file names. Defaults to a pattern matching \code{*.tmp_*.parquet}.}
 
-\item{max_age_hours}{Integer. Minimum age (in hours) before a temp file is
-considered safe to remove. Default 24 hours (files < 24 hrs old are preserved).}
+\item{max_age_hours}{Integer. Minimum age, in hours, a temporary file
+must reach before it is removed. Defaults to \code{24}.}
 
-\item{dry_run}{Logical. If TRUE, log what would be removed without actually
-deleting files (default FALSE).}
+\item{dry_run}{Logical. Accepts \code{TRUE}, which logs the files that
+would be removed, without removing them. Accepts \code{FALSE}, which
+removes them. Defaults to \code{FALSE}.}
 
-\item{verbose}{Logical. If TRUE, log cleanup operations (default TRUE).}
+\item{verbose}{Logical. Accepts \code{TRUE}, which logs each cleanup
+operation. Accepts \code{FALSE}, which logs nothing. Defaults to
+\code{TRUE}.}
 }
 \value{
-Invisibly returns a data.table with columns:
-  \describe{
-    \item{file}{Full path to the temporary file}
-    \item{size_bytes}{File size in bytes}
-    \item{age_hours}{Age of file in hours}
-    \item{mtime}{File modification time}
-  }
+Invisibly, a data.table with columns \code{file}, the full path
+  to the temporary file, \code{size_bytes}, the file size in bytes,
+  \code{age_hours}, the age of the file in hours, and \code{mtime}, the
+  file modification time.
 }
 \description{
-Scans a directory for temporary files left behind by atomic write operations
-(files matching a pattern, typically `*.tmp_*.parquet`). Removes old temporary
-files while preserving recent ones that may still be in use.
-}
-\details{
-This function is useful for cleaning up orphaned temporary files after
-crashed or interrupted write operations. It scans recursively into all
-subdirectories and removes only files older than \code{max_age_hours},
-to avoid interfering with active write operations.
+Scans a directory, and every subdirectory beneath it, for temporary files
+left behind by atomic write operations, matching \code{pattern}, and
+removes those older than \code{max_age_hours}, leaving more recent ones
+in place.
 }
 \examples{
 \dontrun{

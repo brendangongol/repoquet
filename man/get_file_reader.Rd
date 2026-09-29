@@ -2,25 +2,25 @@
 % Please edit documentation in R/repoquet.R
 \name{get_file_reader}
 \alias{get_file_reader}
-\title{Look up a registered file reader by type}
+\title{Looks up a registered file reader by type}
 \usage{
 get_file_reader(type)
 }
 \arguments{
-\item{type}{Character scalar. Reader name, matched case-insensitively
-after trimming whitespace, as registered by
+\item{type}{Character scalar. Reader name, matched without regard to
+letter case and after trimming whitespace, as registered with
 \code{\link{register_file_reader}}.}
 }
 \value{
-The reader's list of callbacks (\code{type}, \code{read_full},
+The reader's list of callbacks, \code{type}, \code{read_full},
   \code{read_header}, \code{read_sample}, \code{count_rows},
-  \code{has_labels}, \code{read_labels_header}, \code{chunkable},
-  \code{read_chunk}) exactly as passed to \code{\link{register_file_reader}}.
-  Stops with an error listing the registered types if \code{type} is not
-  found.
+  \code{has_labels}, \code{read_labels_header}, \code{chunkable}, and
+  \code{read_chunk}, exactly as passed to
+  \code{\link{register_file_reader}}. Stops with an error listing the
+  registered types when \code{type} is not found.
 }
 \description{
-Look up a registered file reader by type
+Looks up a registered file reader by type
 }
 \examples{
 reader <- get_file_reader("csv")

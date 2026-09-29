@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{real_world_source_catalog}
 \alias{real_world_source_catalog}
-\title{Curated official source inventory for real-world examples}
+\title{Curated catalog of official sources for real world examples}
 \usage{
 real_world_source_catalog(
   profile = c("quick", "relational", "schema_drift", "stress", "comprehensive"),
@@ -10,20 +10,25 @@ real_world_source_catalog(
 )
 }
 \arguments{
-\item{profile}{Example profile: quick, relational, schema_drift, stress, or
-comprehensive. Comprehensive includes the packaged full NHANES and UCI
-healthcare catalogs plus credentialed MIMIC-III metadata.}
+\item{profile}{Character scalar. Example profile. Accepts one of
+five values: \code{"quick"}, \code{"relational"},
+\code{"schema_drift"}, \code{"stress"}, or \code{"comprehensive"}.
+\code{"comprehensive"} includes the packaged full NHANES and UCI
+healthcare catalogs, plus credentialed MIMIC-III metadata.}
 
-\item{IncludeLarge}{Include sources flagged as large. Defaults to TRUE for
-stress and comprehensive.}
+\item{IncludeLarge}{Logical. Accepts \code{TRUE}, which includes a
+source flagged as large. Accepts \code{FALSE}, which excludes it.
+Defaults to \code{NULL}, which is \code{TRUE} for \code{"stress"}
+and \code{"comprehensive"}, and \code{FALSE} otherwise.}
 }
 \value{
 A data frame ready for DBSetup.xlsx.
 }
 \description{
-Returns workbook rows for public sources chosen to exercise relational
-tables, schema drift, archive members, labelled transport files, and
-larger-than-memory loading. No network request is made.
+Returns workbook rows for a public source chosen to exercise a
+relational table, schema drift, an archive member, a labeled
+transport file, and loading larger than memory. Makes no network
+request.
 }
 \examples{
 quick <- real_world_source_catalog("quick")

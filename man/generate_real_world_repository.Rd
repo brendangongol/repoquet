@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{generate_real_world_repository}
 \alias{generate_real_world_repository}
-\title{Generate a project backed by curated public real-world datasets}
+\title{Generates a project backed by curated public real world datasets}
 \usage{
 generate_real_world_repository(
   dir,
@@ -17,17 +17,22 @@ generate_real_world_repository(
 
 \item{profile}{Source profile passed to \code{real_world_source_catalog()}.}
 
-\item{IncludeLarge}{Include large stress-test sources.}
+\item{IncludeLarge}{Include a source flagged for a stress test.}
 
-\item{Download}{Download selected sources immediately. FALSE only writes the inventory.}
+\item{Download}{Logical. Accepts \code{TRUE}, which downloads the
+selected sources immediately. Accepts \code{FALSE}, which only
+writes the inventory. Defaults to \code{FALSE}.}
 
-\item{overwrite}{Replace scaffold files when TRUE.}
+\item{overwrite}{Logical. Accepts \code{TRUE}, which replaces a
+scaffold file. Accepts \code{FALSE}, which does not. Defaults to
+\code{FALSE}.}
 }
 \value{
-Invisibly, scaffold paths plus the generated MDT in \code{Sources}.
+Invisibly, the scaffold paths, plus the generated MDT in
+  \code{Sources}.
 }
 \description{
-Generate a project backed by curated public real-world datasets
+Generates a project backed by curated public real world datasets
 }
 \examples{
 dir <- tempfile("repoquet_public_")

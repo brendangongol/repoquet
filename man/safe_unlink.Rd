@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{safe_unlink}
 \alias{safe_unlink}
-\title{Robustly remove a file with retry logic}
+\title{Removes a file, retrying on failure}
 \usage{
 safe_unlink(
   path,
@@ -12,23 +12,25 @@ safe_unlink(
 )
 }
 \arguments{
-\item{path}{Character. Path to the file to remove.}
+\item{path}{Character scalar. Path to the file to remove.}
 
-\item{max_attempts}{Integer. Maximum number of removal attempts (default 3).}
+\item{max_attempts}{Integer. Maximum number of removal attempts. Defaults
+to \code{3}.}
 
-\item{wait_sec}{Numeric vector. Wait times (in seconds) before retries
-(default c(0, 1, 5)).}
+\item{wait_sec}{Numeric vector. Number of seconds to wait before each
+retry. Defaults to \code{c(0, 1, 5)}.}
 
-\item{log_failures}{Logical. If TRUE, log failed removal to the standard
-repository log (default TRUE).}
+\item{log_failures}{Logical. Accepts \code{TRUE}, which records a failure
+that persists after every attempt in the repository log. Accepts
+\code{FALSE}, which does not record it. Defaults to \code{TRUE}.}
 }
 \value{
-Logical. TRUE if file was removed or did not exist; FALSE if removal
-  failed after all retries.
+Logical scalar. \code{TRUE} when the file was removed or did not
+  exist. \code{FALSE} when removal failed after every attempt.
 }
 \description{
-Attempts to remove a file with exponential backoff retry logic. Useful for
-removing files that may be locked by the OS or another process during I/O
-operations. Logs failures if requested.
+Attempts to remove a file, retrying with a pause between attempts when
+removal fails, and optionally logging a failure that persists after every
+attempt.
 }
 \keyword{internal}

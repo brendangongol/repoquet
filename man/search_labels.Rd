@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{search_labels}
 \alias{search_labels}
-\title{Search the data dictionary for variables by label, name, or value text}
+\title{Searches the data dictionary for a variable by label, name, or value text}
 \usage{
 search_labels(
   pattern,
@@ -13,27 +13,40 @@ search_labels(
 )
 }
 \arguments{
-\item{pattern}{Regular expression (case-insensitive by default).}
+\item{pattern}{Character scalar. Regular expression to match,
+case insensitive by default.}
 
-\item{TableSchemaPath}{Path to the schema catalog holding the Labels sheet.}
+\item{TableSchemaPath}{Character scalar. Path to the schema
+catalog holding the \code{Labels} sheet.}
 
-\item{search_in}{Any of "label", "column", "values" (default: all three).}
+\item{search_in}{Character vector. Accepts any of three values:
+\code{"label"}, which searches the variable label, \code{"column"},
+which searches the column name, and \code{"values"}, which
+searches the value labels. Defaults to all three.}
 
-\item{ignore_case}{Logical, default TRUE.}
+\item{ignore_case}{Logical. Accepts \code{TRUE}, which matches
+\code{pattern} without regard to case. Accepts \code{FALSE},
+which matches case sensitively. Defaults to \code{TRUE}.}
 
-\item{ParquetBasePath}{Optional. When given, adds a PartitionsOnDisk column.}
+\item{ParquetBasePath}{Character scalar. When given, adds a
+\code{PartitionsOnDisk} column reporting which partition of each
+matched table exists on disk. Defaults to \code{NULL}.}
 }
 \value{
-data.table of matches: Database, TableName, DuckDBTable, Column,
-  CanonicalType, VariableLabel, ValueLabels (and PartitionsOnDisk).
+A data.table of matches with \code{Database},
+  \code{TableName}, \code{DuckDBTable}, \code{Column},
+  \code{CanonicalType}, \code{VariableLabel}, \code{ValueLabels},
+  and, when \code{ParquetBasePath} is given, \code{PartitionsOnDisk}.
 }
 \description{
-Makes the harvested \code{Labels} sheet queryable: find every column across
-every table whose variable label, column name, or value labels match a
-pattern -- e.g. \code{search_labels("payer", TableSchemaPath)} to locate the
-payer variables in all databases at once. Resolved canonical types are
-merged in from the schema catalog, and when \code{ParquetBasePath} is given
-each hit also reports which partitions of its table exist on disk.
+Makes the harvested \code{Labels} sheet queryable: finds every
+column across every table whose variable label, column name, or
+value labels match a pattern, for example
+\code{search_labels("payer", TableSchemaPath)} to locate a payer
+variable in every database at once. A resolved canonical type is
+merged in from the schema catalog, and when \code{ParquetBasePath}
+is given each hit also reports which partition of its table
+exists on disk.
 }
 \examples{
 tmp <- tempfile(fileext = ".csv")
@@ -52,5 +65,5 @@ search_labels("sex", TableSchemaPath = tmp)
 unlink(c(tmp, labels_path))
 }
 \seealso{
-\code{\link{column_availability}} for per-year column presence.
+\code{\link{column_availability}} for column presence by year.
 }

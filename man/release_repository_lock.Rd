@@ -2,34 +2,37 @@
 % Please edit documentation in R/repoquet.R
 \name{release_repository_lock}
 \alias{release_repository_lock}
-\title{Release the single-writer repository lock}
+\title{Releases the single writer repository lock}
 \usage{
 release_repository_lock(lock, force = FALSE, LogPath = NULL)
 }
 \arguments{
 \item{lock}{A \code{repository_lock} object from
-\code{\link{acquire_repository_lock}}, or (with \code{force = TRUE}) a
-character path to the lock directory.}
+\code{\link{acquire_repository_lock}}. Accepts such an object, which
+is released only when its token matches the current owner file,
+that is, when this run still holds the lock, unless \code{force} is
+\code{TRUE}. Also accepts, when \code{force} is \code{TRUE}, a
+character path to the lock directory, to remove an abandoned lock
+by hand.}
 
-\item{force}{Logical. If \code{FALSE} (default), \code{lock} must be a
-\code{repository_lock} object and is only released when its token
-matches the current owner file (i.e. this run still holds it). If
-\code{TRUE}, the lock directory is removed unconditionally -- use this
-to clear an abandoned lock from another crashed run.}
+\item{force}{Logical. Accepts \code{FALSE}, which requires \code{lock}
+to be a \code{repository_lock} object and releases it only when its
+token matches the current owner file. Accepts \code{TRUE}, which
+removes the lock directory unconditionally, to clear an abandoned
+lock left by another, crashed run. Defaults to \code{FALSE}.}
 
-\item{LogPath}{Character (optional). Log file to write to. See
-\code{\link{acquire_repository_lock}} for why this matters when calling
-standalone.}
+\item{LogPath}{Character scalar. Log file to write to. See
+\code{\link{acquire_repository_lock}} for why this matters when
+this is called on its own. Defaults to \code{NULL}.}
 }
 \value{
-Invisibly, \code{TRUE} if the lock was released (or already
-  absent), or \code{FALSE} if it is currently held by a different run and
-  \code{force = FALSE}.
+Invisibly, \code{TRUE} when the lock was released, or was
+  already absent. \code{FALSE} when it is currently held by a
+  different run and \code{force} is \code{FALSE}.
 }
 \description{
-Pass the object returned by \code{\link{acquire_repository_lock}} (only the
-owning run's token releases), or a path with \code{force = TRUE} to remove
-an abandoned lock by hand.
+Removes the lock directory created with
+\code{\link{acquire_repository_lock}}.
 }
 \examples{
 lock_path <- tempfile("repo_lock_")

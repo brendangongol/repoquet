@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{build_col_classes}
 \alias{build_col_classes}
-\title{Infer the agreed R class for every column across a set of files}
+\title{Infers the agreed R class for every column across a set of files}
 \usage{
 build_col_classes(
   files,
@@ -13,45 +13,46 @@ build_col_classes(
 )
 }
 \arguments{
-\item{files}{Character vector of file paths (full paths when
-\code{base_path = ""}, relative otherwise).}
+\item{files}{Character vector of file paths. Full paths when
+\code{base_path} is \code{""}, and relative to \code{base_path}
+otherwise.}
 
-\item{base_path}{Character scalar. Prepended to each element of \code{files}
-when non-empty. Pass \code{""} when \code{files} already contains full
-paths.}
+\item{base_path}{Character scalar. Prepended to each element of
+\code{files} when not empty. Pass \code{""} when \code{files} already
+contains full paths.}
 
 \item{n_workers}{Integer. Number of parallel \code{future::multisession}
-workers to use for the scan. \code{1} (the default) scans serially in the
-current process; values above 1 are capped at \code{length(files)}.}
+workers to use for the scan. Accepts \code{1}, which scans serially
+in the current process. Accepts a value greater than \code{1}, which
+scans in parallel across that many workers, capped at
+\code{length(files)}. Defaults to \code{1}.}
 
-\item{reader}{Character scalar or vector. Registered reader name(s) (see
-\code{\link{get_file_reader}}), e.g. \code{"sav"} (default) or
-\code{"csv"}. A single value is recycled across all \code{files};
-otherwise it must have one entry per file.}
+\item{reader}{Character scalar or vector. Registered reader name, or
+one name per file, as registered with \code{\link{get_file_reader}},
+for example \code{"sav"} or \code{"csv"}. A single value is recycled
+across every file. Defaults to \code{"sav"}.}
 
-\item{reader_options}{List (optional). One reader-options list per file
-(recycled as an empty list per file when \code{NULL}), passed through to
-the reader's \code{read_sample} callback -- see
-\code{reader_options_for_row}.}
+\item{reader_options}{List. One reader options list per file, passed to
+the reader's \code{read_sample} callback, see
+\code{reader_options_for_row}. Defaults to \code{NULL}, which uses an
+empty list for every file.}
 }
 \value{
-A named list where each element is a character scalar giving the
-  agreed R class for that column (e.g. \code{list(AGE = "integer",
-  DXCCS1 = "character")}).
+A named list where each element is a character scalar giving
+  the agreed R class for that column, for example
+  \code{list(AGE = "integer", DXCCS1 = "character")}.
 }
 \description{
-Reads a sample of rows from each file (in parallel when \code{n_workers >
-1}), strips \pkg{haven} attributes from SAV samples, and for each column
-records the set of R classes seen across all files. If all files agree on
-a single non-character class, that class is returned; otherwise
-\code{"character"} is returned as the safe common denominator (see
-\code{promote_types}). Parallelism is scoped within this function: a
-\code{multisession} plan is activated only for the duration of the scan and
-restored to the prior plan immediately after (see
-\code{.parallel_scan_with_serial_retry}), which prevents workers
-from remaining alive during the sequential Parquet write phase (a cause of
-file-lock conflicts on Windows). Per-file scan failures are retried
-serially in the main process before being treated as fatal.
+Reads a sample of rows from each file, in parallel when \code{n_workers}
+is greater than \code{1}, strips \pkg{haven} attributes from a SAV
+sample, and for each column records the set of R classes seen across
+every file. When every file agrees on a single class other than
+character, that class is returned for the column. Otherwise
+\code{"character"} is returned for it, see \code{promote_types}. A
+parallel scan activates a \code{multisession} plan only for the
+duration of the scan, and restores the previous plan immediately
+afterward. A per file scan failure is retried once, serially, in the
+main process, before being treated as an error.
 }
 \examples{
 \dontrun{

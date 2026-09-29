@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{RepositoryInitialize}
 \alias{RepositoryInitialize}
-\title{Resolve and (optionally) create every standard repository path}
+\title{Resolves and, optionally, creates every standard repository path}
 \usage{
 RepositoryInitialize(
   FormattedDBPath,
@@ -23,52 +23,63 @@ RepositoryInitialize(
 )
 }
 \arguments{
-\item{FormattedDBPath}{Character. Root directory for the repository's
-Parquet store, checkpoints, logs, schema artifacts, and manifest.}
+\item{FormattedDBPath}{Character scalar. Root directory for the
+repository's Parquet store, checkpoints, logs, schema artifacts,
+and manifest.}
 
-\item{ParquetBasePath}{Character. Root directory for Hive-partitioned
-Parquet output. Defaults to \code{file.path(FormattedDBPath, "parquet")}.}
+\item{ParquetBasePath}{Character scalar. Root directory for hive
+partitioned Parquet output. Defaults to
+\code{file.path(FormattedDBPath, "parquet")}.}
 
-\item{CheckpointPath}{Character. Path to the resumable-load checkpoint
-\code{.rds} file.}
+\item{CheckpointPath}{Character scalar. Path to the resumable load
+checkpoint \code{.rds} file.}
 
-\item{LogPath}{Character. Path to the run log file.}
+\item{LogPath}{Character scalar. Path to the run log file.}
 
-\item{DownloadCachePath}{Character. Directory used by
-\code{\link{MaterializeRemoteSources}} to cache downloaded sources.}
+\item{DownloadCachePath}{Character scalar. Directory used by
+\code{\link{MaterializeRemoteSources}} to cache a downloaded
+source.}
 
-\item{SchemaRegistryPath}{Character. Path to the schema registry workbook.}
+\item{SchemaRegistryPath}{Character scalar. Path to the schema
+registry workbook.}
 
-\item{TableSchemaPath}{Character. Path to the approved table schema
-catalog workbook.}
+\item{TableSchemaPath}{Character scalar. Path to the approved
+table schema catalog workbook.}
 
-\item{SchemaObservationPath}{Character. Path to the raw schema
-observation Parquet file written by \code{\link{SurveyRepositorySchema}}.}
+\item{SchemaObservationPath}{Character scalar. Path to the raw
+schema observation Parquet file written by
+\code{\link{SurveyRepositorySchema}}.}
 
-\item{SchemaReviewPath}{Character. Path to the compact schema review
-workbook a human resolves before \code{\link{FinalizeSchemaRegistry}}.}
+\item{SchemaReviewPath}{Character scalar. Path to the compact
+schema review workbook a person resolves before
+\code{\link{FinalizeSchemaRegistry}}.}
 
-\item{ManifestPath}{Character (optional). Path to the transactional
-manifest. \code{NULL} (the default) reuses a pre-existing legacy
-\code{Manifest/ParquetManifest.csv} if one is found, otherwise defaults
-to \code{Manifest/RepositoryMetadata.duckdb}.}
+\item{ManifestPath}{Character scalar. Path to the transactional
+manifest. Defaults to \code{NULL}, which reuses an already
+existing legacy \code{Manifest/ParquetManifest.csv} when one is
+found, and otherwise defaults to
+\code{Manifest/RepositoryMetadata.duckdb}.}
 
-\item{DataContractPath}{Character. Path to the data contracts workbook.}
+\item{DataContractPath}{Character scalar. Path to the data
+contracts workbook.}
 
-\item{ManifestWorkbookPath}{Character (optional). Path to the
-human-readable manifest workbook mirror. \code{NULL} (the default)
-derives it from \code{ManifestPath} via
+\item{ManifestWorkbookPath}{Character scalar. Path to the manifest
+workbook mirror readable by a person. Defaults to \code{NULL},
+which derives it from \code{ManifestPath} with
 \code{\link{metadata_workbook_path_default}}.}
 
-\item{create}{Logical. If \code{TRUE} (default), creates every directory
-in the returned path list (recursively) and seeds the schema registry
-and data contracts workbooks if they don't already exist. If
-\code{FALSE}, only resolves and returns the paths.}
+\item{create}{Logical. Accepts \code{TRUE}, which creates every
+directory in the returned path list, recursively, and seeds the
+schema registry and data contracts workbooks when they do not
+already exist. Accepts \code{FALSE}, which only resolves and
+returns the paths. Defaults to \code{TRUE}.}
 
-\item{profile}{Character. One of \code{"generic"} (default) or
-\code{"hcup"}, passed to \code{\link{load_schema_registry}} when
-seeding a new schema registry -- \code{"hcup"} preloads column-name
-patterns for the HCUP hospital discharge family of databases.}
+\item{profile}{Character scalar. Accepts one of two values,
+\code{"generic"} or \code{"hcup"}, passed to
+\code{\link{load_schema_registry}} when seeding a new schema
+registry. \code{"hcup"} preloads column name patterns for the
+HCUP hospital discharge family of databases. Defaults to
+\code{"generic"}.}
 }
 \value{
 A named list of resolved paths: \code{FormattedDBPath},
@@ -81,19 +92,21 @@ A named list of resolved paths: \code{FormattedDBPath},
 }
 \description{
 Derives the full set of standard file and directory locations under
-\code{FormattedDBPath} (Parquet output, checkpoint, logs, download cache,
-schema registry and review workbooks, data contracts, and the manifest),
-creating any that don't yet exist. This is the first call in every
-workflow stage -- \code{\link{create_repository_project}},
+\code{FormattedDBPath}, the Parquet output, checkpoint, logs,
+download cache, schema registry and review workbooks, data
+contracts, and the manifest, creating any that do not yet exist.
+This is the first call in every workflow stage.
+\code{\link{create_repository_project}},
 \code{\link{generate_example_repository}}, and the packaged
-\code{inst/scripts/repoquet.R} command-line driver all call it before
-anything else.
+\code{inst/scripts/repoquet.R} command line driver all call it
+before anything else.
 }
 \details{
-Initialization is idempotent for the schema registry and data contracts:
-each is only seeded with \code{profile}'s defaults the first time (i.e.
-when its file does not yet exist), so calling this again on an
-already-initialized repository never overwrites reviewed decisions.
+Initialization is idempotent for the schema registry and data
+contracts: each is seeded with \code{profile}'s defaults only the
+first time, that is, when its file does not yet exist, so calling
+this again on an already initialized repository never overwrites a
+reviewed decision.
 }
 \examples{
 dir <- tempfile("repo_init_"); on.exit(unlink(dir, recursive = TRUE))

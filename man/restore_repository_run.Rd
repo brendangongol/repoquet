@@ -2,22 +2,23 @@
 % Please edit documentation in R/repoquet.R
 \name{restore_repository_run}
 \alias{restore_repository_run}
-\title{Restore a previous run-scoped logging context}
+\title{Sets the run identifier and log path back to a previous logging context}
 \usage{
 restore_repository_run(previous)
 }
 \arguments{
-\item{previous}{The list returned (invisibly) by
-\code{\link{begin_repository_run}}. If \code{NULL}, this is a no-op.}
+\item{previous}{List. The context returned invisibly by
+\code{\link{begin_repository_run}}. Accepts such a list, which is
+restored as the current run identifier and log path. Also accepts
+\code{NULL}, which leaves the current run identifier and log path
+unchanged.}
 }
 \value{
-\code{invisible(NULL)}. Called for its side effect.
+\code{invisible(NULL)}.
 }
 \description{
-Reverses \code{\link{begin_repository_run}}: restores the run identifier
-and log path that were active before it was called. Typically used in an
-\code{on.exit()} so a nested operation's run-scoped logging context
-doesn't leak into the caller's.
+Sets the run identifier and log path to the values recorded in
+\code{previous}, reversing \code{\link{begin_repository_run}}.
 }
 \examples{
 previous <- begin_repository_run(LogPath = tempfile(fileext = ".txt"), RunId = "demo_run")

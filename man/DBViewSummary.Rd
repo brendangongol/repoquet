@@ -2,26 +2,28 @@
 % Please edit documentation in R/repoquet.R
 \name{DBViewSummary}
 \alias{DBViewSummary}
-\title{List all registered DuckDB views}
+\title{Lists every registered DuckDB view}
 \usage{
 DBViewSummary(con, verbose = TRUE, logStatus = TRUE)
 }
 \arguments{
 \item{con}{A DBI connection to an open DuckDB database.}
 
-\item{verbose}{Logical. If \code{TRUE} (default), logs or prints each view
-name.}
+\item{verbose}{Logical. Accepts \code{TRUE}, which logs or prints each
+view name. Accepts \code{FALSE}, which does not. Defaults to
+\code{TRUE}.}
 
-\item{logStatus}{Logical. If \code{TRUE} (default), output is written via
-\code{\link{log_msg}}; otherwise it is printed to the console.}
+\item{logStatus}{Logical. Accepts \code{TRUE}, which writes output with
+\code{\link{log_msg}}. Accepts \code{FALSE}, which prints it to the
+console. Defaults to \code{TRUE}.}
 }
 \value{
-Character vector of table/view names (invisibly from
-  \code{dbListTables()}).
+Character vector of table and view names, returned invisibly
+  from \code{dbListTables()}.
 }
 \description{
-Calls \code{dbListTables()} and logs or prints the names and count of all
-tables / views currently registered in the DuckDB connection.
+Calls \code{dbListTables()} and logs or prints the names and count of
+every table and view currently registered in the DuckDB connection.
 }
 \examples{
 con <- DBI::dbConnect(duckdb::duckdb(), dbdir = ":memory:")

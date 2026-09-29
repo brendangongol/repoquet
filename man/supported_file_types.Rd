@@ -2,18 +2,19 @@
 % Please edit documentation in R/repoquet.R
 \name{supported_file_types}
 \alias{supported_file_types}
-\title{List the currently registered file-reader types}
+\title{Lists the currently registered file reader types}
 \usage{
 supported_file_types()
 }
 \value{
-A sorted character vector of reader type names registered via
-  \code{\link{register_file_reader}}, including the built-ins installed at
-  package load by \code{register_builtin_file_readers()} (e.g.
-  \code{"sav"}, \code{"csv"}, \code{"dta"}, \code{"parquet"}, \code{"rds"}).
+A sorted character vector of reader type names registered with
+  \code{\link{register_file_reader}}, including the package's own
+  readers, installed when the package loads by
+  \code{register_builtin_file_readers()}, for example \code{"sav"},
+  \code{"csv"}, \code{"dta"}, \code{"parquet"}, and \code{"rds"}.
 }
 \description{
-List the currently registered file-reader types
+Lists the currently registered file reader types
 }
 \examples{
 supported_file_types()

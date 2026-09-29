@@ -2,11 +2,11 @@
 % Please edit documentation in R/repoquet.R
 \name{is_excel_workbook_path}
 \alias{is_excel_workbook_path}
-\title{Detect Excel workbook paths used by schema outputs}
+\title{Determines whether a path is an Excel workbook used by schema outputs}
 \usage{
 is_excel_workbook_path(path)
 }
 \description{
-Detect Excel workbook paths used by schema outputs
+Determines whether a path is an Excel workbook used by schema outputs
 }
 \keyword{internal}

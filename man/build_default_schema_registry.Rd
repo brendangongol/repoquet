@@ -2,28 +2,30 @@
 % Please edit documentation in R/repoquet.R
 \name{build_default_schema_registry}
 \alias{build_default_schema_registry}
-\title{Build the default repository schema registry}
+\title{Builds the default repository schema registry}
 \usage{
 build_default_schema_registry(profile = c("generic", "hcup"))
 }
 \arguments{
-\item{profile}{Character. One of \code{"generic"} (default; returns an
-empty zero-row template with no naming assumptions) or \code{"hcup"}
-(returns built-in HCUP conventions for merge keys, diagnosis/procedure
-codes, and survey weights).}
+\item{profile}{Character scalar. Accepts one of two values.
+\code{"generic"} returns an empty, zero row template with no naming
+assumption. \code{"hcup"} returns the built in HCUP conventions for
+merge keys, diagnosis and procedure codes, and survey weights.
+Defaults to \code{"generic"}.}
 }
 \value{
-A \code{data.table} with columns \code{Profile}, \code{ColumnPattern},
+A data.table with columns \code{Profile}, \code{ColumnPattern},
   \code{CanonicalType}, \code{Role}, \code{AppliesTo}, and \code{Notes}.
-  Zero rows when \code{profile = "generic"}.
+  Has zero rows when \code{profile} is \code{"generic"}.
 }
 \description{
-The registry is intentionally pattern-based and focused on merge keys,
-diagnosis/procedure/code columns, survey weights, and common analytic fields.
-It should remain small; ordinary table-specific columns are still inferred
-from the source files. The generic profile is an empty template with no
-naming assumptions. Domain conventions are available only through explicit
-profiles such as \code{"hcup"} or user-authored rows.
+The registry is pattern based, and focused on merge keys, diagnosis,
+procedure, and code columns, survey weights, and common analytic
+fields. It is deliberately kept small. An ordinary, table specific
+column is still inferred from the source files. The generic profile is
+an empty template with no naming assumption. A domain convention is
+available only through an explicit profile, such as \code{"hcup"}, or
+through a row a person authors.
 }
 \examples{
 generic_reg <- build_default_schema_registry("generic")

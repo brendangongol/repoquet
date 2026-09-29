@@ -2,11 +2,11 @@
 % Please edit documentation in R/repoquet.R
 \name{apply_builtin_schema_registry_policies}
 \alias{apply_builtin_schema_registry_policies}
-\title{Apply non-negotiable built-in schema policies}
+\title{Applies schema policies that cannot be overridden}
 \usage{
 apply_builtin_schema_registry_policies(reg, profile = c("generic", "hcup"))
 }
 \description{
-Apply non-negotiable built-in schema policies
+Applies schema policies that cannot be overridden
 }
 \keyword{internal}

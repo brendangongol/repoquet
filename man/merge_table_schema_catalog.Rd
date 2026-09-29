@@ -2,24 +2,27 @@
 % Please edit documentation in R/repoquet.R
 \name{merge_table_schema_catalog}
 \alias{merge_table_schema_catalog}
-\title{Merge a freshly inferred schema catalog with an existing one}
+\title{Merges a freshly inferred schema catalog with an existing one}
 \usage{
 merge_table_schema_catalog(new_schema, existing_schema = NULL)
 }
 \arguments{
-\item{new_schema}{data.table of freshly inferred/resolved catalog rows.}
+\item{new_schema}{A data.table of freshly inferred or resolved
+catalog rows.}
 
-\item{existing_schema}{data.table of the catalog currently on disk (or NULL).}
+\item{existing_schema}{A data.table of the catalog currently on
+disk. Defaults to \code{NULL}.}
 }
 \value{
-data.table combining both per the precedence rules above.
+A data.table combining both according to the precedence
+  rules described above.
 }
 \description{
-Preserves human curation across preflight runs: existing rows whose
-\code{Source} is \code{"manual"} or \code{"user_approved"} keep their
-reviewed fields (human decisions outrank both inference and the registry),
-and rows for tables or databases the fresh pass did not cover are carried
-forward unchanged.
+Preserves human curation across a preflight run: an existing row
+whose \code{Source} is \code{"manual"} or \code{"user_approved"}
+keeps its reviewed fields, since a human decision outranks both
+inference and the registry, and a row for a table or database the
+fresh pass did not cover is carried forward unchanged.
 }
 \examples{
 existing <- data.table::data.table(Database = "DEMO", TableName = "T", Column = "SEX",
@@ -27,5 +30,5 @@ existing <- data.table::data.table(Database = "DEMO", TableName = "T", Column = 
 fresh <- data.table::data.table(Database = "DEMO", TableName = "T", Column = "SEX",
                                 CanonicalType = "integer", Source = "resolved")
 merged <- merge_table_schema_catalog(fresh, existing)
-merged$CanonicalType # "character" -- the manual override is preserved
+merged$CanonicalType # "character": the manual override is preserved
 }

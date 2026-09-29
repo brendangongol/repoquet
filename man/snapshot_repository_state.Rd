@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{snapshot_repository_state}
 \alias{snapshot_repository_state}
-\title{Snapshot the repository's bookkeeping files before a run}
+\title{Copies the repository's bookkeeping files into a timestamped snapshot before a run}
 \usage{
 snapshot_repository_state(
   CheckpointPath = NULL,
@@ -14,25 +14,25 @@ snapshot_repository_state(
 )
 }
 \arguments{
-\item{CheckpointPath, ManifestPath, TableSchemaPath, SchemaRegistryPath}{State
-file paths; NULL or missing files are skipped silently.}
+\item{CheckpointPath, ManifestPath, TableSchemaPath, SchemaRegistryPath}{State file paths. A \code{NULL} or missing file is skipped silently.}
 
-\item{BackupDir}{Character. Snapshot root, e.g.
+\item{BackupDir}{Character scalar. Snapshot root, for example
 \code{<FormattedDBPath>/StateBackups}.}
 
-\item{keep_last}{Integer. Snapshots to retain (default 20).}
+\item{keep_last}{Integer. Number of snapshots to retain. Defaults to
+\code{20}.}
 }
 \value{
-Invisibly, the snapshot directory path (or NULL if nothing to copy).
+Invisibly, the snapshot directory path, or \code{NULL} when
+  there was nothing to copy.
 }
 \description{
-Copies the small state files that encode everything the loader knows --
-checkpoint (.rds), manifest (.csv), schema catalog (plus its Labels sibling
-when the catalog is CSV), and schema registry -- into a timestamped
-subfolder of \code{BackupDir}. Together these are a few hundred KB, but
-they are the difference between \code{\link{audit_repository}} findings
-being merely detectable and being recoverable. Retention keeps the newest
-\code{keep_last} snapshots and removes older ones.
+Copies the small state files that record everything the loader knows,
+the checkpoint, as \code{.rds}, the manifest, as \code{.csv}, the
+schema catalog, together with its Labels sibling when the catalog is
+a CSV file, and the schema registry, into a timestamped subfolder of
+\code{BackupDir}. Retention keeps the newest \code{keep_last}
+snapshots and removes an older one.
 }
 \examples{
 tmp_checkpoint <- tempfile(fileext = ".rds")

@@ -2,14 +2,15 @@
 % Please edit documentation in R/repoquet.R
 \name{.read_delimited_partition_columns}
 \alias{.read_delimited_partition_columns}
-\title{Read only the declared partition key column(s) of a delimited file}
+\title{Reads only the declared partition key columns of a delimited file}
 \usage{
 .read_delimited_partition_columns(path, reader_options, header, partition_keys)
 }
 \description{
-Cheap narrow scan (fread's \code{select=}) used to size up each partition's
-row count before deciding whether it can be read as a single piece --
-reading a few narrow columns for every row is far cheaper than reading the
-full (often wide) table just to find out how it's laid out.
+Performs an inexpensive scan, using fread's \code{select=} argument, of
+each partition's row count, to decide whether it can be read as a
+single piece, since reading a few narrow columns for every row is far
+cheaper than reading the full, often wide, table just to determine how
+it is laid out.
 }
 \keyword{internal}

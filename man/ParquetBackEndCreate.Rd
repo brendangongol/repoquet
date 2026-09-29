@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{ParquetBackEndCreate}
 \alias{ParquetBackEndCreate}
-\title{Orchestrate repository schema first, then write Parquet}
+\title{Orchestrates the repository schema first, then writes Parquet}
 \usage{
 ParquetBackEndCreate(
   MDT,
@@ -63,229 +63,283 @@ ParquetBackEndCreate(
 )
 }
 \arguments{
-\item{MDT}{Data frame. The full Master Database Table (every database);
-rows are filtered to each entry of \code{DBLoad} in turn.}
+\item{MDT}{Data frame. The full master database table, every
+database. A row is filtered to each entry of \code{DBLoad} in
+turn.}
 
-\item{DBLoad}{Character vector. Databases (values of \code{MDT$Database})
-to build/load in this run, in order.}
+\item{DBLoad}{Character vector. A database, a value of
+\code{MDT$Database}, to build or load in this run, in order.}
 
-\item{MasterDBPath}{Character. Root directory of the source SAV/CSV/etc.
-files.}
+\item{MasterDBPath}{Character scalar. Root directory of the
+source SAV, CSV, or other file.}
 
-\item{completed_checkpoint}{Character vector of repository keys already
-completed (see \code{\link{load_checkpoint}}); advanced and saved to
-\code{CheckpointPath} as loading proceeds.}
+\item{completed_checkpoint}{Character vector of a repository key
+already completed. See \code{\link{load_checkpoint}}. Advanced
+and saved to \code{CheckpointPath} as loading proceeds.}
 
-\item{CheckpointPath}{Character. Checkpoint file re-saved atomically after
-every completed source file (see \code{\link{save_checkpoint}}).}
+\item{CheckpointPath}{Character scalar. Checkpoint file resaved
+atomically after every completed source file. See
+\code{\link{save_checkpoint}}.}
 
-\item{ParquetBasePath}{Character. Root Parquet output directory.}
+\item{ParquetBasePath}{Character scalar. Root Parquet output
+directory.}
 
-\item{SAV_ROW_THRESHOLD}{Integer. Row-count threshold used by
-\code{PartitionBy = "NRows"} (see \code{\link{read_fn}}).}
+\item{SAV_ROW_THRESHOLD}{Integer. Row count threshold used by
+\code{PartitionBy = "NRows"}. See \code{\link{read_fn}}.}
 
-\item{PartitionBy}{Character. One of \code{"NRows"}, \code{"RAMEstimate"},
-or \code{"FAIL"} (matched via \code{match.arg}); the chunking-decision
-strategy used for every file this run (see \code{\link{read_fn}}).}
+\item{PartitionBy}{Character scalar. Accepts one of three
+values, matched through \code{match.arg}: \code{"NRows"},
+\code{"RAMEstimate"}, or \code{"FAIL"}, the chunking decision
+strategy used for every file this run. See \code{\link{read_fn}}.}
 
-\item{RAMThreshold}{Numeric. GB threshold used by
-\code{PartitionBy = "RAMEstimate"} (see \code{\link{read_fn}}).}
+\item{RAMThreshold}{Numeric scalar. Gigabyte threshold used by
+\code{PartitionBy = "RAMEstimate"}. See \code{\link{read_fn}}.}
 
-\item{SAV_CHUNK_SIZE}{Integer. Requested rows per chunk for chunked SAV
-reads.}
+\item{SAV_CHUNK_SIZE}{Integer. Requested rows per chunk for a
+chunked SAV read.}
 
-\item{DelimitedChunkMaxMB}{Numeric. Per-chunk memory cap (MB) for chunked
-delimited reads; must be a positive number (validated at entry).}
+\item{DelimitedChunkMaxMB}{Numeric scalar. Per chunk memory cap,
+in megabytes, for a chunked delimited read. Must be a positive
+number, validated at entry.}
 
-\item{DelimitedPartitionMaxMB}{Numeric or NULL. Cap (MB) on a single
-source-defined partition's estimated in-memory footprint before a
-route-eligible delimited file is read one partition at a time instead of
-in fixed-size chunks. When NULL (default), it is half of a conservative
-source-route cap: the smaller of four times \code{DelimitedChunkMaxMB}
-and one quarter of \code{RAMThreshold * 1024}. Supply an explicit value
-only after confirming that the resulting one-shot read fits this machine.}
+\item{DelimitedPartitionMaxMB}{Numeric scalar. Cap, in megabytes,
+on a single source defined partition's estimated in memory
+footprint before a route eligible delimited file is read one
+partition at a time instead of in fixed size chunks. When
+\code{NULL}, the default, it is half of a conservative source
+route cap: the smaller of four times \code{DelimitedChunkMaxMB}
+and one quarter of \code{RAMThreshold * 1024}. Supply an
+explicit value only after confirming that the resulting one
+shot read fits this machine.}
 
-\item{FailProbeMode}{Character. One of \code{"subprocess"} (default),
-\code{"in_process"}, or \code{"disabled"}; see \code{\link{read_fn}}.}
+\item{FailProbeMode}{Character scalar. Accepts one of three
+values: \code{"subprocess"}, \code{"in_process"}, or
+\code{"disabled"}. See \code{\link{read_fn}}. Defaults to
+\code{"subprocess"}.}
 
-\item{FailProbeTimeoutSeconds}{Numeric. Timeout for the isolated subprocess
-under \code{FailProbeMode = "subprocess"}.}
+\item{FailProbeTimeoutSeconds}{Numeric scalar. Timeout for the
+isolated subprocess under \code{FailProbeMode = "subprocess"}.}
 
-\item{FailProbeSourcePath}{Character (optional). Path to the repoquet
-source the probe subprocess should \code{source()}; see \code{\link{read_fn}}.}
+\item{FailProbeSourcePath}{Character scalar. Path to the repoquet
+source the probe subprocess should \code{source()}. See
+\code{\link{read_fn}}. Defaults to \code{NULL}.}
 
-\item{LogPath}{Character. Log file for this run. Starts a run-scoped
-logging context via \code{\link{begin_repository_run}} (restored on
-exit), so \code{\link{log_msg}} calls throughout the run -- including in
-\code{\link{generic_db_loader}} and \code{\link{read_fn}} -- write here
-by default without needing \code{log_path} passed explicitly.}
+\item{LogPath}{Character scalar. Log file for this run. Starts a
+run scoped logging context through
+\code{\link{begin_repository_run}}, restored on exit, so that a
+\code{\link{log_msg}} call throughout the run, including in
+\code{\link{generic_db_loader}} and \code{\link{read_fn}},
+writes here by default without needing \code{log_path} passed
+explicitly.}
 
-\item{n_workers}{Integer. Parallel workers for schema-inference sampling
-scans (see \code{\link{BuildRepositorySchema}}).}
+\item{n_workers}{Integer. Parallel workers for a schema
+inference sampling scan. See \code{\link{BuildRepositorySchema}}.}
 
-\item{PrintStatus}{Logical. If \code{TRUE}, prints extra progress messages
-to the console in addition to the log.}
+\item{PrintStatus}{Logical. Accepts \code{TRUE}, which prints an
+extra progress message to the console in addition to the log.
+Accepts \code{FALSE}, which does not.}
 
-\item{TerminalHivePartition}{Logical. If \code{TRUE}, chunk files are
-written to \code{batch_id=<stem>_<NNNNN>/data.parquet} subdirectories
-instead of flat files; see \code{\link{read_fn}}.}
+\item{TerminalHivePartition}{Logical. Accepts \code{TRUE}, which
+writes a chunk file to a
+\code{batch_id=<stem>_<NNNNN>/data.parquet} subdirectory instead
+of a flat file. See \code{\link{read_fn}}. Accepts \code{FALSE},
+which does not.}
 
-\item{MaxFileStemTruncate}{Logical. If \code{TRUE} (default here), shortens
-generated output filenames for filesystems with path-length limits; see
-\code{\link{read_fn}}.}
+\item{MaxFileStemTruncate}{Logical. Accepts \code{TRUE}, the
+default here, which shortens a generated output filename for a
+file system with a path length limit. See \code{\link{read_fn}}.
+Accepts \code{FALSE}, which does not.}
 
-\item{chunk_size_decrement}{Integer (optional). Passed through to the
-chunked readers; see \code{\link{read_fn}}.}
-
-\item{min_chunk_size}{Integer (optional). Passed through to the chunked
-readers; see \code{\link{read_fn}}.}
-
-\item{SchemaRegistryPath}{Character (optional). Schema registry path
-(created if missing); see \code{\link{load_schema_registry}}.}
-
-\item{TableSchemaPath}{Character (optional). Schema catalog path, read (if
-\code{UseSchemaCatalog = TRUE}) and re-written at the end of the run.
-Defaults to \code{file.path(dirname(ParquetBasePath), "Schema", "TableSchemas.xlsx")}
-when \code{NULL}.}
-
-\item{ManifestPath}{Character (optional). DuckDB manifest path; defaults
-via \code{manifest_path_default} when \code{NULL}.}
-
-\item{StrictPreflight}{Logical. \code{strict} argument forwarded to
-\code{\link{ValidateMDTPreflight}} when \code{RunPreflight = TRUE}.}
-
-\item{StrictSchemaValidation}{Logical. \code{strict} argument forwarded to
-\code{ValidateSchemaMergeKeys}.}
-
-\item{UseSchemaCatalog}{Logical. If \code{TRUE} (default), requires a
-finalized catalog at \code{TableSchemaPath} (errors if absent) and uses
-its \code{col_classes} as \code{known_col_classes} for each database's
-\code{\link{BuildRepositorySchema}} call, so already-reviewed column
-types are reused instead of re-inferred.}
-
-\item{LockRepository}{Logical. If \code{TRUE} (default), acquires a
-repository lock for the duration of the run; see
-\code{\link{acquire_repository_lock}}.}
-
-\item{LockPath}{Character (optional). Lock file location; defaults via
-\code{repository_lock_path_default} when \code{NULL}.}
-
-\item{LockStaleMinutes}{Numeric. Minutes after which an existing lock is
-considered abandoned and may be taken over.}
-
-\item{RunPreflight}{Logical. If \code{TRUE} (default), runs
-\code{\link{ValidateMDTPreflight}} before anything else; if \code{FALSE},
-the caller is responsible for having already validated \code{MDT}.}
-
-\item{SnapshotState}{Logical. If \code{TRUE} (default), snapshots
-checkpoint/manifest/schema state to \code{StateBackupDir} before loading;
-see \code{\link{snapshot_repository_state}}.}
-
-\item{StateBackupDir}{Character (optional). Snapshot destination; defaults
-to \code{file.path(dirname(ParquetBasePath), "StateBackups")}.}
-
-\item{SnapshotKeep}{Integer. Number of state snapshot generations retained.}
-
-\item{StopOnDatabaseError}{Logical. If \code{TRUE} (default), raises an
-error at the end of the run if any database's schema-inference or
-loading phase failed (after the run summary and metadata export have
-already been written).}
-
-\item{StopOnFileError}{Logical. If \code{TRUE} (default), raises an error
-at the end of the run if any individual source file failed.}
-
-\item{MaxCoerceNAPct}{Numeric (optional). Passed through to
-\code{\link{read_fn}}/\code{\link{align_columns}}; fails a file when type
-coercion turns more than this percentage of a column's values into
-\code{NA}.}
-
-\item{SourceFingerprintMode}{Character. One of \code{"metadata"} (default),
-\code{"sha256"}, or \code{"none"}; controls source-file change detection
-for checkpoints (see \code{repository_checkpoint_key}). Legacy
-checkpoint entries are upgraded to this fingerprint mode at the start of
-the run.}
-
-\item{AutoCleanup}{Logical. If TRUE (default), temporary Parquet files are
-cleaned up at the end of write operations. This prevents accumulation of
-orphaned `.tmp_*.parquet` files that may be left behind due to I/O delays
-or file locking.}
-
-\item{CleanupAfterPhase}{Character. Controls when cleanup occurs:
-\describe{
-  \item{"all"}{(default) Clean only after all databases are written}
-  \item{"database"}{Clean after each database batch completes}
-  \item{"none"}{Disable auto-cleanup; user must call cleanup manually}
-}}
-
-\item{MaxTempAgeHours}{Integer. Minimum age (in hours) before a temporary
-file is considered safe to remove. Default 1 (files < 1 hour old are
-preserved to avoid interfering with active writes).}
-
-\item{ReturnRunResult}{Logical. If \code{TRUE}, the full run result object
-is returned instead of just the checkpoint (see Value).}
-
-\item{RunId}{Character (optional). Run identifier tagging log lines and
-manifest rows; auto-generated (see \code{resolve_run_id}) when
+\item{chunk_size_decrement}{Integer. Passed through to the
+chunked reader. See \code{\link{read_fn}}. Defaults to
 \code{NULL}.}
 
-\item{RunSummaryPath}{Character (optional). Destination for the JSON/RDS
-run summary (see \code{write_repository_run_summary}). Defaults to
+\item{min_chunk_size}{Integer. Passed through to the chunked
+reader. See \code{\link{read_fn}}. Defaults to \code{NULL}.}
+
+\item{SchemaRegistryPath}{Character scalar. Schema registry path,
+created when missing. See \code{\link{load_schema_registry}}.
+Defaults to \code{NULL}.}
+
+\item{TableSchemaPath}{Character scalar. Schema catalog path,
+read when \code{UseSchemaCatalog} is \code{TRUE} and rewritten
+at the end of the run. Defaults to
+\code{file.path(dirname(ParquetBasePath), "Schema", "TableSchemas.xlsx")}
+when \code{NULL}.}
+
+\item{ManifestPath}{Character scalar. DuckDB manifest path,
+defaulting through \code{manifest_path_default} when
+\code{NULL}.}
+
+\item{StrictPreflight}{Logical. The \code{strict} argument
+forwarded to \code{\link{ValidateMDTPreflight}} when
+\code{RunPreflight} is \code{TRUE}.}
+
+\item{StrictSchemaValidation}{Logical. The \code{strict} argument
+forwarded to \code{ValidateSchemaMergeKeys}.}
+
+\item{UseSchemaCatalog}{Logical. Accepts \code{TRUE}, the
+default, which requires a finalized catalog at
+\code{TableSchemaPath}, erroring when absent, and uses its
+\code{col_classes} as \code{known_col_classes} for each
+database's \code{\link{BuildRepositorySchema}} call, so that an
+already reviewed column type is reused instead of re inferred.
+Accepts \code{FALSE}, which does not.}
+
+\item{LockRepository}{Logical. Accepts \code{TRUE}, the default,
+which acquires a repository lock for the duration of the run.
+See \code{\link{acquire_repository_lock}}. Accepts \code{FALSE},
+which does not.}
+
+\item{LockPath}{Character scalar. Lock file location, defaulting
+through \code{repository_lock_path_default} when \code{NULL}.}
+
+\item{LockStaleMinutes}{Numeric scalar. Minutes after which an
+existing lock is considered abandoned and may be taken over.}
+
+\item{RunPreflight}{Logical. Accepts \code{TRUE}, the default,
+which runs \code{\link{ValidateMDTPreflight}} before anything
+else. Accepts \code{FALSE}, which relies on the caller having
+already validated \code{MDT}.}
+
+\item{SnapshotState}{Logical. Accepts \code{TRUE}, the default,
+which snapshots checkpoint, manifest, and schema state to
+\code{StateBackupDir} before loading. See
+\code{\link{snapshot_repository_state}}. Accepts \code{FALSE},
+which does not.}
+
+\item{StateBackupDir}{Character scalar. Snapshot destination,
+defaulting to
+\code{file.path(dirname(ParquetBasePath), "StateBackups")}.}
+
+\item{SnapshotKeep}{Integer. Number of state snapshot generations
+retained.}
+
+\item{StopOnDatabaseError}{Logical. Accepts \code{TRUE}, the
+default, which raises an error at the end of the run if any
+database's schema inference or loading phase failed, after the
+run summary and metadata export have already been written.
+Accepts \code{FALSE}, which does not.}
+
+\item{StopOnFileError}{Logical. Accepts \code{TRUE}, the default,
+which raises an error at the end of the run if any individual
+source file failed. Accepts \code{FALSE}, which does not.}
+
+\item{MaxCoerceNAPct}{Numeric scalar. Passed through to
+\code{\link{read_fn}} and \code{\link{align_columns}}. Fails a
+file when type coercion turns more than this percentage of a
+column's values into \code{NA}. Defaults to \code{NULL}.}
+
+\item{SourceFingerprintMode}{Character scalar. Accepts one of
+three values: \code{"metadata"}, \code{"sha256"}, or
+\code{"none"}, controlling source file change detection for a
+checkpoint. See \code{repository_checkpoint_key}. A legacy
+checkpoint entry is upgraded to this fingerprint mode at the
+start of the run. Defaults to \code{"metadata"}.}
+
+\item{AutoCleanup}{Logical. Accepts \code{TRUE}, the default,
+which cleans up a temporary Parquet file at the end of a write
+operation, preventing accumulation of an orphaned
+\verb{.tmp_*.parquet} file that may be left behind due to an
+input or output delay or file locking. Accepts \code{FALSE},
+which does not.}
+
+\item{CleanupAfterPhase}{Character scalar. Controls when cleanup
+occurs. Accepts \code{"all"}, the default, which cleans only
+after every database is written. Accepts \code{"database"},
+which cleans after each database batch completes. Accepts
+\code{"none"}, which disables automatic cleanup, leaving the
+user to call cleanup manually.}
+
+\item{MaxTempAgeHours}{Integer. Minimum age, in hours, before a
+temporary file is considered safe to remove. Defaults to
+\code{1}, so that a file less than one hour old is preserved to
+avoid interfering with an active write.}
+
+\item{ReturnRunResult}{Logical. Accepts \code{TRUE}, which
+returns the full run result object instead of just the
+checkpoint. See Value. Accepts \code{FALSE}, which does not.}
+
+\item{RunId}{Character scalar. Run identifier tagging a log line
+and manifest row, automatically generated, see
+\code{resolve_run_id}, when \code{NULL}.}
+
+\item{RunSummaryPath}{Character scalar. Destination for the JSON
+or RDS run summary. See \code{write_repository_run_summary}.
+Defaults to
 \code{file.path(dirname(ManifestPath), "RunSummaries", paste0("run_", RunId, ".json"))}.}
 
-\item{ExportMetadataWorkbook}{Logical or NULL. When NULL (default), creates
-an accessible Excel snapshot for DuckDB manifests and skips legacy CSV
-manifests. Set TRUE or FALSE explicitly to override this behavior.}
+\item{ExportMetadataWorkbook}{Logical or \code{NULL}. When
+\code{NULL}, the default, creates an accessible Excel snapshot
+for a DuckDB manifest and skips a legacy CSV manifest. Set to
+\code{TRUE} or \code{FALSE} explicitly to override this
+behavior.}
 
-\item{MetadataWorkbookPath}{Destination for the generated metadata workbook.
-Defaults to \code{RepositoryMetadata.xlsx} beside the manifest.}
+\item{MetadataWorkbookPath}{Character scalar. Destination for the
+generated metadata workbook. Defaults to
+\code{RepositoryMetadata.xlsx} beside the manifest.}
 
-\item{MetadataWorkbookMaxRowsPerSheet}{Maximum raw manifest rows written to
-each numbered detail sheet.}
+\item{MetadataWorkbookMaxRowsPerSheet}{Integer. Maximum raw
+manifest row written to each numbered detail sheet.}
 
-\item{DownloadCachePath}{Managed local cache for rows with \code{SourceURI}.}
+\item{DownloadCachePath}{Character scalar. Managed local cache
+for a row with \code{SourceURI}.}
 
-\item{MaterializeRemote}{Materialize unresolved remote rows before loading.}
+\item{MaterializeRemote}{Logical. Accepts \code{TRUE}, which
+materializes an unresolved remote row before loading. Accepts
+\code{FALSE}, which does not.}
 
-\item{RemoteOffline}{Disable network access and require cached remote files.}
+\item{RemoteOffline}{Logical. Accepts \code{TRUE}, which disables
+network access and requires a cached remote file. Accepts
+\code{FALSE}, which does not.}
 
-\item{RemoteDefaultDownloadPolicy}{Default policy for blank MDT policy cells.}
+\item{RemoteDefaultDownloadPolicy}{Character scalar. Default
+policy for a blank MDT policy cell.}
 
-\item{RemoteDownloadMethod}{Method passed to \code{utils::download.file()}.}
+\item{RemoteDownloadMethod}{Character scalar. Method passed to
+\code{utils::download.file()}.}
 
-\item{RemoteDownloadTimeout}{Minimum remote download timeout in seconds.}
+\item{RemoteDownloadTimeout}{Numeric scalar. Minimum remote
+download timeout, in seconds.}
 
-\item{RemoteDownloadFunction}{Optional caller-managed download function.}
+\item{RemoteDownloadFunction}{A function. An optional caller
+managed download function.}
 }
 \value{
-If \code{ReturnRunResult = TRUE}, an object of class
-  \code{"RepositoryRunResult"}: a list with \code{run_id}, \code{status}
-  (\code{"success"} or \code{"partial_failure"}), \code{started_at},
-  \code{finished_at}, \code{checkpoint} (updated character vector),
-  \code{completed} (data.table of files completed this run),
-  \code{file_failures}, \code{database_failures}, \code{ManifestPath},
-  \code{TableSchemaPath}, \code{CheckpointPath}, \code{LogPath},
-  \code{MetadataWorkbookPath}, and \code{MetadataWorkbookExportError}.
-  Otherwise (the default), just the updated checkpoint character vector.
-  When \code{StopOnDatabaseError} or \code{StopOnFileError} is \code{TRUE}
-  (the default for both) and a corresponding failure occurred, the
-  function \code{stop()}s after the run summary and metadata export have
-  already been written -- inspect \code{RunSummaryPath} or wrap the call in
-  \code{tryCatch()} to recover the partial result.
+If \code{ReturnRunResult} is \code{TRUE}, an object of
+  class \code{"RepositoryRunResult"}: a list with \code{run_id},
+  \code{status}, either \code{"success"} or
+  \code{"partial_failure"}, \code{started_at}, \code{finished_at},
+  \code{checkpoint}, the updated character vector,
+  \code{completed}, a data.table of a file completed this run,
+  \code{file_failures}, \code{database_failures},
+  \code{ManifestPath}, \code{TableSchemaPath}, \code{CheckpointPath},
+  \code{LogPath}, \code{MetadataWorkbookPath}, and
+  \code{MetadataWorkbookExportError}. Otherwise, the default, just
+  the updated checkpoint character vector. When
+  \code{StopOnDatabaseError} or \code{StopOnFileError} is
+  \code{TRUE}, the default for both, and a corresponding failure
+  occurred, the function stops after the run summary and metadata
+  export have already been written. Inspect \code{RunSummaryPath}
+  or wrap the call in \code{tryCatch()} to recover the partial
+  result.
 }
 \description{
-The top-level entry point of the package: for each database in
-\code{DBLoad}, builds/refreshes its schema (see
-\code{\link{BuildRepositorySchema}}) and then loads its pending source
-files to Hive-partitioned Parquet (see \code{\link{generic_db_loader}} and
-\code{\link{read_fn}}), checkpointing after every file so an interrupted
-run resumes cleanly. Along the way it validates the MDT (see
-\code{\link{ValidateMDTPreflight}}), resolves any remote
-(\code{SourceURI}) rows, snapshots checkpoint/manifest/schema state,
-upgrades legacy checkpoint entries to the current
-\code{SourceFingerprintMode}, disables \code{data.table} memory-mapped
-reads for the duration of the run (a known crash vector on Windows network
-drives), writes a combined schema catalog and a coercion report, exports an
-Excel metadata snapshot, and cleans up orphaned temporary Parquet files.
+The top level entry point of the package: for each database in
+\code{DBLoad}, builds or refreshes its schema, see
+\code{\link{BuildRepositorySchema}}, and then loads its pending
+source file to hive partitioned Parquet, see
+\code{\link{generic_db_loader}} and \code{\link{read_fn}},
+checkpointing after every file so that an interrupted run resumes
+cleanly. Along the way it validates the MDT, see
+\code{\link{ValidateMDTPreflight}}, resolves a remote,
+\code{SourceURI}, row, snapshots checkpoint, manifest, and schema
+state, upgrades a legacy checkpoint entry to the current
+\code{SourceFingerprintMode}, disables \code{data.table} memory
+mapped reads for the duration of the run, a known crash vector on
+a Windows network drive, writes a combined schema catalog and a
+coercion report, exports an Excel metadata snapshot, and cleans up
+an orphaned temporary Parquet file.
 }
 \examples{
 \dontrun{

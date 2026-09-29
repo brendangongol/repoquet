@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{.resolve_source_encoding}
 \alias{.resolve_source_encoding}
-\title{Resolve a delimited source file's character encoding without modifying it}
+\title{Resolves a delimited source file's character encoding without modifying it}
 \usage{
 .resolve_source_encoding(
   path,
@@ -11,23 +11,26 @@
 )
 }
 \arguments{
-\item{path}{Character. Path to the source file.}
+\item{path}{Character scalar. Path to the source file.}
 
-\item{declared_encoding}{Character (optional). An explicit encoding name
-(e.g. from \code{ReaderOptions}); if supplied and non-blank, it is
-canonicalized and returned without sampling the file.}
+\item{declared_encoding}{Character scalar. An explicit encoding name,
+for example from \code{ReaderOptions}. Accepts a non blank value,
+which is canonicalized and returned without sampling the file. Accepts
+\code{NULL}, which detects the encoding from the file. Defaults to
+\code{NULL}.}
 
-\item{sample_bytes}{Integer. Maximum number of raw bytes to read for BOM
-and encoding detection. Defaults to 4 MiB.}
+\item{sample_bytes}{Integer. Maximum number of raw bytes to read for
+byte order mark and encoding detection. Defaults to 4 MiB.}
 }
 \value{
-A list with the detected/declared encoding name and detection
+A list with the detected or declared encoding name and detection
   metadata, used internally by the delimited reader family.
 }
 \description{
-Reads a bounded raw-byte sample from a source opened read-only. An explicit
-encoding wins; otherwise a BOM, strict UTF-8 validation, and ICU detection
-are used in that order. The returned encoding is used to convert parsed text
-in memory, while the source file remains byte-for-byte unchanged.
+Reads a bounded raw byte sample from a source opened only for reading.
+An explicit encoding, when supplied, is used as is. Otherwise a byte
+order mark, strict UTF8 validation, and ICU detection are tried in that
+order. The returned encoding is used to convert parsed text in memory,
+while the source file remains byte for byte unchanged.
 }
 \keyword{internal}

@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{coercion_report_write}
 \alias{coercion_report_write}
-\title{Write the aggregated coercion-damage report for the current run}
+\title{Writes the aggregated coercion damage report for the current run}
 \usage{
 coercion_report_write(path)
 }
@@ -10,18 +10,17 @@ coercion_report_write(path)
 \item{path}{Character scalar. Output CSV path for the aggregated report.}
 }
 \value{
-If no coercion events were recorded, \code{invisible(NULL)} and
-  nothing is written. Otherwise, invisibly, \code{path} -- the CSV file
-  is written and a summary is logged.
+When no coercion event was recorded, \code{invisible(NULL)}, and
+  nothing is written. Otherwise, invisibly, \code{path}, after the CSV
+  file is written and a summary is logged.
 }
 \description{
-Aggregates every coercion event recorded via the internal collector
-(populated whenever a type coercion introduces \code{NA} values) into one
-row per \code{Column}/\code{FromClass}/\code{ToClass} combination, with
-total destroyed/present counts and percent destroyed, sorted by
-\code{NDestroyed} descending. Writes the result to \code{path} as CSV.
-Call \code{\link{coercion_report_reset}} at the start of a run to ensure
-the report reflects only that run.
+Aggregates every recorded coercion event, each one a type coercion that
+introduced \code{NA} values, into one row per combination of
+\code{Column}, \code{FromClass}, and \code{ToClass}, with the total
+number of values destroyed and present and the percent destroyed,
+sorted in descending order of \code{NDestroyed}, and writes the result
+to \code{path} as a CSV file.
 }
 \examples{
 coercion_report_reset()

@@ -41,142 +41,171 @@ generic_db_loader(
 )
 }
 \arguments{
-\item{files}{Character vector. Currently unused by the function body --
-the file list actually iterated is \code{MDTSelect$Path} (one row per
-source file). Retained for interface stability; do not rely on it.}
+\item{files}{Character vector. Currently unused by the function
+body. The file list actually iterated is
+\code{MDTSelect$Path}, one row per source file. Retained for
+interface stability. Do not rely on it.}
 
-\item{base_path}{Character. Root directory of the source files, combined
-with each row's \code{MDBDir}/\code{Path} (or \code{ResolvedSourcePath})
-to build the full path. Passed to \code{\link{read_fn}} as
-\code{MasterDBPath}.}
+\item{base_path}{Character scalar. Root directory of the source
+files, combined with each row's \code{MDBDir} and \code{Path},
+or \code{ResolvedSourcePath}, to build the full path. Passed to
+\code{\link{read_fn}} as \code{MasterDBPath}.}
 
-\item{db_prefix}{Character scalar. Database name recorded on manifest rows,
-failure/completion rows, and passed to \code{\link{read_fn}} as
-\code{Database}.}
+\item{db_prefix}{Character scalar. Database name recorded on a
+manifest row and a failure or completion row, and passed to
+\code{\link{read_fn}} as \code{Database}.}
 
-\item{completed_checkpoint}{Character vector of repository keys (see
-\code{repository_checkpoint_key}) already completed; matching rows
-of \code{MDTSelect} are skipped.}
+\item{completed_checkpoint}{Character vector of a repository key,
+see \code{repository_checkpoint_key}, already completed. A
+matching row of \code{MDTSelect} is skipped.}
 
-\item{CheckpointPath}{Character. File the checkpoint is atomically
-re-saved to (see \code{\link{save_checkpoint}}) immediately after each
-row completes, so progress survives an interrupted run.}
+\item{CheckpointPath}{Character scalar. File the checkpoint is
+atomically resaved to, see \code{\link{save_checkpoint}},
+immediately after each row completes, so that progress survives
+an interrupted run.}
 
-\item{ParquetBasePath}{Character. Root Parquet output directory; each
-table writes under \code{file.path(ParquetBasePath, table_name)}.}
+\item{ParquetBasePath}{Character scalar. Root Parquet output
+directory. Each table writes under
+\code{file.path(ParquetBasePath, table_name)}.}
 
-\item{MDTSelect}{Data frame. One database's rows of the Master Database
-Table -- the actual per-file work list for this call.}
+\item{MDTSelect}{Data frame. One database's rows of the master
+database table, the actual per file work list for this call.}
 
-\item{comprehensive}{Named list keyed by \code{TableName}: the union of
-column names for that table (as from
-\code{BuildRepositorySchema()$comprehensive}), passed to
-\code{\link{read_fn}} as \code{all_cols} and used to align each file's
-columns before writing.}
+\item{comprehensive}{A named list keyed by \code{TableName}: the
+union of column names for that table, as from
+\code{BuildRepositorySchema()$comprehensive}, passed to
+\code{\link{read_fn}} as \code{all_cols} and used to align each
+file's columns before writing.}
 
-\item{col_classes}{Named list keyed by \code{TableName} of
-column-to-canonical-type maps (as from
-\code{BuildRepositorySchema()$col_classes}), or a single flat map applied
-to every table. \code{NULL} lets each file's types be inferred.}
+\item{col_classes}{A named list keyed by \code{TableName} of a
+column to canonical type map, as from
+\code{BuildRepositorySchema()$col_classes}, or a single flat
+map applied to every table. \code{NULL} lets each file's type
+be inferred.}
 
-\item{reader}{Character scalar. Currently unused by the function body --
-each row's reader is resolved from its own \code{MDTSelect$FileType}
-instead. Retained for interface stability; do not rely on it.}
+\item{reader}{Character scalar. Currently unused by the function
+body. Each row's reader is resolved from its own
+\code{MDTSelect$FileType} instead. Retained for interface
+stability. Do not rely on it.}
 
-\item{PartitionBy}{Character. One of \code{"NRows"}, \code{"RAMEstimate"},
-or \code{"FAIL"}; passed through to \code{\link{read_fn}}.}
+\item{PartitionBy}{Character scalar. Accepts one of three values:
+\code{"NRows"}, \code{"RAMEstimate"}, or \code{"FAIL"}, passed
+through to \code{\link{read_fn}}.}
 
-\item{RAMThreshold}{Numeric. Passed through to \code{\link{read_fn}}.}
-
-\item{SAV_ROW_THRESHOLD}{Integer. Passed through to \code{\link{read_fn}}.}
-
-\item{LogPath}{Character. Currently unused by the function body -- log
-lines are written via \code{\link{log_msg}} with no explicit
-\code{log_path}, so they follow the ambient run-scoped log path set by
-\code{\link{begin_repository_run}} (or \code{resolve_log_path}'s
-default) rather than this argument.}
-
-\item{SAV_CHUNK_SIZE}{Integer. Passed through to \code{\link{read_fn}}.}
-
-\item{DelimitedChunkMaxMB}{Numeric. Passed through to \code{\link{read_fn}}.}
-
-\item{DelimitedPartitionMaxMB}{Numeric (optional). Passed through to
+\item{RAMThreshold}{Numeric scalar. Passed through to
 \code{\link{read_fn}}.}
 
-\item{FailProbeMode}{Character. One of \code{"subprocess"},
-\code{"in_process"}, or \code{"disabled"}; passed through to
+\item{SAV_ROW_THRESHOLD}{Integer. Passed through to
 \code{\link{read_fn}}.}
 
-\item{FailProbeTimeoutSeconds}{Numeric. Passed through to \code{\link{read_fn}}.}
+\item{LogPath}{Character scalar. Currently unused by the function
+body. A log line is written through \code{\link{log_msg}} with
+no explicit \code{log_path}, so it follows the ambient run
+scoped log path set by \code{\link{begin_repository_run}}, or
+\code{resolve_log_path}'s default, rather than this argument.}
 
-\item{FailProbeSourcePath}{Character (optional). Passed through to
+\item{SAV_CHUNK_SIZE}{Integer. Passed through to
 \code{\link{read_fn}}.}
 
-\item{PrintStatus}{Logical. If \code{TRUE}, prints progress to the console
-in addition to the log.}
-
-\item{ManifestPath}{Character (optional). DuckDB manifest path; each
-successful (or verified-empty/partial) file is recorded via
-\code{\link{update_parquet_manifest}}. \code{NULL} skips manifest writes.}
-
-\item{SchemaRegistryPath}{Character (optional). Registry path loaded via
-\code{\link{load_schema_registry}} when \code{schema_registry} is
-\code{NULL} and \code{registry_resolved} is \code{FALSE}.}
-
-\item{schema_registry}{data.table (optional). Pre-loaded registry (see
-\code{\link{build_default_schema_registry}}), applied per table only
-when \code{registry_resolved} is \code{FALSE}.}
-
-\item{TerminalHivePartition}{Logical. Passed through to \code{\link{read_fn}}.}
-
-\item{MaxFileStemTruncate}{Logical. Passed through to \code{\link{read_fn}}
-and used when deriving each file's output stem.}
-
-\item{chunk_size_decrement}{Integer (optional). Passed through to
+\item{DelimitedChunkMaxMB}{Numeric scalar. Passed through to
 \code{\link{read_fn}}.}
 
-\item{min_chunk_size}{Integer (optional). Passed through to \code{\link{read_fn}}.}
+\item{DelimitedPartitionMaxMB}{Numeric scalar. Passed through to
+\code{\link{read_fn}}. Defaults to \code{NULL}.}
 
-\item{registry_resolved}{Logical. If \code{TRUE} (as set by
-\code{\link{ParquetBackEndCreate}}), \code{col_classes} is assumed to
-already have the schema registry applied and \code{schema_registry}/
-\code{SchemaRegistryPath} are not consulted again per file.}
+\item{FailProbeMode}{Character scalar. Accepts one of three
+values: \code{"subprocess"}, \code{"in_process"}, or
+\code{"disabled"}, passed through to \code{\link{read_fn}}.}
 
-\item{RepositoryLock}{Repository lock handle (optional), from
-\code{\link{acquire_repository_lock}}; touched periodically and passed
-through to \code{\link{read_fn}} during long reads.}
+\item{FailProbeTimeoutSeconds}{Numeric scalar. Passed through to
+\code{\link{read_fn}}.}
 
-\item{MaxCoerceNAPct}{Numeric (optional). Passed through to
-\code{\link{read_fn}}/\code{\link{align_columns}}; fails a file when type
-coercion turns more than this percentage of a column's values into
-\code{NA}.}
+\item{FailProbeSourcePath}{Character scalar. Passed through to
+\code{\link{read_fn}}. Defaults to \code{NULL}.}
 
-\item{SourceFingerprintMode}{Character. One of \code{"metadata"},
-\code{"sha256"}, or \code{"none"}; controls how \code{repository_checkpoint_key}
-and \code{\link{source_fingerprint}} detect a changed source file.}
+\item{PrintStatus}{Logical. Accepts \code{TRUE}, which prints
+progress to the console in addition to the log. Accepts
+\code{FALSE}, which does not.}
 
-\item{RunId}{Character (optional). Run identifier recorded on manifest rows.}
+\item{ManifestPath}{Character scalar. DuckDB manifest path. Each
+successful, or verified empty or partial, file is recorded
+through \code{\link{update_parquet_manifest}}. \code{NULL}
+skips a manifest write.}
+
+\item{SchemaRegistryPath}{Character scalar. Registry path loaded
+through \code{\link{load_schema_registry}} when
+\code{schema_registry} is \code{NULL} and
+\code{registry_resolved} is \code{FALSE}. Defaults to
+\code{NULL}.}
+
+\item{schema_registry}{A data.table. A registry already loaded.
+See \code{\link{build_default_schema_registry}}. Applied per
+table only when \code{registry_resolved} is \code{FALSE}.
+Defaults to \code{NULL}.}
+
+\item{TerminalHivePartition}{Logical. Passed through to
+\code{\link{read_fn}}.}
+
+\item{MaxFileStemTruncate}{Logical. Passed through to
+\code{\link{read_fn}} and used when deriving each file's output
+stem.}
+
+\item{chunk_size_decrement}{Integer. Passed through to
+\code{\link{read_fn}}. Defaults to \code{NULL}.}
+
+\item{min_chunk_size}{Integer. Passed through to
+\code{\link{read_fn}}. Defaults to \code{NULL}.}
+
+\item{registry_resolved}{Logical. Accepts \code{TRUE}, as set by
+\code{\link{ParquetBackEndCreate}}, which assumes
+\code{col_classes} already has the schema registry applied, so
+that \code{schema_registry} and \code{SchemaRegistryPath} are
+not consulted again per file. Accepts \code{FALSE}, which
+consults them per file.}
+
+\item{RepositoryLock}{A repository lock handle, from
+\code{\link{acquire_repository_lock}}, touched periodically and
+passed through to \code{\link{read_fn}} during a long read.
+Defaults to \code{NULL}.}
+
+\item{MaxCoerceNAPct}{Numeric scalar. Passed through to
+\code{\link{read_fn}} and \code{\link{align_columns}}. Fails a
+file when type coercion turns more than this percentage of a
+column's values into \code{NA}. Defaults to \code{NULL}.}
+
+\item{SourceFingerprintMode}{Character scalar. Accepts one of
+three values: \code{"metadata"}, \code{"sha256"}, or
+\code{"none"}, controlling how \code{repository_checkpoint_key}
+and \code{\link{source_fingerprint}} detect a changed source
+file.}
+
+\item{RunId}{Character scalar. Run identifier recorded on a
+manifest row. Defaults to \code{NULL}.}
 }
 \value{
-An object of class \code{"RepositoryLoadResult"}: a list with
-  \code{checkpoint} (the updated, de-duplicated character vector of
-  completed repository keys), \code{completed} (data.table of rows
-  completed in this call: Database, TableName, DuckDBTable, SourcePath,
-  RepositoryKey, Status), and \code{failures} (data.table of rows that
-  failed: Database, TableName, DuckDBTable, SourcePath, RepositoryKey,
-  Message).
+An object of class \code{"RepositoryLoadResult"}: a list
+  with \code{checkpoint}, the updated, de duplicated character
+  vector of a completed repository key, \code{completed}, a
+  data.table of a row completed in this call, with
+  \code{Database}, \code{TableName}, \code{DuckDBTable},
+  \code{SourcePath}, \code{RepositoryKey}, and \code{Status}, and
+  \code{failures}, a data.table of a row that failed, with
+  \code{Database}, \code{TableName}, \code{DuckDBTable},
+  \code{SourcePath}, \code{RepositoryKey}, and \code{Message}.
 }
 \description{
-Per-database driver invoked once per entry in \code{DBLoad} by
-\code{\link{ParquetBackEndCreate}}. Iterates the rows of \code{MDTSelect}
-not already present in \code{completed_checkpoint}, resolves each row's own
-\code{FileType} (so a single database's tables can mix e.g. \code{.sav} and
-\code{.csv} sources), and delegates the actual read/write of each file to
-\code{\link{read_fn}}. On success for a row, the manifest is updated, the
-checkpoint is advanced and saved to disk immediately (so an interrupted run
-resumes past everything already written), and progress is logged; on
-failure, the row is recorded in the returned \code{failures} table and the
-loop continues to the next file.
+A per database driver invoked once per entry in \code{DBLoad} by
+\code{\link{ParquetBackEndCreate}}. Iterates a row of
+\code{MDTSelect} not already present in
+\code{completed_checkpoint}, resolves each row's own
+\code{FileType}, so that a single database's tables can mix, for
+example, \code{.sav} and \code{.csv} sources, and delegates the
+actual read and write of each file to \code{\link{read_fn}}. On
+success for a row, the manifest is updated, the checkpoint is
+advanced and saved to disk immediately, so that an interrupted
+run resumes past everything already written, and progress is
+logged. On failure, the row is recorded in the returned
+\code{failures} table and the loop continues to the next file.
 }
 \examples{
 \donttest{

@@ -2,23 +2,25 @@
 % Please edit documentation in R/repoquet.R
 \name{metadata_workbook_path_default}
 \alias{metadata_workbook_path_default}
-\title{Default path for the accessible Excel metadata snapshot}
+\title{Computes the default path for the accessible Excel metadata snapshot}
 \usage{
 metadata_workbook_path_default(ManifestPath)
 }
 \arguments{
-\item{ManifestPath}{Character scalar. Path to the authoritative DuckDB or
-CSV manifest file. Must be a single non-empty, non-\code{NA} path.}
+\item{ManifestPath}{Character scalar. Path to the authoritative
+DuckDB or CSV manifest file. Must be a single path that is not
+empty and not \code{NA}.}
 }
 \value{
-Character scalar. The derived \code{.xlsx} path (the file itself
-  is not created or checked for existence).
+Character scalar. The derived \code{.xlsx} path. The file
+  itself is not created, and its existence is not checked.
 }
 \description{
 Derives the default \code{.xlsx} output path used by
-\code{\link{ExportRepositoryMetadata}} when its \code{OutputPath} argument
-is not supplied: the same directory as \code{ManifestPath}, with the
-manifest's file name (extension stripped) and an \code{.xlsx} extension.
+\code{\link{ExportRepositoryMetadata}} when its \code{OutputPath}
+argument is not supplied: the same directory as \code{ManifestPath},
+with the manifest's file name, extension removed, and an
+\code{.xlsx} extension.
 }
 \examples{
 metadata_workbook_path_default("C:/repo/Manifest/RepositoryMetadata.duckdb")

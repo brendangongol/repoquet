@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{update_parquet_manifest}
 \alias{update_parquet_manifest}
-\title{Append or replace one row in the Parquet manifest}
+\title{Appends or replaces one row in the Parquet manifest}
 \usage{
 update_parquet_manifest(
   ManifestPath,
@@ -33,91 +33,102 @@ update_parquet_manifest(
 )
 }
 \arguments{
-\item{ManifestPath}{Character. Path to the manifest (a \code{.duckdb}/
-\code{.ddb} extension is treated as a transactional DuckDB store,
-anything else as CSV). \code{NULL} or an empty string is a no-op.}
+\item{ManifestPath}{Character scalar. Path to the manifest. A
+\code{.duckdb} or \code{.ddb} extension is treated as a
+transactional DuckDB store, and any other extension as CSV. Accepts
+\code{NULL} or an empty string, which does nothing.}
 
-\item{Database}{Character. Logical source database name.}
+\item{Database}{Character scalar. Logical source database name.}
 
-\item{TableName}{Character. Logical table name.}
+\item{TableName}{Character scalar. Logical table name.}
 
-\item{DuckDBTable}{Character. Physical Parquet directory / DuckDB view
-name for this table.}
+\item{DuckDBTable}{Character scalar. Physical Parquet directory and
+DuckDB view name for this table.}
 
-\item{Year}{Integer or character. Legacy compatibility field, coerced to
-integer (\code{NA} when it cannot be parsed). Used as the partition slot
-for the replace-by-key match when \code{PartitionValue} is missing.}
+\item{Year}{Integer or character scalar. Legacy field kept for
+compatibility, coerced to integer, becoming \code{NA} when it
+cannot be parsed. Used as the partition slot for the replacement by
+key when \code{PartitionValue} is missing.}
 
-\item{SourcePath}{Character. Original source file path recorded in the MDT.}
+\item{SourcePath}{Character scalar. Original source file path
+recorded in the MDT.}
 
-\item{ParquetPath}{Character. Parquet file or partition directory written
-for this record.}
+\item{ParquetPath}{Character scalar. Parquet file or partition
+directory written for this record.}
 
-\item{NRows}{Numeric. Row count represented by this record. Default \code{NA}.}
+\item{NRows}{Numeric scalar. Row count represented by this record.
+Defaults to \code{NA}.}
 
-\item{SchemaHash}{Character. Hash of the resolved table schema for this
-write (see \code{schema_hash_from_classes}). Default \code{NA}.}
+\item{SchemaHash}{Character scalar. Hash of the resolved table
+schema for this write, see \code{schema_hash_from_classes}.
+Defaults to \code{NA}.}
 
-\item{Status}{Character. Load/output status, e.g. \code{"written"}
-(default), \code{"partial_accepted"}, \code{"failed"}, or \code{"empty"}.}
+\item{Status}{Character scalar. Load or output status. Accepts one
+of four values: \code{"written"}, \code{"partial_accepted"},
+\code{"failed"}, or \code{"empty"}. Defaults to \code{"written"}.}
 
-\item{Notes}{Character. Additional loader context. Default \code{NA}.}
+\item{Notes}{Character scalar. Additional loader context. Defaults
+to \code{NA}.}
 
-\item{PartitionKey}{Character. Canonical Hive partition key, or a
-semicolon-separated list of keys (e.g. \code{"YEAR"}). Default \code{NA}.}
+\item{PartitionKey}{Character scalar. Canonical hive partition key,
+or a list of keys separated by a semicolon, for example
+\code{"YEAR"}. Defaults to \code{NA}.}
 
-\item{PartitionValue}{Character. Hive partition value, or a semicolon-
-separated value list matching \code{PartitionKey}; used instead of
-\code{Year} to key the record when non-missing. Default \code{NA}.}
+\item{PartitionValue}{Character scalar. Hive partition value, or a
+list of values separated by a semicolon matching
+\code{PartitionKey}. Used instead of \code{Year} to key the record
+when it is not missing. Defaults to \code{NA}.}
 
-\item{RunId}{Character (optional). Run identifier; resolved via
-\code{resolve_run_id} when \code{NULL}.}
+\item{RunId}{Character scalar. Run identifier. Accepts a value,
+which is used for this call. Accepts \code{NULL}, which resolves it
+with \code{resolve_run_id}. Defaults to \code{NULL}.}
 
-\item{RepositoryKey}{Character. Checkpoint identity for the source and
-partition. Default \code{NA}.}
+\item{RepositoryKey}{Character scalar. Checkpoint identity for the
+source and partition. Defaults to \code{NA}.}
 
-\item{SourceSize}{Numeric. Source file size in bytes at load time.
-Default \code{NA}.}
+\item{SourceSize}{Numeric scalar. Source file size in bytes at load
+time. Defaults to \code{NA}.}
 
-\item{SourceMTimeUTC}{Character. Source file modification timestamp in
-UTC. Default \code{NA}.}
+\item{SourceMTimeUTC}{Character scalar. Source file modification
+timestamp in UTC. Defaults to \code{NA}.}
 
-\item{SourceSHA256}{Character. Optional SHA-256 hash of the source file.
-Default \code{NA}.}
+\item{SourceSHA256}{Character scalar. SHA256 hash of the source
+file. Defaults to \code{NA}.}
 
-\item{SourceFingerprint}{Character. Fingerprint used for source-change
-detection (see \code{\link{source_fingerprint}}). Default \code{NA}.}
+\item{SourceFingerprint}{Character scalar. Fingerprint used to
+detect a change to the source, see
+\code{\link{source_fingerprint}}. Defaults to \code{NA}.}
 
-\item{SourceURI}{Character. Optional direct HTTP/HTTPS location declared
-in the MDT for a remote source. Default \code{NA}.}
+\item{SourceURI}{Character scalar. Direct HTTP or HTTPS location
+declared in the MDT for a remote source. Defaults to \code{NA}.}
 
-\item{ResolvedSourcePath}{Character. Managed local cache file path used
-for a remote source. Default \code{NA}.}
+\item{ResolvedSourcePath}{Character scalar. Managed local cache file
+path used for a remote source. Defaults to \code{NA}.}
 
-\item{DownloadPolicy}{Character. Remote refresh policy used for the
-source. Default \code{NA}.}
+\item{DownloadPolicy}{Character scalar. Remote refresh policy used
+for the source. Defaults to \code{NA}.}
 
-\item{DownloadSHA256}{Character. SHA-256 of the cached remote object.
-Default \code{NA}.}
+\item{DownloadSHA256}{Character scalar. SHA256 hash of the cached
+remote object. Defaults to \code{NA}.}
 
-\item{DownloadTimeUTC}{Character. Modification time of the cached remote
-object in UTC. Default \code{NA}.}
+\item{DownloadTimeUTC}{Character scalar. Modification time of the
+cached remote object, in UTC. Defaults to \code{NA}.}
 
-\item{DownloadStatus}{Character. Remote cache result, e.g.
-\code{"downloaded"}, \code{"updated"}, \code{"unchanged"}, or
-\code{"cached"}. Default \code{NA}.}
+\item{DownloadStatus}{Character scalar. Remote cache result. Accepts
+one of four values: \code{"downloaded"}, \code{"updated"},
+\code{"unchanged"}, or \code{"cached"}. Defaults to \code{NA}.}
 }
 \value{
-Invisibly, the one-row \code{data.table} that was written.
+Invisibly, the one row data.table that was written.
 }
 \description{
 Builds one manifest record from the supplied fields and writes it to
-\code{ManifestPath}. For a transactional DuckDB manifest, any existing row
-with the same Database/TableName/partition-or-year/SourcePath/ParquetPath
-key is deleted and the new row appended within one transaction (missing
-columns are added on the fly). For a legacy CSV manifest, the same
-replace-by-key logic runs in memory and the whole table is rewritten
-atomically.
+\code{ManifestPath}. For a transactional DuckDB manifest, an existing
+row with the same \code{Database}, \code{TableName}, partition or
+year, \code{SourcePath}, and \code{ParquetPath} key is deleted and
+the new row appended within one transaction, and a missing column is
+added as needed. For a legacy CSV manifest, the same replacement by
+key runs in memory, and the whole table is rewritten atomically.
 }
 \examples{
 manifest <- tempfile(fileext = ".csv")

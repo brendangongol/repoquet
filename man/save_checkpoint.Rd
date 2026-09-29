@@ -2,27 +2,29 @@
 % Please edit documentation in R/repoquet.R
 \name{save_checkpoint}
 \alias{save_checkpoint}
-\title{Atomically save the completed-file checkpoint}
+\title{Saves the completed file checkpoint atomically}
 \usage{
 save_checkpoint(checkpoint, path)
 }
 \arguments{
-\item{checkpoint}{Character vector of completed source-file keys/paths.
-Duplicates are dropped (via \code{unique()}) before writing.}
+\item{checkpoint}{Character vector of completed source file keys or
+paths. A duplicate is dropped, with \code{unique()}, before writing.}
 
-\item{path}{Destination .rds checkpoint path. Its directory is created if
-needed; a previous generation at this path is preserved as
-\code{<path>.previous} before being overwritten (see
-\code{\link{load_checkpoint}}).}
+\item{path}{Destination \code{.rds} checkpoint path. Its directory is
+created when needed. A previous generation already at this path is
+kept as \code{<path>.previous} before being overwritten, see
+\code{\link{load_checkpoint}}.}
 }
 \value{
-\code{invisible(TRUE)} on success. Stops if the checkpoint cannot
-  be verified by reading it back before or after the atomic replace.
+\code{invisible(TRUE)} on success. Stops when the checkpoint
+  cannot be verified by reading it back, either before or after the
+  atomic replacement.
 }
 \description{
-Writes the checkpoint to a temporary file in the same directory and then
-renames it into place. This greatly reduces the chance of a corrupted
-checkpoint if R stops during saveRDS() or a network drive briefly disconnects.
+Writes the checkpoint to a temporary file in the same directory, and
+then renames it into place, which greatly reduces the chance of a
+corrupted checkpoint when R stops during \code{saveRDS()} or a network
+drive briefly disconnects.
 }
 \examples{
 tmp_checkpoint <- tempfile(fileext = ".rds")

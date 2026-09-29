@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{BuildRepositoryCatalog}
 \alias{BuildRepositoryCatalog}
-\title{Preflight: build the full cross-database schema catalog before loading}
+\title{Preflights the full cross database schema catalog before loading}
 \usage{
 BuildRepositoryCatalog(
   MDT,
@@ -21,68 +21,85 @@ BuildRepositoryCatalog(
 )
 }
 \arguments{
-\item{MDT}{Data frame. Master Database Table.}
+\item{MDT}{Data frame. Master database table.}
 
-\item{DBLoad}{Character vector of databases to (re)infer. Default NULL means
-every database present in \code{MDT}.}
+\item{DBLoad}{Character vector of databases to infer or reinfer.
+Defaults to \code{NULL}, which means every database present in
+\code{MDT}.}
 
-\item{MasterDBPath}{Character. Root directory of the source files.}
+\item{MasterDBPath}{Character scalar. Root directory of the
+source files.}
 
-\item{n_workers}{Integer. Parallel workers for the sampling scans.}
+\item{n_workers}{Integer. Parallel workers for the sampling scan.
+Defaults to \code{1}.}
 
-\item{SchemaRegistryPath}{Character. Registry path (created if missing).}
+\item{SchemaRegistryPath}{Character scalar. Registry path,
+created when missing.}
 
-\item{TableSchemaPath}{Character. Catalog destination (.xlsx or .csv).}
+\item{TableSchemaPath}{Character scalar. Catalog destination,
+accepting either an \code{.xlsx} or a \code{.csv} extension.}
 
-\item{StrictSchemaValidation}{Logical. Stop on merge-key type mismatches.}
+\item{StrictSchemaValidation}{Logical. Accepts \code{TRUE}, which
+stops on a merge key type mismatch. Accepts \code{FALSE}, which
+does not.}
 
-\item{HarvestLabels}{Logical. If \code{TRUE} (default), also harvests
-variable/value labels (see \code{\link{harvest_source_labels}}) for each
-database and merges them with any existing \code{Labels} sheet -- rows for
-databases not in \code{DBLoad} are carried forward unchanged.}
+\item{HarvestLabels}{Logical. Accepts \code{TRUE}, which also
+harvests a variable and value label, see
+\code{\link{harvest_source_labels}}, for each database and
+merges it with any existing \code{Labels} sheet, where a row
+for a database not in \code{DBLoad} is carried forward
+unchanged. Accepts \code{FALSE}, which does not. Defaults to
+\code{TRUE}.}
 
-\item{LockRepository}{Logical. If \code{TRUE} (default), acquires a
-repository lock for the duration of the run (see
-\code{\link{acquire_repository_lock}}) so a concurrent writer cannot
-corrupt the catalog.}
+\item{LockRepository}{Logical. Accepts \code{TRUE}, which
+acquires a repository lock for the duration of the run, see
+\code{\link{acquire_repository_lock}}, so that a concurrent
+writer cannot corrupt the catalog. Accepts \code{FALSE}, which
+does not. Defaults to \code{TRUE}.}
 
-\item{LockPath}{Character (optional). Lock file location. Defaults to
-\code{.repository.lock} two directories above \code{TableSchemaPath}; if
-\code{TableSchemaPath} is also \code{NULL}, locking is skipped with a
-warning.}
+\item{LockPath}{Character scalar. Lock file location. Defaults to
+\code{.repository.lock} two directories above
+\code{TableSchemaPath}. When \code{TableSchemaPath} is also
+\code{NULL}, locking is skipped with a warning.}
 
-\item{LockStaleMinutes}{Numeric. Minutes after which an existing lock is
-considered abandoned and may be taken over.}
+\item{LockStaleMinutes}{Numeric scalar. Minutes after which an
+existing lock is considered abandoned and may be taken over.}
 
-\item{LogPath}{Character (optional). Log file for this run; when supplied
-(with or without \code{RunId}), a run-scoped logging context is started
-via \code{\link{begin_repository_run}} and restored on exit.}
+\item{LogPath}{Character scalar. Log file for this run. When
+supplied, with or without \code{RunId}, a run scoped logging
+context is started through \code{\link{begin_repository_run}}
+and restored on exit.}
 
-\item{RunId}{Character (optional). Run identifier tagged onto log lines;
-see \code{\link{begin_repository_run}}.}
+\item{RunId}{Character scalar. Run identifier tagged onto log
+lines. See \code{\link{begin_repository_run}}.}
 }
 \value{
-Invisibly, the loaded catalog (as from
-  \code{\link{load_table_schema_catalog}}) after the round trip to disk.
+Invisibly, the loaded catalog, as from
+  \code{\link{load_table_schema_catalog}}, after the round trip
+  to disk.
 }
 \description{
-Runs schema inference plus the registry for every database in \code{DBLoad}
-and writes one combined catalog to \code{TableSchemaPath}, so all column
-types across all databases and tables are established -- and reviewable --
-before \code{\link{ParquetBackEndCreate}} writes any Parquet. The loader
-then reads this catalog instead of re-inferring, which also makes resumed
-runs skip the expensive per-file sampling pass.
+Runs schema inference plus the registry for every database in
+\code{DBLoad} and writes one combined catalog to
+\code{TableSchemaPath}, so that every column type, across every
+database and table, is established and reviewable before
+\code{\link{ParquetBackEndCreate}} writes any Parquet. The loader
+then reads this catalog instead of re inferring, which also makes
+a resumed run skip the expensive per file sampling pass.
 }
 \details{
-Curation workflow: open the workbook, change a row's \code{CanonicalType},
-and set that row's \code{Source} to \code{"manual"}. Manual rows survive
-subsequent preflight runs and outrank both inference and the registry.
-A type change only affects future writes; to apply it to a table already on
-disk, run \code{\link{reset_table_for_reload}} and re-run the loader.
-Databases not listed in \code{DBLoad} keep their existing catalog rows.
+Curation workflow: open the workbook, change a row's
+\code{CanonicalType}, and set that row's \code{Source} to
+\code{"manual"}. A manual row survives a subsequent preflight run
+and outranks both inference and the registry. A type change only
+affects a future write. To apply it to a table already on disk,
+run \code{\link{reset_table_for_reload}} and rerun the loader. A
+database not listed in \code{DBLoad} keeps its existing catalog
+row.
 
-Merge-key validation runs on the combined catalog, so join-key type
-mismatches are caught across databases, not just within one.
+Merge key validation runs on the combined catalog, so a join key
+type mismatch is caught across every database, not only within
+one.
 }
 \examples{
 src <- tempfile("mdb_"); dir.create(file.path(src, "DEMO"), recursive = TRUE)

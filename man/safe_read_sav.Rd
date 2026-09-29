@@ -2,22 +2,22 @@
 % Please edit documentation in R/repoquet.R
 \name{safe_read_sav}
 \alias{safe_read_sav}
-\title{Safely read a SAV file with UTF-8 sanitisation}
+\title{Reads a SAV file safely, with character encoding sanitization}
 \usage{
 safe_read_sav(path)
 }
 \arguments{
-\item{path}{Character. Full path to the \code{.sav} file.}
+\item{path}{Character scalar. Full path to the \code{.sav} file.}
 }
 \value{
-A \code{data.table} with all columns in their declared base types, or
-  an empty \code{data.frame()} if reading fails.
+A data.table with every column in its declared base type, or an
+  empty data frame when reading fails.
 }
 \description{
-Wraps \code{haven::read_sav()} with \code{tryCatch}.  After loading,
-\pkg{haven} S3 attributes are stripped via \code{strip_haven} and all
-character columns are re-encoded to UTF-8 (replacing unmappable bytes with
-their hex escape).
+Wraps \code{haven::read_sav()} with \code{tryCatch}. After loading, the
+\pkg{haven} S3 attributes are stripped with \code{strip_haven}, and
+every character column is reencoded to UTF8, replacing an unmappable
+byte with its hexadecimal escape.
 }
 \examples{
 \dontrun{

@@ -2,25 +2,27 @@
 % Please edit documentation in R/repoquet.R
 \name{merge_key_name_candidate}
 \alias{merge_key_name_candidate}
-\title{Validate table-schema compatibility for merge-key columns within each year}
+\title{Validates table schema compatibility for a merge key column within each year}
 \usage{
 merge_key_name_candidate(column)
 }
 \arguments{
-\item{column}{Character vector of column names (canonicalized internally
-via \code{canonical_colnames} before matching).}
+\item{column}{Character vector of column names, canonicalized
+internally through \code{canonical_colnames} before matching.}
 }
 \value{
-Logical vector, the same length as \code{column}: \code{TRUE} where
-  the (canonicalized) name looks like a merge/join key.
+A logical vector the same length as \code{column}:
+  \code{TRUE} where the canonicalized name looks like a merge or
+  join key.
 }
 \description{
-Heuristic used by \code{ValidateSchemaMergeKeys} to flag columns
-that are *likely* join/merge keys purely from their name, for tables that
-have not explicitly declared a \code{Role} of \code{"join_key"} or
-\code{"partition"} in the schema catalog. Matches common identifier
-suffixes (\code{_KEY}, \code{_ID}, \code{_IDENTIFIER}) plus a short list of
-well-known HCUP linkage columns (\code{VISITLINK}, \code{HOSP_NIS}, etc.).
+A heuristic used by \code{ValidateSchemaMergeKeys} to flag a
+column that is likely a join or merge key purely from its name,
+for a table that has not explicitly declared a \code{Role} of
+\code{"join_key"} or \code{"partition"} in the schema catalog.
+Matches a common identifier suffix, \code{_KEY}, \code{_ID}, or
+\code{_IDENTIFIER}, plus a short list of well known HCUP linkage
+columns, such as \code{VISITLINK} or \code{HOSP_NIS}.
 }
 \examples{
 merge_key_name_candidate(c("PATIENT_ID", "VISITLINK", "AGE", "HOSPITAL_ID"))

@@ -2,32 +2,36 @@
 % Please edit documentation in R/repoquet.R
 \name{DBDimPerTable}
 \alias{DBDimPerTable}
-\title{Report row and column counts for every registered DuckDB view}
+\title{Reports row and column counts for every registered DuckDB view}
 \usage{
 DBDimPerTable(con, verbose = TRUE, logStatus = TRUE, orderByMemBurden = TRUE)
 }
 \arguments{
 \item{con}{A DBI connection to an open DuckDB database.}
 
-\item{verbose}{Logical. If \code{TRUE} (default), logs or prints each
-table's row count as it is queried.}
+\item{verbose}{Logical. Accepts \code{TRUE}, which logs or prints each
+table's row count as it is queried. Accepts \code{FALSE}, which does
+not. Defaults to \code{TRUE}.}
 
-\item{logStatus}{Logical. If \code{TRUE} (default), output is written via
-\code{\link{log_msg}}; otherwise it is printed to the console.}
+\item{logStatus}{Logical. Accepts \code{TRUE}, which writes output with
+\code{\link{log_msg}}. Accepts \code{FALSE}, which prints it to the
+console. Defaults to \code{TRUE}.}
 
-\item{orderByMemBurden}{Logical. If \code{TRUE} (default), the returned
-table is sorted descending by \code{Nrow * Ncol} so the most memory-
-intensive tables appear first.}
+\item{orderByMemBurden}{Logical. Accepts \code{TRUE}, which sorts the
+returned table in descending order of \code{Nrow * Ncol}, so the
+tables with the greatest memory burden appear first. Accepts
+\code{FALSE}, which leaves the table in the order the views were
+listed. Defaults to \code{TRUE}.}
 }
 \value{
-A \code{data.table} with columns \code{Table}, \code{Nrow},
-  \code{Ncol}, and \code{MemBurden}.
+A data.table with columns \code{Table}, \code{Nrow}, \code{Ncol},
+  and \code{MemBurden}.
 }
 \description{
-Queries each table in the DuckDB connection for its row count
-(\code{COUNT(*)}) and column count (\code{DESCRIBE}), assembles a summary
-\code{data.table}, and optionally sorts by memory burden
-(\code{Nrow * Ncol}).
+Queries each table in the DuckDB connection for its row count, with
+\code{COUNT(*)}, and column count, with \code{DESCRIBE}, and assembles a
+summary data.table, optionally sorted by memory burden, computed as
+\code{Nrow * Ncol}.
 }
 \examples{
 con <- DBI::dbConnect(duckdb::duckdb(), dbdir = ":memory:")

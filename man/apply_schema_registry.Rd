@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{apply_schema_registry}
 \alias{apply_schema_registry}
-\title{Apply repository-level schema registry overrides to an inferred type map}
+\title{Applies repository level schema registry overrides to an inferred type map}
 \usage{
 apply_schema_registry(
   col_classes,
@@ -12,39 +12,46 @@ apply_schema_registry(
 )
 }
 \arguments{
-\item{col_classes}{Named list or vector mapping column name to inferred
-canonical type (as produced by \code{\link{build_col_classes}}).
-\code{NULL} is returned unchanged.}
+\item{col_classes}{Named list or vector mapping a column name to its
+inferred canonical type, as produced by
+\code{\link{build_col_classes}}. Accepts \code{NULL}, which is
+returned unchanged.}
 
-\item{schema_registry}{Schema registry \code{data.frame}/\code{data.table}
-(as returned by \code{\link{load_schema_registry}}), or \code{NULL}
-(default) to skip overrides -- in that case \code{col_classes} is still
-returned with canonicalized names and normalized types.}
+\item{schema_registry}{Schema registry, as a data frame or
+data.table, as returned by \code{\link{load_schema_registry}}.
+Accepts such a registry, whose applicable rows override the
+inferred type. Accepts \code{NULL}, which skips overrides, so that
+\code{col_classes} is still returned with canonicalized names and
+normalized types. Defaults to \code{NULL}.}
 
-\item{database}{Character (optional). Logical database name used to
-evaluate each registry row's \code{AppliesTo} scope.}
+\item{database}{Character scalar. Logical database name used to
+evaluate each registry row's \code{AppliesTo} scope. Defaults to
+\code{NULL}.}
 
-\item{table_name}{Character (optional). Logical table name used to
-evaluate each registry row's \code{AppliesTo} scope.}
+\item{table_name}{Character scalar. Logical table name used to
+evaluate each registry row's \code{AppliesTo} scope. Defaults to
+\code{NULL}.}
 }
 \value{
-\code{col_classes} with canonicalized names, normalized types, and
-  any applicable registry overrides applied.
+\code{col_classes}, with canonicalized names, normalized
+  types, and any applicable registry override applied.
 }
 \description{
-Column names are first canonicalized (see \code{canonical_colnames})
-and every inferred type is normalized. Then, for each column, every
+Canonicalizes each column name, see \code{canonical_colnames}, and
+normalizes every inferred type. Then, for each column, considers every
 \code{schema_registry} row whose \code{AppliesTo} scope matches
-\code{database}/\code{table_name} (see \code{\link{build_default_schema_registry}})
-and whose \code{ColumnPattern} matches the column name is considered; the
-first matching row's \code{CanonicalType} is the candidate override. The
+\code{database} and \code{table_name}, see
+\code{\link{build_default_schema_registry}}, and whose
+\code{ColumnPattern} matches the column name, and takes the first
+matching row's \code{CanonicalType} as the candidate override. The
 override is applied only when it is compatible with the type already
-inferred for that column -- i.e. when
+inferred for that column, that is, when
 \code{promote_types(c(current_type, policy_type))} equals
-\code{policy_type} -- so the registry can widen or normalize a type (e.g.
-\code{integer} to \code{numeric}) but cannot silently force a column that
-was inferred as \code{character} (because real data already failed to
-parse as the policy type) into a narrower type.
+\code{policy_type}, so that the registry can widen or normalize a
+type, for example from \code{integer} to \code{numeric}, but cannot
+force a column already inferred as \code{character}, because real
+data already failed to parse as the policy type, into a narrower
+type.
 }
 \examples{
 col_classes <- list(age = "integer", dx1 = "integer")

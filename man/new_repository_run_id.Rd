@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{new_repository_run_id}
 \alias{new_repository_run_id}
-\title{Generate a unique run identifier}
+\title{Generates a unique run identifier}
 \usage{
 new_repository_run_id()
 }
@@ -11,10 +11,11 @@ Character scalar. A run identifier of the form
   \code{"<YYYYMMDDTHHMMSS>_<pid>_<000000-999999>"}.
 }
 \description{
-Builds a process- and time-scoped identifier by combining the current
-timestamp, process ID, and a random six-digit suffix. Used by
-\code{\link{begin_repository_run}} to tag every log line emitted during a
-repository run when the caller does not supply an explicit \code{RunId}.
+Builds a process and time scoped identifier by combining the
+current timestamp, process ID, and a random six digit suffix.
+Used by \code{\link{begin_repository_run}} to tag every log line
+emitted during a repository run when the caller does not supply
+an explicit \code{RunId}.
 }
 \examples{
 id1 <- new_repository_run_id()

@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{MaterializeRemoteSources}
 \alias{MaterializeRemoteSources}
-\title{Materialize remote source files into the repository cache}
+\title{Downloads remote source files into a managed local cache}
 \usage{
 MaterializeRemoteSources(
   MDT,
@@ -19,57 +19,79 @@ MaterializeRemoteSources(
 )
 }
 \arguments{
-\item{MDT}{Master Database Table data frame.}
+\item{MDT}{Data frame. The master database table.}
 
-\item{DownloadCachePath}{Directory used for managed source copies.}
+\item{DownloadCachePath}{Character scalar. Directory in which downloaded
+copies of source files are stored.}
 
-\item{Offline}{If TRUE, never access the network and require cached copies.}
+\item{Offline}{Logical. Accepts \code{TRUE}, which prevents any network
+access, so that a row whose file is not already cached is left
+unresolved. Accepts \code{FALSE}, which allows network access according
+to each row's download policy. Defaults to \code{FALSE}.}
 
-\item{DefaultDownloadPolicy}{Default for blank \code{DownloadPolicy} cells:
-\code{"if_missing"}, \code{"if_changed"}, \code{"always"}, or
-\code{"manual"}.}
+\item{DefaultDownloadPolicy}{Character scalar. Policy applied to a row
+whose \code{DownloadPolicy} cell is blank. Accepts one of four values.
+\code{"if_missing"} downloads the file only when no cached copy exists.
+\code{"if_changed"} downloads the file when no cached copy exists, and
+otherwise compares the cached copy against the remote source to decide
+whether to download it again. \code{"always"} downloads the file on
+every call. \code{"manual"} never downloads the file, and requires a
+cached copy to already exist. Defaults to \code{"if_missing"}.}
 
-\item{DownloadMethod}{Method passed to \code{utils::download.file()}.}
+\item{DownloadMethod}{Character scalar. Method argument passed to
+\code{utils::download.file()}. Accepts any value that function accepts.
+Defaults to \code{"auto"}.}
 
-\item{TimeoutSeconds}{Minimum download timeout in seconds.}
+\item{TimeoutSeconds}{Numeric scalar. Minimum download timeout, in
+seconds, before a download attempt is treated as failed. Defaults to
+\code{10800}.}
 
-\item{Strict}{Stop if any remote row cannot be materialized.}
+\item{Strict}{Logical. Accepts \code{TRUE}, which stops with an error if
+any row with a \code{SourceURI} cannot be materialized. Accepts
+\code{FALSE}, which leaves such a row unresolved and continues.
+Defaults to \code{TRUE}.}
 
-\item{DownloadFunction}{Optional function with arguments \code{uri} and
-\code{destination}. It must write the destination file. This supports
-caller-managed authentication and deterministic tests.}
+\item{DownloadFunction}{Function. Accepts a function with arguments
+\code{uri} and \code{destination}, which replaces the default download
+behavior and is responsible for writing the destination file. Accepts
+\code{NULL}, which uses the default download behavior. Defaults to
+\code{NULL}.}
 
-\item{Resume}{Logical. When TRUE (default) and \code{DownloadFunction} is
-NULL, an interrupted download (network drop or exceeded
-\code{TimeoutSeconds}) leaves its partial bytes in a deterministic
-\code{<cache file>.part} file next to the destination, and the next
-attempt continues from that byte offset with an HTTP Range request
-instead of restarting from scratch. Requires the \code{curl} package;
-without it (or with \code{Resume = FALSE}), every attempt restarts from
-byte zero as before. If the server ignores the Range request and returns
-the full file again, the partial file is discarded and the next attempt
-restarts cleanly rather than risk an appended, corrupted file. Partial
-\code{.part} files are never treated as a completed cached copy and are
-not automatically purged; delete them from \code{DownloadCachePath} to
-force a clean restart.}
+\item{Resume}{Logical. Accepts \code{TRUE}, which, when
+\code{DownloadFunction} is \code{NULL}, continues an interrupted
+download from the byte offset recorded in a partial
+\code{<cache file>.part} file, using an HTTP Range request, rather than
+restarting the download from the first byte. This requires the
+\code{curl} package and a remote server that honors the Range request;
+when either condition is not met, or when \code{Resume} is
+\code{FALSE}, every download attempt restarts from the first byte,
+discarding any partial file first. Partial files are not deleted
+automatically. Defaults to \code{TRUE}.}
 
-\item{LogPath, RunId}{Optional repository logging context.}
+\item{LogPath}{Character scalar. Path to the log file for this call. See
+\code{\link{begin_repository_run}}.}
+
+\item{RunId}{Character scalar. Run identifier for this call. See
+\code{\link{begin_repository_run}}.}
 }
 \value{
-A copy of \code{MDT} with resolved paths and remote provenance.
+A copy of \code{MDT} with resolved paths and columns describing
+  the cached copy of each remote source.
 }
 \description{
-Rows with a non-empty \code{SourceURI} are downloaded to a managed local
-cache before schema discovery or loading. Original sources and the MDT
-workbook are never modified. \code{Path} remains the stable logical source
-name; the returned MDT adds \code{ResolvedSourcePath} for runtime reads and
-provenance fields describing the cached object.
+For each row of \code{MDT} with a non empty \code{SourceURI}, downloads
+the file into \code{DownloadCachePath} according to its download policy.
+A row without a \code{SourceURI} is left unchanged. The original source
+files and the MDT workbook are never modified. \code{Path} remains the
+logical source name in the returned MDT, which also gains a
+\code{ResolvedSourcePath} column pointing at the file to read, together
+with columns describing the cached copy.
 }
 \details{
-Remote acquisition accepts direct HTTP or HTTPS file URLs and explicit ZIP
-members declared with \code{ArchiveType="zip"} and \code{ArchiveMember}.
-It does not scrape web pages or store credentials. Use \code{DownloadFunction} for a
-caller-managed authenticated download without placing secrets in the MDT.
+Accepts direct HTTP or HTTPS file URLs, and also accepts a ZIP archive
+member declared with \code{ArchiveType = "zip"} and \code{ArchiveMember}.
+Does not access web pages other than the file URL itself, and does not
+store credentials.
 }
 \examples{
 tmp_cache <- tempfile("remote_cache_")

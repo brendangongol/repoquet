@@ -2,22 +2,22 @@
 % Please edit documentation in R/repoquet.R
 \name{load_checkpoint}
 \alias{load_checkpoint}
-\title{Load the completed-files checkpoint from disk}
+\title{Loads the completed files checkpoint from disk}
 \usage{
 load_checkpoint(path)
 }
 \arguments{
-\item{path}{Character. Path to the checkpoint \code{.rds} file.  Defaults
-to \code{CheckpointPath} from the calling environment.}
+\item{path}{Character scalar. Path to the checkpoint \code{.rds} file.
+Defaults to \code{CheckpointPath} from the calling environment.}
 }
 \value{
-A character vector of relative file paths that have already been
-  successfully loaded, or \code{character(0)} if no checkpoint exists.
+A character vector of the relative file paths already loaded
+  successfully, or \code{character(0)} when no checkpoint exists.
 }
 \description{
-Reads the RDS file at \code{path} and returns its contents.  If the file
-does not exist, prints a warning and returns \code{character(0)} so the
-loader starts fresh.
+Reads the RDS file at \code{path} and returns its contents. When the
+file does not exist, prints a warning and returns \code{character(0)},
+so that the loader starts fresh.
 }
 \examples{
 \dontrun{

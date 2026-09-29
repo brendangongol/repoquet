@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{reset_table_for_reload}
 \alias{reset_table_for_reload}
-\title{Reset one table so the loader rewrites it under the current schema registry}
+\title{Resets one table so the loader rewrites it under the current schema registry}
 \usage{
 reset_table_for_reload(
   MDT,
@@ -16,43 +16,51 @@ reset_table_for_reload(
 )
 }
 \arguments{
-\item{MDT}{Data frame. Master Database Table containing the rows for the
-table being reset (used to derive checkpoint keys).}
+\item{MDT}{Data frame. Master Database Table containing the rows for
+the table being reset, used to derive checkpoint keys.}
 
-\item{Database}{Character. Database prefix (e.g. \code{"NIS"}).}
+\item{Database}{Character scalar. Database prefix, for example
+\code{"NIS"}.}
 
-\item{TableName}{Character. Table suffix (e.g. \code{"Core"}); together
-these identify the DuckDB table \code{<Database>_<TableName>}.}
+\item{TableName}{Character scalar. Table suffix, for example
+\code{"Core"}. Together with \code{Database}, this identifies the
+DuckDB table \code{<Database>_<TableName>}.}
 
-\item{ParquetBasePath}{Character. Root directory of the Parquet store.}
+\item{ParquetBasePath}{Character scalar. Root directory of the
+Parquet store.}
 
-\item{CheckpointPath}{Character. Path to the checkpoint \code{.rds} file.}
+\item{CheckpointPath}{Character scalar. Path to the checkpoint
+\code{.rds} file.}
 
-\item{ManifestPath}{Character (optional). Parquet manifest CSV; its rows for
-this table are removed when provided.}
+\item{ManifestPath}{Character scalar. Parquet manifest CSV. Accepts a
+path, whose rows for this table are removed. Accepts \code{NULL},
+which does not remove any manifest row. Defaults to \code{NULL}.}
 
-\item{DryRun}{Logical. If \code{TRUE} (default), only reports what would be
-deleted. Pass \code{FALSE} to actually delete.}
+\item{DryRun}{Logical. Accepts \code{TRUE}, which only reports what
+would be deleted. Accepts \code{FALSE}, which deletes it. Defaults
+to \code{TRUE}.}
 
-\item{LogPath}{Character (optional). Log file to write to. Without it,
-\code{log_msg()} falls back to whatever \code{LogPath} (if any) happens
-to be in scope in the caller, which is unset when this is called
-standalone (e.g. interactively, outside a \code{ParquetBackEndCreate()}
-run) -- pass it explicitly to log deterministically.}
+\item{LogPath}{Character scalar. Log file to write to. Accepts a file
+path, which is used for this call. Accepts \code{NULL}, which uses
+whatever \code{LogPath} happens to be in scope in the caller, unset
+when this is called on its own, for example interactively, outside
+a \code{ParquetBackEndCreate()} run. Pass it explicitly to log
+deterministically in that case. Defaults to \code{NULL}.}
 }
 \value{
-Invisibly, a list with \code{parquet_dir}, \code{n_checkpoint_removed},
-  and \code{n_manifest_removed}.
+Invisibly, a list with \code{parquet_dir},
+  \code{n_checkpoint_removed}, and \code{n_manifest_removed}.
 }
 \description{
-Parquet files written before the schema registry existed (or under an older
-registry) keep their original column types forever, because the checkpoint
-marks their source files complete and the loader never revisits them. This
-is how type mismatches such as \code{KEY_NIS} being \code{DOUBLE} in one
-table and \code{VARCHAR} in another survive a registry fix. This function
-clears everything the loader uses to consider the table done -- its Parquet
-directory, its checkpoint entries (both key-based and legacy path-based),
-and its manifest rows -- so the next \code{\link{ParquetBackEndCreate}} run
+A Parquet file written before the schema registry existed, or under an
+older registry, keeps its original column types indefinitely, because
+the checkpoint marks its source file complete and the loader never
+revisits it. This is how a type mismatch, such as \code{KEY_NIS} being
+\code{DOUBLE} in one table and \code{VARCHAR} in another, survives a
+fix to the registry. This function clears everything the loader uses
+to consider the table done, its Parquet directory, its checkpoint
+entries, in both the key based and legacy path based formats, and its
+manifest rows, so that the next \code{\link{ParquetBackEndCreate}} run
 rebuilds it from source with the current registry types.
 }
 \examples{

@@ -2,35 +2,40 @@
 % Please edit documentation in R/repoquet.R
 \name{load_table_schema_catalog}
 \alias{load_table_schema_catalog}
-\title{Read the table schema catalog back as the authoritative column-type source}
+\title{Reads the table schema catalog back as the authoritative column type source}
 \usage{
 load_table_schema_catalog(TableSchemaPath, strict = FALSE)
 }
 \arguments{
-\item{TableSchemaPath}{Character. Path to the catalog written by
-\code{\link{write_table_schema_catalog}}.}
+\item{TableSchemaPath}{Character scalar. Path to the catalog
+written by \code{\link{write_table_schema_catalog}}.}
 
-\item{strict}{Logical. If \code{TRUE}, a missing required column, an
-unreadable file, an invalid \code{CanonicalType} value, or a conflicting
-duplicate Database/TableName/Column row stops with an error instead of
-logging a warning and falling back (unrecognised types become
-\code{"character"}; duplicates keep the first occurrence).}
+\item{strict}{Logical. Accepts \code{TRUE}, which stops with an
+error on a missing required column, an unreadable file, an
+invalid \code{CanonicalType} value, or a conflicting duplicate
+Database, TableName, and Column row. Accepts \code{FALSE}, which
+instead logs a warning and falls back: an unrecognized type
+becomes \code{"character"}, and a duplicate keeps its first
+occurrence. Defaults to \code{FALSE}.}
 }
 \value{
-\code{NULL} when the file is absent or unusable; otherwise a list
-  with \code{table_schema} (data.table), \code{col_classes} (nested list:
-  \code{col_classes[[Database]][[TableName]]} is a named list of
-  column -> canonical type, YEAR excluded), and \code{TableSchemaPath}.
+\code{NULL} when the file is absent or unusable.
+  Otherwise a list with \code{table_schema}, a data.table,
+  \code{col_classes}, a nested list where
+  \code{col_classes[[Database]][[TableName]]} is a named list
+  mapping a column to its canonical type, with YEAR excluded, and
+  \code{TableSchemaPath}.
 }
 \description{
-Reads \code{TableSchemas.xlsx} (sheet \code{TableSchemas}) or the CSV
-equivalent and converts it into the per-table \code{col_classes} maps the
-loader consumes. This is the read half of the curation workflow: edit a
-row's \code{CanonicalType} and set its \code{Source} to \code{"manual"} to
-pin that column's type; \code{\link{BuildRepositoryCatalog}} preserves such
-rows on re-inference. In strict mode, unrecognised \code{CanonicalType}
-values stop the load; non-strict inspection logs them and falls back to
-character.
+Reads \code{TableSchemas.xlsx}, sheet \code{TableSchemas}, or its
+CSV equivalent, and converts it into the per table
+\code{col_classes} map the loader consumes. This is the read half
+of the curation workflow: edit a row's \code{CanonicalType} and
+set its \code{Source} to \code{"manual"} to pin that column's
+type. \code{\link{BuildRepositoryCatalog}} preserves such a row on
+re inference. In strict mode, an unrecognized \code{CanonicalType}
+value stops the load. Outside strict mode, it is logged and falls
+back to character.
 }
 \examples{
 tmp <- tempfile(fileext = ".csv")

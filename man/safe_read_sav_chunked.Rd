@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{safe_read_sav_chunked}
 \alias{safe_read_sav_chunked}
-\title{Read a large SAV file in memory-bounded chunks and write directly to Parquet}
+\title{Reads a large SAV file in chunks bounded by memory, writing each directly to Parquet}
 \usage{
 safe_read_sav_chunked(
   path,
@@ -31,130 +31,148 @@ safe_read_sav_chunked(
 )
 }
 \arguments{
-\item{path}{Character. Full path to the \code{.sav} file.}
+\item{path}{Character scalar. Full path to the \code{.sav} file.}
 
-\item{chunk_size}{Integer. Number of rows per chunk.  Defaults to
+\item{chunk_size}{Integer. Number of rows per chunk. Defaults to
 \code{SAV_CHUNK_SIZE} from the calling environment.}
 
-\item{TerminalHivePartition}{Logical. If \code{TRUE}, chunk files are
-written to source-specific \code{batch_id=<stem>_<NNNNN>/data.parquet}
-subdirectories under \code{year_dir} instead of flat
-\code{<stem>_<NNNNN>.parquet} files, and \code{direct_write} (schema
-alignment via \code{all_cols}/\code{col_classes} rather than the
-partition-preserving path) is forced on. Default \code{FALSE}.}
+\item{TerminalHivePartition}{Logical. Accepts \code{TRUE}, which writes
+chunk files to source specific
+\code{batch_id=<stem>_<NNNNN>/data.parquet} subdirectories under
+\code{year_dir}, instead of flat \code{<stem>_<NNNNN>.parquet} files,
+and forces \code{direct_write} on, using schema alignment through
+\code{all_cols} and \code{col_classes} rather than the partition
+preserving path. Accepts \code{FALSE}, which does not. Defaults to
+\code{FALSE}.}
 
-\item{year_dir}{Character. Full path to the hive-partitioned year
-directory where chunk Parquet files will be written
-(e.g. \code{"/data/parquet/NIS_Core/year=2019"}).}
+\item{year_dir}{Character scalar. Full path to the hive partitioned
+year directory where chunk Parquet files are written, for example
+\code{"/data/parquet/NIS_Core/year=2019"}.}
 
-\item{out_path}{Character (optional). Any non-\code{NULL} value forces
-\code{direct_write = TRUE} (schema alignment via \code{all_cols}); the
-path string itself is not used to name output files, which are always
-written under \code{year_dir}.}
+\item{out_path}{Character scalar. Accepts a value other than
+\code{NULL}, which forces \code{direct_write = TRUE}, using schema
+alignment through \code{all_cols}. The path string itself is not
+used to name an output file, since every output file is written
+under \code{year_dir}. Defaults to \code{NULL}.}
 
-\item{all_cols}{Character vector (optional). Union of all columns across
-years for this table, passed to \code{\link{align_columns}} when writing
-directly (\code{out_path} supplied or \code{TerminalHivePartition = TRUE}).}
+\item{all_cols}{Character vector. Union of every column across every
+year of this table, passed to \code{\link{align_columns}} when
+writing directly, that is, when \code{out_path} is supplied or
+\code{TerminalHivePartition} is \code{TRUE}. Defaults to \code{NULL}.}
 
-\item{col_classes}{Named list (optional). Column class map from
-\code{\link{build_col_classes}}, used for type enforcement and to derive
-the reference Arrow schema for all chunks of this file.}
+\item{col_classes}{Named list. Column class map from
+\code{\link{build_col_classes}}, used to enforce types and to derive
+the reference Arrow schema for every chunk of this file. Defaults to
+\code{NULL}.}
 
-\item{year_val}{Integer or character (optional). Derived value recorded in
-legacy manifest fields when \code{YEAR} is an explicit partition key.}
+\item{year_val}{Integer or character scalar. Value recorded in legacy
+manifest fields when \code{YEAR} is an explicit partition key.
+Defaults to \code{NULL}.}
 
-\item{chunk_size_decrement}{Integer (optional). Rows to subtract from the
-chunk size after a chunk fails (e.g. with a memory-allocation error).
-Defaults to 10\% of \code{chunk_size}. The reduction is local to this
-call because \code{chunk_size} itself is unmodified, so the next file loaded
-by \code{\link{generic_db_loader}} receives the original value.}
+\item{chunk_size_decrement}{Integer. Number of rows subtracted from the
+chunk size after a chunk fails, for example with a memory allocation
+error. Defaults to 10 percent of \code{chunk_size}. This reduction
+applies only to this call, since \code{chunk_size} itself is not
+modified, so the next file loaded by \code{\link{generic_db_loader}}
+receives the original value.}
 
-\item{min_chunk_size}{Integer (optional). Smallest chunk size that will be
-attempted before giving up on the chunked reader and falling back to
-\code{foreign::read.spss()} for the remaining ("tail") rows. Defaults to
-\code{chunk_size_decrement} (i.e. up to ~9 reductions from the original
-\code{chunk_size}).}
+\item{min_chunk_size}{Integer. Smallest chunk size that is attempted
+before the chunked reader gives up and falls back to
+\code{foreign::read.spss()} for the remaining rows. Defaults to
+\code{chunk_size_decrement}, allowing up to about nine reductions
+from the original \code{chunk_size}.}
 
-\item{ManifestPath, Database, TableName, DuckDBTable, SourcePath, SchemaHash}{Manifest bookkeeping: each written (or tail-read) chunk is recorded via
-\code{\link{update_parquet_manifest}} with these identifiers, and stale
-chunk files from a prior failed attempt are removed via
-\code{\link{remove_parquet_manifest_rows}} using \code{SourcePath}
-(defaulting to \code{path}) before the chunk loop starts.}
+\item{ManifestPath, Database, TableName, DuckDBTable, SourcePath, SchemaHash}{Used for manifest bookkeeping. Each written, or tail read, chunk is
+recorded with \code{\link{update_parquet_manifest}} under these
+identifiers, and a stale chunk file from an earlier failed attempt
+is removed with \code{\link{remove_parquet_manifest_rows}}, using
+\code{SourcePath}, which defaults to \code{path}, before the chunk
+loop starts.}
 
-\item{partition_keys}{Character vector. Canonical Hive partition column
-name(s), e.g. \code{"YEAR"}. Used to validate and then strip the
-partition column(s) out of each chunk before writing (the value lives in
-the directory name, not the Parquet file). Default \code{"YEAR"}.}
+\item{partition_keys}{Character vector. Canonical hive partition
+column names, for example \code{"YEAR"}. Used to validate, and then
+remove, the partition columns from each chunk before writing, since
+their value lives in the directory name rather than in the Parquet
+file. Defaults to \code{"YEAR"}.}
 
-\item{partition_values}{Named list or data frame row (optional). Declared
-partition value(s) for this file, checked against each chunk's own
-partition-column values via \code{\link{validate_partition_column_values}}.}
+\item{partition_values}{Named list, or one row of a data frame.
+Declared partition value for this file, checked against each
+chunk's own partition column values with
+\code{\link{validate_partition_column_values}}. Defaults to
+\code{NULL}.}
 
-\item{MaxFileStemTruncate}{Logical. If \code{TRUE}, chunk file stems are
-shortened to reduce Windows path-length failures.}
+\item{MaxFileStemTruncate}{Logical. Accepts \code{TRUE}, which
+shortens a chunk file's stem to reduce a Windows path length
+failure. Accepts \code{FALSE}, which does not. Defaults to
+\code{FALSE}.}
 
-\item{accept_partial}{Logical. If \code{TRUE}, a file whose total written
-row count falls short of the SPSS header's declared \code{ncases} is
-recorded as \code{partial_accepted} instead of stopping with a
-row-count-mismatch error. Default \code{FALSE}.}
+\item{accept_partial}{Logical. Accepts \code{TRUE}, which records a
+file whose total written row count falls short of the SPSS header's
+declared \code{ncases} as \code{partial_accepted}, instead of
+stopping with an error naming the row count mismatch. Accepts
+\code{FALSE}, which stops with that error. Defaults to \code{FALSE}.}
 
-\item{max_coerce_na_pct}{Numeric (optional). Passed to
-\code{\link{align_columns}}/\code{enforce_col_classes} for each
-chunk; fails the file when type coercion turns more than this percentage
-of a column's present values into \code{NA}.}
+\item{max_coerce_na_pct}{Numeric scalar. Passed to
+\code{\link{align_columns}} and \code{enforce_col_classes} for each
+chunk. Stops the file when type coercion turns more than this
+percentage of a column's present values into \code{NA}. Defaults to
+\code{NULL}.}
 
 \item{reader_options}{List. Reader options forwarded to
-\code{read_sav_with_options} for both the header/row-count probe
-and every chunk read (e.g. \code{Encoding}). Default \code{list()}.}
+\code{read_sav_with_options} for both the header and row count probe
+and every chunk read, for example \code{Encoding}. Defaults to
+\code{list()}.}
 
-\item{RepositoryLock}{Repository lock handle (optional), from
-\code{\link{acquire_repository_lock}}, touched via
-\code{\link{touch_repository_lock}} at the start of every chunk so the
-lock does not expire mid-file.}
+\item{RepositoryLock}{Repository lock handle, from
+\code{\link{acquire_repository_lock}}. Touched with
+\code{\link{touch_repository_lock}} at the start of every chunk, so
+the lock does not expire partway through the file. Defaults to
+\code{NULL}.}
 }
 \value{
-A list with \code{written = TRUE}, \code{n_rows} (total rows
-  written), and \code{status} (\code{"completed"}, \code{"empty"} for a
-  verified zero-row source, or \code{"partial_accepted"} when
-  \code{accept_partial = TRUE} absorbed a row-count shortfall) on success.
-  A fatal chunking, schema, or row-count error stops the load (after
-  removing any partial chunk output already written) so the source is not
+A list with \code{written = TRUE}, \code{n_rows}, the total
+  rows written, and \code{status}, one of \code{"completed"},
+  \code{"empty"} for a verified zero row source, or
+  \code{"partial_accepted"} when \code{accept_partial = TRUE} absorbed
+  a row count shortfall, on success. A chunking, schema, or row count
+  error that is not recovered stops the load, after removing any
+  partial chunk output already written, so that the source is not
   checkpointed.
 }
 \description{
-For SAV files that exceed \code{SAV_ROW_THRESHOLD} rows, loading the entire
-file into R at once would exhaust available RAM.  This function reads the
-file in batches of \code{chunk_size} rows using \code{haven::read_sav(skip,
-n_max)}, processes each chunk in-place (strip haven, UTF-8 sanitise, column
-align, type enforce, non-finite replacement), converts it to an Arrow table,
-and writes it as an individual numbered Parquet file directly into
-\code{year_dir}.  Peak RAM is bounded to one chunk regardless of total file
-size.
+Reads the file in batches of \code{chunk_size} rows, using
+\code{haven::read_sav(skip, n_max)}, processes each chunk in place, by
+stripping haven attributes, sanitizing its character encoding, aligning
+its columns, enforcing its column types, and replacing a non finite
+value, converts it to an Arrow table, and writes it as an individually
+numbered Parquet file directly into \code{year_dir}. Peak memory use is
+bounded to one chunk, regardless of the total file size.
 }
 \details{
-Chunk files are named \code{<stem>_<NNNNN>.parquet} and stored directly in
-the hive-partitioned \code{year=<year_val>/} directory.  DuckDB reads all
-\code{*.parquet} files in that directory as a single virtual table via the
-glob pattern in \code{\link{register_parquet_view}}.
+Each chunk file is named \code{<stem>_<NNNNN>.parquet} and stored
+directly in the hive partitioned \code{year=<year_val>/} directory.
+DuckDB reads every \code{*.parquet} file in that directory as a single
+virtual table, through the glob pattern used by
+\code{\link{register_parquet_view}}.
 
-Total row count is read from the SPSS file header (\code{ncases} attribute
-from \code{haven::read_sav(n_max = 0)}) before the chunk loop so that
-\code{skip} never exceeds the declared row count (which would cause
-\emph{"file did not contain the expected number of rows"}).
+The total row count is read from the SPSS file header, the
+\code{ncases} attribute from \code{haven::read_sav(n_max = 0)}, before
+the chunk loop begins, so that \code{skip} never exceeds the declared
+row count.
 
-Schema conflicts across chunks (e.g. a column inferred as \code{int32} in
-one chunk and \code{string} in another due to mixed ICD-10 / ICD-9 codes)
-are resolved by promoting the conflicting field to \code{utf8} and
-re-casting all prior chunks.
+A schema conflict across chunks, for example a column read as
+\code{int32} in one chunk and as \code{string} in another because it
+mixes ICD10 and ICD9 codes, is resolved by promoting the conflicting
+field to \code{utf8} and recasting every prior chunk.
 
-\strong{Adaptive chunk-size reduction:} if a chunk fails (most commonly
-\emph{"cannot allocate vector of size ... Mb"} because \code{chunk_size} is
-still too large for this table's column count/width), the chunk size is
-reduced by \code{chunk_size_decrement} and the same offset is retried. Once
-a working size is found it is reused for all remaining chunks of this file,
-but \code{chunk_size} as passed to the next file by
-\code{\link{generic_db_loader}} is unaffected. If \code{min_chunk_size} is
-reached without success, the function falls back to \code{\link{safe_read_sav}}.
+When a chunk fails, most commonly because \code{chunk_size} is still
+too large for this table's column count and width, the chunk size is
+reduced by \code{chunk_size_decrement} and the same offset is retried.
+Once a working size is found, it is reused for every remaining chunk of
+this file, while \code{chunk_size} as passed to the next file by
+\code{\link{generic_db_loader}} is unaffected. When \code{min_chunk_size}
+is reached without success, the function falls back to
+\code{\link{safe_read_sav}}.
 }
 \examples{
 \dontrun{

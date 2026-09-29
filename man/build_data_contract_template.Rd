@@ -2,24 +2,26 @@
 % Please edit documentation in R/repoquet.R
 \name{build_data_contract_template}
 \alias{build_data_contract_template}
-\title{Create an empty data-contract template data frame}
+\title{Creates an empty data contract template data frame}
 \usage{
 build_data_contract_template()
 }
 \value{
-An empty (0-row) data frame with columns \code{ContractName},
-  \code{DuckDBTable}, \code{Column}, \code{Rule}, \code{Value},
-  \code{ReferenceTable}, \code{ReferenceColumn}, \code{Where},
-  \code{Severity}, \code{Enabled}, and \code{Notes}.
+An empty, zero row, data frame with columns
+  \code{ContractName}, \code{DuckDBTable}, \code{Column},
+  \code{Rule}, \code{Value}, \code{ReferenceTable},
+  \code{ReferenceColumn}, \code{Where}, \code{Severity},
+  \code{Enabled}, and \code{Notes}.
 }
 \description{
-Returns the zero-row column layout expected by \code{\link{load_data_contracts}}
-and \code{\link{validate_data_contracts}}: one row per rule to enforce
-against a DuckDB table/column, with the rule's parameters, severity, and
-an enabled/disabled flag. Used internally to seed a new data-contract
-file when \code{\link{load_data_contracts}} is called with
+Returns the zero row column layout expected by
+\code{\link{load_data_contracts}} and
+\code{\link{validate_data_contracts}}: one row per rule to enforce
+against a DuckDB table and column, with the rule's parameters,
+severity, and an enabled or disabled flag. Used to seed a new data
+contract file when \code{\link{load_data_contracts}} is called with
 \code{create_if_missing = TRUE}, and useful as a starting point when
-writing contracts by hand.
+writing a contract by hand.
 }
 \examples{
 template <- build_data_contract_template()

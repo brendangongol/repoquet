@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{register_file_reader}
 \alias{register_file_reader}
-\title{Register a file reader for a workbook FileType}
+\title{Registers a file reader for a workbook FileType}
 \usage{
 register_file_reader(
   type,
@@ -17,60 +17,70 @@ register_file_reader(
 )
 }
 \arguments{
-\item{type}{Character scalar. Reader name to register, matched
-case-insensitively and after trimming whitespace against the MDT's
-\code{FileType} column. Must be non-empty.}
+\item{type}{Character scalar. Reader name to register. Matched against
+the MDT's \code{FileType} column without regard to letter case and
+after trimming whitespace. Must be a non empty string.}
 
-\item{read_full}{Function. \code{function(path, ...)} returning the whole
-file as a data.frame/data.table. Must throw an error on failure --
-dispatch logic in \code{\link{read_fn}} relies on the error signal to
-decide whether to retry or fall back to chunked reading.}
+\item{read_full}{Function with signature \code{function(path, ...)},
+returning the whole file as a data frame or data.table. Must signal
+an error on failure, since the dispatch logic in \code{\link{read_fn}}
+relies on that error to decide whether to retry or fall back to
+reading in chunks.}
 
-\item{read_header}{Function. \code{function(path, ...)} returning a
-character vector of the file's raw (un-canonicalized) column names.}
+\item{read_header}{Function with signature \code{function(path, ...)},
+returning a character vector of the file's raw, uncanonicalized
+column names.}
 
-\item{read_sample}{Function. \code{function(path, ...)} returning a
-data.frame of the file's first rows, used for column-type inference by
-\code{\link{build_col_classes}}. Declared-type formats (SAV, Stata, SAS)
-only need a handful of rows; delimited formats should sample deeper to
-catch late type disagreements.}
+\item{read_sample}{Function with signature \code{function(path, ...)},
+returning a data frame of the file's first rows, used for column type
+inference by \code{\link{build_col_classes}}. A format with a
+declared type for each column, such as SAV, Stata, or SAS, needs only
+a handful of rows. A delimited format should sample more deeply, to
+catch a type disagreement that appears later in the file.}
 
-\item{count_rows}{Function (optional). \code{function(path, ...)} returning
-an integer row count; may error, which callers treat as \code{NA}.
-Required when \code{chunkable = TRUE}, unless \code{type} is
-\code{"sav"} (which has its own row-counting path).}
+\item{count_rows}{Function with signature \code{function(path, ...)},
+returning an integer row count. May signal an error, which a caller
+treats as \code{NA}. Required when \code{chunkable} is \code{TRUE},
+unless \code{type} is \code{"sav"}, which has its own way of counting
+rows. Defaults to \code{NULL}.}
 
-\item{has_labels}{Logical. \code{TRUE} when \code{read_labels_header}
-returns a 0-row frame carrying variable/value label attributes (as SAV
-and Stata files do). Default \code{FALSE}.}
+\item{has_labels}{Logical. Accepts \code{TRUE}, which declares that
+\code{read_labels_header} returns a data frame with zero rows whose
+column attributes carry variable and value labels, as SAV and Stata
+files do. Accepts \code{FALSE}, which declares that it does not.
+Defaults to \code{FALSE}.}
 
-\item{read_labels_header}{Function (optional). \code{function(path, ...)}
-returning a 0-row data.frame whose column attributes carry
-variable/value labels. Only meaningful when \code{has_labels = TRUE}.}
+\item{read_labels_header}{Function with signature
+\code{function(path, ...)}, returning a data frame with zero rows
+whose column attributes carry variable and value labels. Meaningful
+only when \code{has_labels} is \code{TRUE}. Defaults to \code{NULL}.}
 
-\item{chunkable}{Logical. \code{TRUE} when the loader may stream this file
-type in memory-bounded chunks via \code{read_chunk} (consumed by
-\code{\link{read_delimited_chunked}}). Default \code{FALSE}.}
+\item{chunkable}{Logical. Accepts \code{TRUE}, which declares that the
+loader may stream this file type in chunks bounded by memory, through
+\code{read_chunk}, consumed by \code{\link{read_delimited_chunked}}.
+Accepts \code{FALSE}, which declares that it may not. Defaults to
+\code{FALSE}.}
 
-\item{read_chunk}{Function (optional). \code{function(path, offset, n_max,
-...)} returning one chunk of rows starting at row \code{offset}.
-Required when \code{chunkable = TRUE}, unless \code{type} is
-\code{"sav"} (which is chunked by \code{\link{safe_read_sav_chunked}}
-instead).}
+\item{read_chunk}{Function with signature
+\code{function(path, offset, n_max, ...)}, returning one chunk of
+rows starting at row \code{offset}. Required when \code{chunkable} is
+\code{TRUE}, unless \code{type} is \code{"sav"}, which is instead
+chunked by \code{\link{safe_read_sav_chunked}}. Defaults to
+\code{NULL}.}
 }
 \value{
-Invisibly, the normalized (lowercased, trimmed) \code{type} string
-  that was registered.
+Invisibly, the normalized, lowercased and trimmed, \code{type}
+  string that was registered.
 }
 \description{
-Adds (or replaces) an entry in \pkg{repoquet}'s internal file-reader
-registry under \code{tolower(trimws(type))}, so that MDT rows whose
-\code{FileType} matches \code{type} are dispatched to the supplied
-callbacks instead of one of the built-ins (e.g. \code{"sav"}, \code{"csv"},
-\code{"tsv"}, \code{"dta"}, \code{"sas7bdat"}, \code{"xpt"},
-\code{"parquet"}, \code{"rds"}). Every callback receives the file path as
-its first argument, plus any extra options \code{call_reader}
-forwards to it.
+Adds, or replaces, an entry in the package's internal file reader
+registry under \code{tolower(trimws(type))}, so that an MDT row whose
+\code{FileType} matches \code{type} is dispatched to the supplied
+callbacks instead of one of the package's own readers, for example
+\code{"sav"}, \code{"csv"}, \code{"tsv"}, \code{"dta"},
+\code{"sas7bdat"}, \code{"xpt"}, \code{"parquet"}, or \code{"rds"}. Every
+callback receives the file path as its first argument, together with
+any extra options \code{call_reader} forwards to it.
 }
 \examples{
 #### Register a minimal reader for a fictitious pipe-delimited format ####

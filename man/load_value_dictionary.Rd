@@ -2,23 +2,26 @@
 % Please edit documentation in R/repoquet.R
 \name{load_value_dictionary}
 \alias{load_value_dictionary}
-\title{Read low-cardinality value evidence from the schema catalog}
+\title{Reads low cardinality value evidence from the schema catalog}
 \usage{
 load_value_dictionary(TableSchemaPath)
 }
 \arguments{
-\item{TableSchemaPath}{Character. Path to the schema catalog written by
-\code{\link{write_table_schema_catalog}} (\code{.xlsx} or \code{.csv}).}
+\item{TableSchemaPath}{Character scalar. Path to the schema
+catalog written by \code{\link{write_table_schema_catalog}},
+accepting either an \code{.xlsx} or a \code{.csv} extension.}
 }
 \value{
-A data.table of value evidence (all columns read as character), or
-  \code{NULL} when \code{TableSchemaPath} is missing, does not exist, has
-  no \code{ValueDictionary} sheet/sibling file, or it is empty.
+A data.table of value evidence, with every column read as
+  character, or \code{NULL} when \code{TableSchemaPath} is
+  missing, does not exist, has no \code{ValueDictionary} sheet or
+  sibling file, or that sheet or file is empty.
 }
 \description{
-Reads the \code{ValueDictionary} sheet of \code{TableSchemas.xlsx}, or the
-sibling CSV written for a CSV schema catalog. Values are descriptive survey
-evidence and never control physical Parquet coercion.
+Reads the \code{ValueDictionary} sheet of \code{TableSchemas.xlsx},
+or the sibling CSV written for a CSV schema catalog. The values
+are descriptive survey evidence and never control physical
+Parquet coercion.
 }
 \examples{
 tmp <- tempfile(fileext = ".csv")

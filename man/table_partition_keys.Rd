@@ -2,20 +2,21 @@
 % Please edit documentation in R/repoquet.R
 \name{table_partition_keys}
 \alias{table_partition_keys}
-\title{Resolve the (validated) partition keys shared by all rows of one table}
+\title{Resolves the partition keys shared by every row of one table}
 \usage{
 table_partition_keys(rows_tbl)
 }
 \arguments{
-\item{rows_tbl}{MDT rows for a single Database/TableName group.}
+\item{rows_tbl}{MDT rows for a single Database and TableName group.}
 }
 \value{
-Character vector of canonical partition key names (e.g. "YEAR").
+Character vector of canonical partition key names, for example
+  \code{"YEAR"}.
 }
 \description{
-All MDT rows of a Database/TableName group must declare the identical
-partition key list -- otherwise the table's directory tree would disagree
-with itself about its partition columns and the DuckDB view would break.
+Returns the partition key list common to every MDT row of one Database
+and TableName group, and stops with an error when the rows declare
+different partition key lists.
 }
 \examples{
 rows <- data.frame(PartitionKey = c("YEAR", "YEAR"),

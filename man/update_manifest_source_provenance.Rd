@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{update_manifest_source_provenance}
 \alias{update_manifest_source_provenance}
-\title{Record remote-source download provenance on an existing manifest row}
+\title{Records remote source download provenance on an existing manifest row}
 \usage{
 update_manifest_source_provenance(
   ManifestPath,
@@ -13,6 +13,6 @@ update_manifest_source_provenance(
 )
 }
 \description{
-Record remote-source download provenance on an existing manifest row
+Records remote source download provenance on an existing manifest row
 }
 \keyword{internal}

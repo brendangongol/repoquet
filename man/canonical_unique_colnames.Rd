@@ -2,14 +2,23 @@
 % Please edit documentation in R/repoquet.R
 \name{canonical_unique_colnames}
 \alias{canonical_unique_colnames}
-\title{Canonicalize column names while retaining every physical source column}
+\title{Canonicalizes column names while retaining every physical source column}
 \usage{
 canonical_unique_colnames(x)
 }
+\arguments{
+\item{x}{Character vector of raw column names.}
+}
+\value{
+Character vector the same length as \code{x}, of canonicalized,
+  unique column names.
+}
 \description{
-Exact duplicate raw headers are disambiguated deterministically with
-\code{__2}, \code{__3}, and so on. This preserves the data without changing
-the source file. Distinct raw headers that only collide after canonicalization
-remain available to \code{canonicalize_dataframe_names()} for its existing
-compatibility merge/conflict check.
+Canonicalizes each name with \code{\link{canonical_colnames}}. An exact
+duplicate raw header is disambiguated deterministically by appending
+\code{__2}, \code{__3}, and so on, preserving the data without changing
+the source file. A distinct raw header that collides with another only
+after canonicalization keeps its own canonicalized name, unchanged, so
+that \code{canonicalize_dataframe_names()} can still detect and resolve
+that collision.
 }

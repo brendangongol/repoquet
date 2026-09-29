@@ -2,25 +2,26 @@
 % Please edit documentation in R/repoquet.R
 \name{touch_repository_lock}
 \alias{touch_repository_lock}
-\title{Heartbeat the repository lock so it does not go stale mid-run}
+\title{Sends a heartbeat for the repository lock so it does not go stale during a run}
 \usage{
 touch_repository_lock(lock)
 }
 \arguments{
 \item{lock}{A \code{repository_lock} object from
-\code{\link{acquire_repository_lock}}, or \code{NULL}/any other value
-(silently a no-op, so callers can pass an optional lock through without
-checking for \code{NULL} first).}
+\code{\link{acquire_repository_lock}}. Accepts such an object, whose
+owner file's modification time is updated. Accepts \code{NULL} or
+any other value, which does nothing, so that a caller can pass an
+optional lock through without checking for \code{NULL} first.}
 }
 \value{
-\code{invisible(NULL)}. Called for its side effect.
+\code{invisible(NULL)}.
 }
 \description{
 Updates the modification time of the lock's owner file to the current
-time. Call this periodically during a long-running operation (e.g. once
-per chunk or per file) so \code{\link{acquire_repository_lock}}'s
-\code{stale_minutes} check does not mistake a slow-but-alive run for a
-crashed one.
+time. Called periodically during a long running operation, for example
+once per chunk or per file, so that
+\code{\link{acquire_repository_lock}}'s \code{stale_minutes} check does
+not mistake a slow but active run for a crashed one.
 }
 \examples{
 lock_path <- tempfile("repo_lock_")

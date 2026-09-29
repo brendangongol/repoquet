@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{align_columns}
 \alias{align_columns}
-\title{Pad a data frame with typed \code{NA} columns to match a target column set}
+\title{Pads a data frame with typed \code{NA} columns to match a target column set}
 \usage{
 align_columns(
   df,
@@ -12,35 +12,35 @@ align_columns(
 )
 }
 \arguments{
-\item{df}{A data frame or data.table.}
+\item{df}{Data frame or data.table.}
 
-\item{all_cols}{Character vector of column names that must be
-present in the output.}
+\item{all_cols}{Character vector of column names that must be present
+in the output.}
 
-\item{comprehensive_sample}{Named list (optional). Maps column names to their
-R class strings, used both to determine the type of added \code{NA}
-columns and (via \code{enforce_col_classes}) to coerce existing
-columns to the agreed class.}
+\item{comprehensive_sample}{Named list. Maps column names to their R
+class strings, used both to determine the type of an added \code{NA}
+column and, through \code{enforce_col_classes}, to coerce an existing
+column to its agreed class. Defaults to \code{NULL}.}
 
-\item{max_coerce_na_pct}{Numeric (optional). Passed to
-\code{enforce_col_classes}. When coercing an existing column to
-its agreed class (per \code{comprehensive_sample}) turns more than this
-percentage of its present values into \code{NA}, the coercion is treated
-as a data-quality failure and an error is raised instead of silently
-destroying data. \code{NULL} (the default) disables this check.}
+\item{max_coerce_na_pct}{Numeric scalar. Passed to
+\code{enforce_col_classes}. Accepts a percentage, such that when
+coercing an existing column to its agreed class, from
+\code{comprehensive_sample}, turns more than that percentage of its
+present values into \code{NA}, an error is raised instead of
+completing the coercion. Accepts \code{NULL}, which disables this
+check. Defaults to \code{NULL}.}
 }
 \value{
-The input \code{df} (as a \code{data.table}) with all missing
-  columns added as typed \code{NA} vectors, existing columns coerced to
-  their agreed classes, and columns reordered so \code{all_cols} come
-  first (in that order), followed by any extra columns in \code{df}.
+The input \code{df}, as a data.table, with every missing column
+  added as a typed \code{NA} vector, every existing column coerced to
+  its agreed class, and columns reordered so that \code{all_cols} come
+  first, in that order, followed by any extra column of \code{df}.
 }
 \description{
 Ensures that \code{df} contains every column listed in \code{all_cols}.
-Columns present in \code{all_cols} but absent from \code{df} are added with
-the appropriate typed \code{NA} value (e.g. \code{NA_integer_} for integer
-columns).  This is required before row-binding data frames from different
-years, which may not share exactly the same column set.
+A column listed in \code{all_cols} but absent from \code{df} is added
+with the appropriate typed \code{NA} value, for example
+\code{NA_integer_} for an integer column.
 }
 \examples{
 \dontrun{

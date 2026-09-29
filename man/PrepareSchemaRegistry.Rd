@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{PrepareSchemaRegistry}
 \alias{PrepareSchemaRegistry}
-\title{Prepare the Parquet observations and compact review workbook}
+\title{Prepares the Parquet observations and compact review workbook}
 \usage{
 PrepareSchemaRegistry(
   MDT,
@@ -35,96 +35,113 @@ PrepareSchemaRegistry(
 )
 }
 \arguments{
-\item{MDT}{Data frame. Master database table; see
+\item{MDT}{Data frame. Master database table. See
 \code{\link{SurveyRepositorySchema}}.}
 
-\item{MasterDBPath}{Character. Root directory of the source files.}
+\item{MasterDBPath}{Character scalar. Root directory of the
+source files.}
 
-\item{ObservationPath}{Character. Output Parquet path for the survey
-evidence.}
+\item{ObservationPath}{Character scalar. Output Parquet path for
+the survey evidence.}
 
-\item{SchemaReviewPath}{Character. Output \code{.xlsx} path for the
-review workbook.}
+\item{SchemaReviewPath}{Character scalar. Output \code{.xlsx}
+path for the review workbook.}
 
-\item{DBLoad}{Character vector (optional). Subset of databases to survey.}
+\item{DBLoad}{Character vector. Subset of databases to survey.
+Defaults to \code{NULL}, which surveys every database.}
 
-\item{n_workers}{Integer. Parallel workers for the survey stage. Default 1.}
+\item{n_workers}{Integer. Parallel workers for the survey stage.
+Defaults to \code{1}.}
 
-\item{SourceFingerprintMode}{Character. One of \code{"metadata"} (default),
-\code{"sha256"}, or \code{"none"}.}
+\item{SourceFingerprintMode}{Character scalar. Accepts one of
+three values: \code{"metadata"}, \code{"sha256"}, or
+\code{"none"}. Defaults to \code{"metadata"}.}
 
-\item{StrictReaders}{Logical. Stop if any source fails to read. Default
-\code{FALSE}.}
+\item{StrictReaders}{Logical. Accepts \code{TRUE}, which stops if
+any source fails to read. Accepts \code{FALSE}, which does not.
+Defaults to \code{FALSE}.}
 
-\item{SchemaRegistryPath}{Character (optional). Schema-registry workbook
-path used by the recommendation stage.}
+\item{SchemaRegistryPath}{Character scalar. Schema registry
+workbook path used by the recommendation stage. Defaults to
+\code{NULL}.}
 
-\item{schema_registry}{A pre-loaded schema-registry object (optional),
-taking precedence over \code{SchemaRegistryPath}.}
+\item{schema_registry}{A schema registry object, already loaded,
+taking precedence over \code{SchemaRegistryPath}. Defaults to
+\code{NULL}.}
 
-\item{SchemaProfile}{Character. One of \code{"none"} (default),
-\code{"generic"}, or \code{"hcup"}.}
+\item{SchemaProfile}{Character scalar. Accepts one of three
+values: \code{"none"}, \code{"generic"}, or \code{"hcup"}.
+Defaults to \code{"none"}.}
 
-\item{ValuePreviewMaxDistinct}{Integer. Value-preview cardinality cutoff.
-Default 15.}
+\item{ValuePreviewMaxDistinct}{Integer. Value preview cardinality
+cutoff. Defaults to \code{15}.}
 
-\item{ValuePreviewTypes}{Character vector. Types eligible for value
-preview. Default \code{c("character", "integer", "int64", "logical")}.}
+\item{ValuePreviewTypes}{Character vector. Type eligible for a
+value preview. Defaults to
+\code{c("character", "integer", "int64", "logical")}.}
 
-\item{ValuePreviewIdentifiers}{Logical. Include identifier-like columns in
-the value preview. Default \code{FALSE}.}
+\item{ValuePreviewIdentifiers}{Logical. Accepts \code{TRUE}, which
+includes an identifier like column in the value preview.
+Accepts \code{FALSE}, which does not. Defaults to \code{FALSE}.}
 
-\item{LogPath}{Character (optional). Log file path for this call.}
+\item{LogPath}{Character scalar. Log file path for this call.
+Defaults to \code{NULL}.}
 
-\item{RunId}{Character (optional). Run identifier tagged onto log lines.}
+\item{RunId}{Character scalar. Run identifier tagged onto log
+lines. Defaults to \code{NULL}.}
 
-\item{SchemaSurveyMode}{Character. One of \code{"adaptive"} (default),
-\code{"full"}, or \code{"sample"}.}
+\item{SchemaSurveyMode}{Character scalar. Accepts one of three
+values: \code{"adaptive"}, \code{"full"}, or \code{"sample"}.
+Defaults to \code{"adaptive"}.}
 
-\item{AdaptiveSampleRows}{Integer. Rows retained for adaptive/sample mode.
-Default 100000.}
+\item{AdaptiveSampleRows}{Integer. Rows retained for adaptive or
+sample mode. Defaults to \code{100000}.}
 
-\item{FastReadMaxBytes}{Numeric. Maximum size (bytes) for the bounded
-fast-read path. Default 256 MiB.}
+\item{FastReadMaxBytes}{Numeric scalar. Maximum size, in bytes,
+for the bounded fast read path. Defaults to \code{256} MiB.}
 
-\item{SchemaChunkSize}{Integer. Rows per exhaustive schema-scan chunk.
-Default 100000.}
+\item{SchemaChunkSize}{Integer. Rows per exhaustive schema scan
+chunk. Defaults to \code{100000}.}
 
-\item{ObservationCachePath}{Character (optional). Per-source observation
-cache directory.}
+\item{ObservationCachePath}{Character scalar. Per source
+observation cache directory. Defaults to \code{NULL}.}
 
-\item{ReuseObservationCache}{Logical. Reuse unchanged cached observations.
-Default \code{TRUE}.}
+\item{ReuseObservationCache}{Logical. Accepts \code{TRUE}, which
+reuses an unchanged cached observation. Accepts \code{FALSE},
+which does not. Defaults to \code{TRUE}.}
 
-\item{RefreshObservationCache}{Logical. Ignore the cache and rescan every
-source. Default \code{FALSE}.}
+\item{RefreshObservationCache}{Logical. Accepts \code{TRUE}, which
+ignores the cache and rescans every source. Accepts
+\code{FALSE}, which does not. Defaults to \code{FALSE}.}
 
-\item{FutureGlobalsMaxSizeMB}{Numeric. Parallel worker export size limit
-(MB). Default 768.}
+\item{FutureGlobalsMaxSizeMB}{Numeric scalar. Parallel worker
+export size limit, in megabytes. Defaults to \code{768}.}
 
-\item{Progress}{Logical. Print periodic progress messages. Default
-\code{TRUE}.}
+\item{Progress}{Logical. Accepts \code{TRUE}, which prints a
+periodic progress message. Accepts \code{FALSE}, which does
+not. Defaults to \code{TRUE}.}
 
-\item{ProgressEvery}{Integer (optional). Force a progress message every
-this many sources.}
+\item{ProgressEvery}{Integer. Forces a progress message every
+this many sources. Defaults to \code{NULL}.}
 
-\item{ProgressIntervalSeconds}{Numeric. Minimum seconds between progress
-messages. Default 30.}
+\item{ProgressIntervalSeconds}{Numeric scalar. Minimum seconds
+between a progress message. Defaults to \code{30}.}
 }
 \value{
-Invisibly, a list with \code{survey} (the
-  \code{"RepositorySchemaSurvey"}), \code{proposal} (the
-  \code{"RepositorySchemaProposal"}), \code{ObservationPath}, and
+Invisibly, a list with \code{survey}, the
+  \code{"RepositorySchemaSurvey"}, \code{proposal}, the
+  \code{"RepositorySchemaProposal"}, \code{ObservationPath}, and
   \code{SchemaReviewPath}.
 }
 \description{
-Convenience wrapper that runs the three schema-preparation stages in
-sequence: \code{\link{SurveyRepositorySchema}} (survey source evidence to
-Parquet), \code{\link{RecommendRepositorySchema}} (derive recommended
-types and compatibility candidates), and \code{\link{WriteSchemaProposal}}
-(write the reviewable workbook). Logs one message per stage. Most
-arguments are passed through to the corresponding stage function; see
-their documentation for details.
+A convenience wrapper that runs the three schema preparation
+stages in sequence: \code{\link{SurveyRepositorySchema}}, which
+surveys source evidence to Parquet, \code{\link{RecommendRepositorySchema}},
+which derives a recommended type and a compatibility candidate,
+and \code{\link{WriteSchemaProposal}}, which writes the reviewable
+workbook. Logs one message per stage. Most arguments are passed
+through to the corresponding stage function. See that function's
+documentation for detail.
 }
 \examples{
 \donttest{

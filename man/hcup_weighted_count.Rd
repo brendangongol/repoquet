@@ -7,7 +7,7 @@
 \alias{hcup_weighted_mean}
 \alias{hcup_weighted_summary}
 \alias{weighted_summary}
-\title{Survey-weighted counts and means over a DuckDB view}
+\title{Computes a survey weighted count or mean over a DuckDB view}
 \usage{
 hcup_weighted_count(con, table, weight_col = "DISCWT", by = NULL, where = NULL)
 
@@ -43,40 +43,48 @@ weighted_summary(
 )
 }
 \arguments{
-\item{con}{Live DuckDB connection.}
+\item{con}{A live DuckDB connection.}
 
-\item{table}{Character. Registered view/table name (validated against the
-database).}
+\item{table}{Character scalar. Registered view or table name,
+validated against the database.}
 
-\item{weight_col}{Character. Survey weight column, default \code{"DISCWT"}.}
+\item{weight_col}{Character scalar. Survey weight column. Defaults
+to \code{"DISCWT"} for \code{hcup_weighted_count},
+\code{hcup_weighted_mean}, and \code{hcup_weighted_summary}, and
+is required, with no default, for \code{weighted_count},
+\code{weighted_mean}, and \code{weighted_summary}.}
 
-\item{by}{Character vector (optional). Grouping columns; validated as
-identifiers against the table.}
+\item{by}{Character vector. Grouping columns, validated as
+identifiers against the table. Defaults to \code{NULL}.}
 
-\item{where}{Character (optional). Raw SQL predicate appended as
-\code{WHERE ...}. Trusted input only -- it is interpolated verbatim.}
+\item{where}{Character scalar. Raw SQL predicate appended as
+\code{WHERE ...}. Trusted input only, since it is interpolated
+verbatim. Defaults to \code{NULL}.}
 
-\item{value_col}{Character (means only). Numeric column to average.}
+\item{value_col}{Character scalar. Numeric column to average. Used
+only for a mean.}
 }
 \value{
-data.table. Counts: by-groups, \code{n_unweighted},
-  \code{n_weighted}, \code{n_missing_weight}. Means additionally:
-  \code{mean_weighted}, \code{mean_unweighted}, \code{n_value_missing}.
+A data.table. For a count: the grouping columns, plus
+  \code{n_unweighted}, \code{n_weighted}, and
+  \code{n_missing_weight}. For a mean, also \code{mean_weighted},
+  \code{mean_unweighted}, and \code{n_value_missing}.
 }
 \description{
-HCUP discharge records are a sample: national estimates require the survey
-weight (\code{DISCWT} for NIS, \code{TRENDWT} for trend files, etc.). These
-helpers compute weighted point estimates with the weight handling that is
-easy to get subtly wrong by hand. Rows with a missing weight are excluded
-from weighted figures (and counted separately), and for means the weight
-sum is restricted to rows where the value is non-missing so the denominator
-matches the numerator.
+HCUP discharge records are a sample. A national estimate requires
+the survey weight, \code{DISCWT} for NIS, \code{TRENDWT} for a trend
+file, and so on. These functions compute a weighted point estimate
+with the weight handling that is easy to get subtly wrong by hand. A
+row with a missing weight is excluded from a weighted figure, and
+counted separately. For a mean, the weight sum is restricted to a
+row whose value is not missing, so that the denominator matches the
+numerator.
 }
 \details{
-IMPORTANT: these are point estimates only. Standard errors for HCUP data
-require the full survey design (strata such as \code{NIS_STRATUM}, clusters
-such as \code{HOSP_NIS}); use the \pkg{survey} package when variance
-estimates are needed.
+These are point estimates only. A standard error for HCUP data
+requires the full survey design, strata such as \code{NIS_STRATUM},
+and clusters such as \code{HOSP_NIS}. Use the \pkg{survey} package
+when a variance estimate is needed.
 }
 \examples{
 con <- DBI::dbConnect(duckdb::duckdb(), dbdir = ":memory:")

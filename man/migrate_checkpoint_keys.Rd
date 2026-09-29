@@ -2,30 +2,30 @@
 % Please edit documentation in R/repoquet.R
 \name{migrate_checkpoint_keys}
 \alias{migrate_checkpoint_keys}
-\title{Rewrite legacy checkpoint entries into the generalized key format}
+\title{Rewrites legacy checkpoint entries into the generalized key format}
 \usage{
 migrate_checkpoint_keys(CheckpointPath, MDT, DryRun = TRUE)
 }
 \arguments{
-\item{CheckpointPath}{Character. Checkpoint .rds path.}
+\item{CheckpointPath}{Character scalar. Path to the checkpoint file.}
 
 \item{MDT}{Data frame. Current Master Database Table.}
 
-\item{DryRun}{Logical. TRUE (default) reports without writing.}
+\item{DryRun}{Logical. Accepts \code{TRUE}, which reports the entries
+that would be migrated without writing any change to
+\code{CheckpointPath}. Accepts \code{FALSE}, which writes the migrated
+entries to \code{CheckpointPath}. Defaults to \code{TRUE}.}
 }
 \value{
-Invisibly, list(n_migrated, n_unexplained).
+Invisibly, a list with elements \code{n_migrated} and
+  \code{n_unexplained}.
 }
 \description{
-Checkpoints written before generalized keys existed contain value-only
-identities (\code{DB||Table||2019||dir||path}) or bare paths. Those formats
-cannot distinguish two partition schemes that share values (e.g.
-\code{SITE=MGH} vs \code{FACILITY=MGH}), so
-\code{checkpoint_completed_mask} only tolerates them as a migration
-bridge. This helper rewrites every legacy entry the current MDT can explain
-into the generalized format, after which \code{accept_legacy = FALSE} can be
-used. Entries no MDT row explains are left untouched and reported --
-investigate those with \code{\link{audit_repository}}.
+Rewrites, in the checkpoint file at \code{CheckpointPath}, each legacy
+entry that the current MDT can explain, whether a key that records only
+partition values or a bare path, into the generalized checkpoint key
+format. An entry that no row of the current MDT explains is left
+unchanged and is reported.
 }
 \examples{
 tmp_cp <- tempfile(fileext = ".rds")

@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{SummaryVerification}
 \alias{SummaryVerification}
-\title{Print a post-load summary of completed files and failures}
+\title{Prints a summary of completed files and failures after a load}
 \usage{
 SummaryVerification(
   MDT,
@@ -15,19 +15,36 @@ SummaryVerification(
 )
 }
 \arguments{
-\item{MDT}{Data frame. Master Database Table (used to identify completed
-paths).}
+\item{MDT}{Data frame. Master Database Table, used to identify completed
+paths.}
 
-\item{CheckpointPath}{Character. Path to the checkpoint \code{.rds} file.}
+\item{CheckpointPath}{Character scalar. Path to the checkpoint
+\code{.rds} file.}
 
-\item{LogPath}{Character. Path to the plain-text log file produced by
-\code{\link{log_msg}}.}
+\item{LogPath}{Character scalar. Path to the plain text log file
+produced by \code{\link{log_msg}}.}
 
-\item{logStatus}{Logical. If \code{TRUE} (default), output is written via
-\code{\link{log_msg}}; otherwise it is printed to the console.}
+\item{logStatus}{Logical. Accepts \code{TRUE}, which writes output with
+\code{\link{log_msg}}. Accepts \code{FALSE}, which prints it to the
+console. Defaults to \code{TRUE}.}
+
+\item{RunId}{Character scalar. Run identifier used to restrict the log
+file to lines from this run only. See
+\code{\link{begin_repository_run}}. Defaults to \code{NULL}, which
+does not restrict by run.}
+
+\item{MasterDBPath}{Character scalar. Root directory used to resolve
+each row's source file for fingerprinting. Required when
+\code{SourceFingerprintMode} is not \code{"none"}. Defaults to
+\code{NULL}.}
+
+\item{SourceFingerprintMode}{Character scalar. Accepts one of three
+values: \code{"none"}, \code{"metadata"}, or \code{"sha256"}. Must
+match the mode used when the checkpoint was written. See
+\code{\link{source_fingerprint}}. Defaults to \code{"none"}.}
 }
 \value{
-\code{invisible(NULL)}.  Called for its side effects.
+\code{invisible(NULL)}.
 }
 \description{
 Reads the checkpoint and the log file to report how many files completed

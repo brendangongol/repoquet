@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{register_parquet_view_compile}
 \alias{register_parquet_view_compile}
-\title{Register DuckDB views for multiple tables}
+\title{Creates DuckDB views for multiple tables}
 \usage{
 register_parquet_view_compile(
   con,
@@ -23,52 +23,66 @@ register_parquet_view_compile(
 \arguments{
 \item{con}{A DBI connection to an open DuckDB database.}
 
-\item{ParquetBasePath}{Character. Root directory of the Parquet store.}
+\item{ParquetBasePath}{Character scalar. Root directory of the Parquet
+store.}
 
 \item{tables_written}{Character vector of table names to register.}
 
-\item{verbose}{Logical. If \code{TRUE} (default), logs or prints a
-confirmation message for each registered view.}
+\item{verbose}{Logical. Accepts \code{TRUE}, which logs or prints a
+confirmation message for each registered view. Accepts \code{FALSE},
+which does not. Defaults to \code{TRUE}.}
 
-\item{logStatus}{Logical. If \code{TRUE} (default), messages are written via
-\code{\link{log_msg}}; otherwise they are printed to the console.}
+\item{logStatus}{Logical. Accepts \code{TRUE}, which writes messages
+with \code{\link{log_msg}}. Accepts \code{FALSE}, which prints them to
+the console. Defaults to \code{TRUE}.}
 
-\item{SchemaRegistryPath}{Character (optional). Path to the schema
-registry workbook, used to load \code{schema_registry} when it isn't
-supplied directly. Ignored if \code{schema_registry} is provided.}
+\item{SchemaRegistryPath}{Character scalar. Path to the schema registry
+workbook, used to load \code{schema_registry} when it is not supplied
+directly. Ignored when \code{schema_registry} is supplied. Defaults to
+\code{NULL}.}
 
-\item{schema_registry}{Data frame (optional). An already-loaded schema
-registry (see \code{\link{load_schema_registry}}). If \code{NULL}, it is
-loaded from \code{SchemaRegistryPath}.}
+\item{schema_registry}{Data frame. An already loaded schema registry,
+see \code{\link{load_schema_registry}}. Defaults to \code{NULL}, which
+loads it from \code{SchemaRegistryPath}.}
 
-\item{validate}{Logical. If \code{TRUE} (default), each registered view is
-validated against the schema registry and table schema catalog via
-\code{\link{validate_duckdb_table}}.}
+\item{validate}{Logical. Accepts \code{TRUE}, which validates each
+registered view against the schema registry and table schema catalog,
+with \code{\link{validate_duckdb_table}}. Accepts \code{FALSE}, which
+does not. Defaults to \code{TRUE}.}
 
-\item{strict_validation}{Logical. If \code{TRUE} (default), a validation
-mismatch stops execution; if \code{FALSE}, it is logged but non-fatal.
-Only consulted when \code{validate = TRUE}.}
+\item{strict_validation}{Logical. Accepts \code{TRUE}, which, once every
+table has been attempted, stops with an error if any table failed
+validation. Accepts \code{FALSE}, which logs such a failure as a
+warning instead. Consulted only when \code{validate} is \code{TRUE}.
+Defaults to \code{TRUE}.}
 
-\item{TableSchemaPath}{Character (optional). Path to the approved table
-schema catalog workbook, used to load \code{table_schema} when it isn't
-supplied directly. Ignored if \code{table_schema} is provided.}
+\item{TableSchemaPath}{Character scalar. Path to the approved table
+schema catalog workbook, used to load \code{table_schema} when it is
+not supplied directly. Ignored when \code{table_schema} is supplied.
+Defaults to \code{NULL}.}
 
-\item{table_schema}{Data frame (optional). An already-loaded table schema
-catalog (see \code{\link{load_table_schema_catalog}}). If \code{NULL}
-and \code{TableSchemaPath} is supplied, it is loaded from there.}
+\item{table_schema}{Data frame. An already loaded table schema catalog,
+see \code{\link{load_table_schema_catalog}}. Defaults to \code{NULL},
+which, when \code{TableSchemaPath} is supplied, loads it from there.}
 
-\item{LogPath}{Character (optional). Log file path for this call's
-run-scoped logging context; see \code{\link{begin_repository_run}}.}
+\item{LogPath}{Character scalar. Path to the log file for this call. See
+\code{\link{begin_repository_run}}.}
 
-\item{RunId}{Character (optional). Run identifier for this call's
-run-scoped logging context; see \code{\link{begin_repository_run}}.}
+\item{RunId}{Character scalar. Run identifier for this call. See
+\code{\link{begin_repository_run}}.}
 }
 \value{
-\code{invisible(NULL)}.  Called for its side effects.
+\code{invisible(NULL)}.
 }
 \description{
-Loops over \code{tables_written} and calls \code{\link{register_parquet_view}}
-for each, logging or printing progress after each registration.
+Calls \code{\link{register_parquet_view}} once for each entry of
+\code{tables_written}, logging or printing progress after each one. A
+table whose registration fails does not prevent the remaining tables
+from being attempted. When \code{strict_validation} is \code{TRUE} and
+one or more tables failed, stops with a single error naming every
+failing table, after every table in \code{tables_written} has been
+attempted. When \code{strict_validation} is \code{FALSE}, such failures
+are logged as a warning instead.
 }
 \examples{
 \donttest{

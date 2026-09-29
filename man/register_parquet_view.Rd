@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{register_parquet_view}
 \alias{register_parquet_view}
-\title{Register a DuckDB VIEW over all Parquet files for one table}
+\title{Creates a DuckDB view over all Parquet files for one table}
 \usage{
 register_parquet_view(
   con,
@@ -17,45 +17,49 @@ register_parquet_view(
 \arguments{
 \item{con}{A DBI connection to an open DuckDB database.}
 
-\item{ParquetBasePath}{Character. Root directory of the Parquet store;
-the table's files are expected under
+\item{ParquetBasePath}{Character scalar. Root directory of the Parquet
+store. The table's files are expected under
 \code{file.path(ParquetBasePath, table_name)}.}
 
-\item{table_name}{Character. Name of the table / view (e.g. \code{"NIS_Core"}).
-Must correspond to a subdirectory of \code{ParquetBasePath}.}
+\item{table_name}{Character scalar. Name of the table and view, for
+example \code{"NIS_Core"}. Must correspond to a subdirectory of
+\code{ParquetBasePath}.}
 
-\item{schema_registry}{Optional schema registry object (as returned by
-the package's schema-registry loader) used when \code{validate = TRUE}
-to check the resulting view's columns against approved types.}
+\item{schema_registry}{Schema registry object, as returned by the
+package's schema registry loader. Used, when \code{validate} is
+\code{TRUE}, to check the resulting view's columns against approved
+types. Defaults to \code{NULL}.}
 
-\item{validate}{Logical. If \code{TRUE} (default), the newly created view
-is validated against the schema registry / table schema catalog.}
+\item{validate}{Logical. Accepts \code{TRUE}, which validates the newly
+created view against the schema registry and table schema catalog.
+Accepts \code{FALSE}, which does not. Defaults to \code{TRUE}.}
 
-\item{strict_validation}{Logical. If \code{TRUE} (default), a validation
-failure raises an error rather than only warning.}
+\item{strict_validation}{Logical. Accepts \code{TRUE}, which raises an
+error on a validation failure. Accepts \code{FALSE}, which only warns.
+Defaults to \code{TRUE}.}
 
-\item{table_schema}{Optional per-table schema/type catalog used to
-resolve explicit \code{CAST} types for hive partition columns and by
-validation.}
+\item{table_schema}{Per table schema and type catalog, used to resolve
+an explicit \code{CAST} type for a hive partition column and used by
+validation. Defaults to \code{NULL}.}
 }
 \value{
-Invisibly \code{TRUE} if the view was created, or \code{FALSE} if
-  no Parquet files were found under the table directory (no view
-  created).
+Invisibly, \code{TRUE} when the view was created. \code{FALSE}
+  when no Parquet files were found under the table directory, in which
+  case no view is created.
 }
 \description{
-Creates (or replaces) a DuckDB \code{VIEW} named \code{table_name} that
-reads all \code{*.parquet} files under the corresponding directory via
-\code{read_parquet()} with hive partitioning and schema union enabled.
-This allows DuckDB to query all years of a table as a single virtual table.
-If the table directory contains no Parquet files (e.g. all of its sources
-verified empty), no view is created and the function returns \code{FALSE}
-instead of erroring.
+Creates, or replaces, a DuckDB view named \code{table_name} that reads
+every \code{*.parquet} file under the corresponding directory with
+\code{read_parquet()}, with hive partitioning and schema union enabled,
+so that DuckDB can query every year of a table as a single virtual
+table. When the table directory contains no Parquet files, for example
+because every one of its sources was verified empty, no view is created
+and the function returns \code{FALSE} instead of stopping with an error.
 }
 \details{
-Backslashes in the path are normalised to forward slashes before
-interpolation into the SQL string because DuckDB interprets backslashes as
-SQL escape sequences.
+A backslash in the path is normalized to a forward slash before
+interpolation into the SQL string, because DuckDB interprets a backslash
+as a SQL escape sequence.
 }
 \examples{
 tmp_base <- tempfile("parquet_demo_")

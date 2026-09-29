@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{GetSchemaObservations}
 \alias{GetSchemaObservations}
-\title{Retrieve detailed schema observations from the internal Parquet store}
+\title{Retrieves detailed schema observations from the internal Parquet store}
 \usage{
 GetSchemaObservations(
   ObservationPath,
@@ -14,28 +14,35 @@ GetSchemaObservations(
 )
 }
 \arguments{
-\item{ObservationPath}{Character. Path to the Parquet file written by
-\code{\link{SurveyRepositorySchema}}.}
+\item{ObservationPath}{Character scalar. Path to the Parquet file
+written by \code{\link{SurveyRepositorySchema}}.}
 
-\item{Database}{Character scalar (optional). Restrict to one database.}
+\item{Database}{Character scalar. Restricts the result to one
+database. Defaults to \code{NULL}, which does not restrict by
+database.}
 
-\item{TableName}{Character scalar (optional). Restrict to one table.}
+\item{TableName}{Character scalar. Restricts the result to one
+table. Defaults to \code{NULL}, which does not restrict by
+table.}
 
-\item{Column}{Character scalar (optional). Restrict to one column
-(matched after \code{canonical_colnames} normalization).}
+\item{Column}{Character scalar. Restricts the result to one
+column, matched after \code{canonical_colnames} normalization.
+Defaults to \code{NULL}, which does not restrict by column.}
 
-\item{IssuesOnly}{Logical. If \code{TRUE}, return only rows where
-\code{SurveyStatus != "ok"} or \code{ReaderWarning} is non-blank.
-Default \code{FALSE}.}
+\item{IssuesOnly}{Logical. Accepts \code{TRUE}, which returns only
+a row where \code{SurveyStatus != "ok"} or \code{ReaderWarning}
+is non blank. Accepts \code{FALSE}, which returns every matching
+row. Defaults to \code{FALSE}.}
 
-\item{Limit}{Integer (optional). Maximum number of rows to return.}
+\item{Limit}{Integer. Maximum number of rows to return. Defaults
+to \code{NULL}, which returns every matching row.}
 }
 \value{
 A data.table of matching observation rows.
 }
 \description{
-Opens \code{ObservationPath} (as written by
-\code{\link{SurveyRepositorySchema}}) through an in-memory DuckDB
+Opens \code{ObservationPath}, as written by
+\code{\link{SurveyRepositorySchema}}, through an in memory DuckDB
 connection and returns the matching rows, ordered by \code{Database},
 \code{TableName}, \code{Column}, \code{PartitionValue}, and
 \code{SourcePath}. Intended for ad hoc inspection of survey evidence

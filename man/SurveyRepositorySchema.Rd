@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{SurveyRepositorySchema}
 \alias{SurveyRepositorySchema}
-\title{Survey source schemas without applying domain policies}
+\title{Surveys source schemas without applying domain policies}
 \usage{
 SurveyRepositorySchema(
   MDT,
@@ -35,95 +35,116 @@ SurveyRepositorySchema(
 \code{Database}, \code{MDBDir}, \code{Path}, \code{TableName},
 \code{FileType}, \code{PartitionKey}, and \code{PartitionValue}.}
 
-\item{MasterDBPath}{Character. Root directory containing the source files
-(each row's full path is \code{file.path(MasterDBPath, MDBDir, Path)}).}
+\item{MasterDBPath}{Character scalar. Root directory containing
+the source files. Each row's full path is
+\code{file.path(MasterDBPath, MDBDir, Path)}.}
 
-\item{ObservationPath}{Character. Output Parquet file path for the
-detailed per-column observations. Must end in \code{.parquet}.}
+\item{ObservationPath}{Character scalar. Output Parquet file path
+for the detailed per column observations. Must end in
+\code{.parquet}.}
 
-\item{DBLoad}{Character vector (optional). Subset of \code{MDT$Database}
-values to survey. \code{NULL} (default) surveys every row.}
+\item{DBLoad}{Character vector. Subset of \code{MDT$Database}
+values to survey. Defaults to \code{NULL}, which surveys every
+row.}
 
 \item{n_workers}{Integer. Number of parallel workers used to scan
-sources. Default 1 (serial).}
+a source. Defaults to \code{1}, which scans serially.}
 
-\item{SourceFingerprintMode}{Character. One of \code{"metadata"}
-(default), \code{"sha256"}, or \code{"none"}; see
-\code{\link{source_fingerprint}}. Used both for cache keys and for the
-\code{SourceFingerprint} recorded in each observation.}
+\item{SourceFingerprintMode}{Character scalar. Accepts one of
+three values: \code{"metadata"}, \code{"sha256"}, or
+\code{"none"}. See \code{\link{source_fingerprint}}. Used both
+for a cache key and for the \code{SourceFingerprint} recorded in
+each observation. Defaults to \code{"metadata"}.}
 
-\item{StrictReaders}{Logical. If \code{TRUE}, stop after the survey when
-any source failed to read. Default \code{FALSE} (failures are recorded
-as rows with \code{SurveyStatus != "ok"} instead of stopping).}
+\item{StrictReaders}{Logical. Accepts \code{TRUE}, which stops
+after the survey when any source failed to read. Accepts
+\code{FALSE}, which instead records such a failure as a row with
+\code{SurveyStatus != "ok"}. Defaults to \code{FALSE}.}
 
-\item{ValuePreviewMaxDistinct}{Integer from 1 to 100. Maximum number of
-distinct values previewed per low-cardinality column. Default 15.}
+\item{ValuePreviewMaxDistinct}{Integer from 1 to 100. Maximum
+number of distinct values previewed per low cardinality column.
+Defaults to \code{15}.}
 
-\item{ValuePreviewTypes}{Character vector of observed types eligible for
-value preview. Default \code{c("character", "integer", "int64", "logical")}.}
+\item{ValuePreviewTypes}{Character vector of observed types
+eligible for a value preview. Defaults to
+\code{c("character", "integer", "int64", "logical")}.}
 
-\item{ValuePreviewIdentifiers}{Logical. If \code{FALSE} (default),
-suppress value previews for columns whose \code{Role} looks like a join
-key or identifier.}
+\item{ValuePreviewIdentifiers}{Logical. Accepts \code{TRUE}, which
+includes a value preview for a column whose \code{Role} looks
+like a join key or identifier. Accepts \code{FALSE}, which
+suppresses it. Defaults to \code{FALSE}.}
 
-\item{LogPath}{Character (optional). Log file path for this call.}
+\item{LogPath}{Character scalar. Log file path for this call.
+Defaults to \code{NULL}.}
 
-\item{RunId}{Character (optional). Run identifier tagged onto log lines.}
+\item{RunId}{Character scalar. Run identifier tagged onto log
+lines. Defaults to \code{NULL}.}
 
-\item{SchemaSurveyMode}{Character. One of \code{"adaptive"} (default),
-\code{"full"}, or \code{"sample"}, controlling how much of each large
-file is read before inferring its schema.}
+\item{SchemaSurveyMode}{Character scalar. Accepts one of three
+values: \code{"adaptive"}, \code{"full"}, or \code{"sample"},
+controlling how much of each large file is read before inferring
+its schema. Defaults to \code{"adaptive"}.}
 
-\item{AdaptiveSampleRows}{Integer. Rows retained for \code{"adaptive"} or
-\code{"sample"} mode. Default 100000.}
+\item{AdaptiveSampleRows}{Integer. Rows retained for
+\code{"adaptive"} or \code{"sample"} mode. Defaults to
+\code{100000}.}
 
-\item{FastReadMaxBytes}{Numeric. Maximum source size (bytes) eligible for
-the bounded in-memory fast-read path. Default 256 MiB.}
+\item{FastReadMaxBytes}{Numeric scalar. Maximum source size, in
+bytes, eligible for the fast read path bounded in memory.
+Defaults to \code{256} MiB.}
 
 \item{SchemaChunkSize}{Integer. Rows per chunk for the exhaustive
-streaming schema scan. Default 100000.}
+streaming schema scan. Defaults to \code{100000}.}
 
-\item{ObservationCachePath}{Character (optional). Directory for per-source
-observation cache files. Defaults to a \verb{<ObservationPath>_sources}
-directory alongside \code{ObservationPath}.}
+\item{ObservationCachePath}{Character scalar. Directory for a per
+source observation cache file. Defaults to a
+\verb{<ObservationPath>_sources} directory alongside
+\code{ObservationPath}.}
 
-\item{ReuseObservationCache}{Logical. If \code{TRUE} (default), reuse a
-cached observation for a source whose fingerprint and survey settings
-are unchanged.}
+\item{ReuseObservationCache}{Logical. Accepts \code{TRUE}, which
+reuses a cached observation for a source whose fingerprint and
+survey settings are unchanged. Accepts \code{FALSE}, which does
+not. Defaults to \code{TRUE}.}
 
-\item{RefreshObservationCache}{Logical. If \code{TRUE}, ignore any
-existing cache and rescan every source. Default \code{FALSE}.}
+\item{RefreshObservationCache}{Logical. Accepts \code{TRUE}, which
+ignores an existing cache and rescans every source. Accepts
+\code{FALSE}, which does not. Defaults to \code{FALSE}.}
 
-\item{FutureGlobalsMaxSizeMB}{Numeric. Maximum size (MB) of globals
-exported to parallel workers. Default 768.}
+\item{FutureGlobalsMaxSizeMB}{Numeric scalar. Maximum size, in
+megabytes, of a global exported to a parallel worker. Defaults
+to \code{768}.}
 
-\item{Progress}{Logical. If \code{TRUE} (default), print periodic
-progress messages while scanning.}
+\item{Progress}{Logical. Accepts \code{TRUE}, which prints a
+periodic progress message while scanning. Accepts \code{FALSE},
+which does not. Defaults to \code{TRUE}.}
 
-\item{ProgressEvery}{Integer (optional). Force a progress message every
-this many sources, in addition to the time-based interval.}
+\item{ProgressEvery}{Integer. Forces a progress message every this
+many sources, in addition to the interval based on time.
+Defaults to \code{NULL}.}
 
-\item{ProgressIntervalSeconds}{Numeric. Minimum seconds between progress
-messages. Default 30.}
+\item{ProgressIntervalSeconds}{Numeric scalar. Minimum seconds
+between a progress message. Defaults to \code{30}.}
 }
 \value{
-An object of class \code{"RepositorySchemaSurvey"}: a list with
-  \code{observations} (data.table of per-column evidence, also written to
-  \code{ObservationPath}), \code{summary} (one-row data.table of counts),
-  \code{ObservationPath}, \code{ValuePreviewMaxDistinct},
-  \code{ValuePreviewTypes}, \code{ValuePreviewIdentifiers},
-  \code{SchemaSurveyMode}, and \code{ObservationCachePath}.
+An object of class \code{"RepositorySchemaSurvey"}: a list
+  with \code{observations}, a data.table of per column evidence,
+  also written to \code{ObservationPath}, \code{summary}, a one
+  row data.table of counts, \code{ObservationPath},
+  \code{ValuePreviewMaxDistinct}, \code{ValuePreviewTypes},
+  \code{ValuePreviewIdentifiers}, \code{SchemaSurveyMode}, and
+  \code{ObservationCachePath}.
 }
 \description{
-Reads every selected source through its registered reader (see
-\code{\link{get_file_reader}}), records one metadata row per observed
-source column and virtual Hive-partition column -- including the observed
-type, any reader warnings, and (for low-cardinality columns) a value
-preview -- and writes the combined evidence to \code{ObservationPath} as
-Parquet. Per-source results are cached under \code{ObservationCachePath}
-keyed by source fingerprint and survey settings, so unchanged sources are
-skipped on a rerun. No schema-registry override or cross-table naming
-rule is applied at this stage; that happens in
+Reads every selected source through its registered reader, see
+\code{\link{get_file_reader}}, records one metadata row per observed
+source column and virtual hive partition column, including the
+observed type, a reader warning, and, for a low cardinality
+column, a value preview, and writes the combined evidence to
+\code{ObservationPath} as Parquet. A per source result is cached
+under \code{ObservationCachePath}, keyed by the source fingerprint
+and the survey settings, so that an unchanged source is skipped on
+a rerun. No schema registry override or cross table naming rule is
+applied at this stage. That happens in
 \code{\link{RecommendRepositorySchema}}.
 }
 \examples{

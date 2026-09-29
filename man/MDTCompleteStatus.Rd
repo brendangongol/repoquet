@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{MDTCompleteStatus}
 \alias{MDTCompleteStatus}
-\title{Check MDT completion status against the loaded checkpoint}
+\title{Compares an MDT against a checkpoint to find files not yet completed}
 \usage{
 MDTCompleteStatus(
   MDT,
@@ -14,40 +14,44 @@ MDTCompleteStatus(
 )
 }
 \arguments{
-\item{MDT}{Data frame. Master Database Table with at minimum columns
-\code{Database}, \code{TableName}, \code{MDBDir}, \code{Path},
-\code{PartitionKey}, and \code{PartitionValue}.}
+\item{MDT}{Data frame. Master Database Table. Requires \code{Database},
+\code{TableName}, \code{MDBDir}, \code{Path}, \code{PartitionKey}, and
+\code{PartitionValue} columns.}
 
-\item{CheckpointPath}{Character. Path to the checkpoint \code{.rds} file,
-read via \code{\link{load_checkpoint}}.}
+\item{CheckpointPath}{Character scalar. Path to the checkpoint
+\code{.rds} file, read with \code{\link{load_checkpoint}}.}
 
-\item{verbose}{Logical. If \code{TRUE} (default), logs or prints the number
-of already-completed files.}
+\item{verbose}{Logical. Accepts \code{TRUE}, which logs or prints the
+number of already completed files. Accepts \code{FALSE}, which does
+not. Defaults to \code{TRUE}.}
 
-\item{logStatus}{Logical. If \code{TRUE} (default), messages are written via
-\code{\link{log_msg}}; otherwise they are printed to the console.}
+\item{logStatus}{Logical. Accepts \code{TRUE}, which writes messages
+with \code{\link{log_msg}}. Accepts \code{FALSE}, which prints them to
+the console. Defaults to \code{TRUE}.}
 
-\item{MasterDBPath}{Character scalar or \code{NULL} (default). Root
-directory used to resolve each row's source file for fingerprinting.
-Required when \code{SourceFingerprintMode} is not \code{"none"}; forwarded
-to \code{\link{repository_checkpoint_key}} and
-\code{\link{checkpoint_completed_mask}}.}
+\item{MasterDBPath}{Character scalar. Root directory used to resolve
+each row's source file for fingerprinting. Required when
+\code{SourceFingerprintMode} is not \code{"none"}. Forwarded to
+\code{\link{repository_checkpoint_key}} and
+\code{\link{checkpoint_completed_mask}}. Defaults to \code{NULL}.}
 
-\item{SourceFingerprintMode}{Character scalar, one of \code{"none"}
-(default), \code{"metadata"}, or \code{"sha256"} -- must match the mode
-used when the checkpoint was written, or a completed source can be
-reported as pending (or vice versa). See \code{\link{source_fingerprint}}.}
+\item{SourceFingerprintMode}{Character scalar. Accepts one of three
+values: \code{"none"}, \code{"metadata"}, or \code{"sha256"}. Must
+match the mode used when the checkpoint was written, otherwise a
+completed source can be reported as pending, or a pending source can
+be reported as completed. See \code{\link{source_fingerprint}}.
+Defaults to \code{"none"}.}
 }
 \value{
-A data frame: the subset of \code{MDT} rows whose \code{Path} has
-  not yet appeared in the checkpoint (i.e. files still pending).
+A data frame. The subset of \code{MDT} rows whose \code{Path} has
+  not yet appeared in the checkpoint.
 }
 \description{
-Compares the Master Database Table (\code{MDT}) against the completed-files
-checkpoint to identify which files have not yet been loaded.  Also detects
-duplicate repository identities derived from database, table, explicit
-partition specification, source directory, and path, which would
-cause silent overwrite collisions during loading.
+Compares \code{MDT} against the completed files recorded in a checkpoint,
+and returns the rows whose file has not yet been loaded. Also detects a
+duplicate repository identity, derived from database, table, partition
+specification, source directory, and path, which would cause files to
+silently overwrite one another during loading.
 }
 \examples{
 \dontrun{

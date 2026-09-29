@@ -2,24 +2,24 @@
 % Please edit documentation in R/repoquet.R
 \name{sanitize_partition_value}
 \alias{sanitize_partition_value}
-\title{Sanitize a value for use in a hive partition directory name}
+\title{Sanitizes a value for use in a hive partition directory name}
 \usage{
 sanitize_partition_value(x)
 }
 \arguments{
-\item{x}{Value(s) to sanitize; coerced with \code{as.character()} before
-sanitization. May be a vector.}
+\item{x}{Value or vector of values to sanitize. Each element is coerced
+with \code{as.character()} before sanitization.}
 }
 \value{
 Character vector the same length as \code{x}, with unsafe
-  characters replaced by \code{"_"} and leading/trailing whitespace
-  trimmed.
+  characters replaced by \code{"_"} and leading and trailing whitespace
+  removed.
 }
 \description{
-Coerces \code{x} to character and replaces every character that is not a
-letter, digit, underscore, period, or hyphen with an underscore, producing
-a string that is always a safe single path segment (e.g. for
-\code{site=<value>} directory names).
+Coerces \code{x} to character and replaces each character that is not a
+letter, digit, underscore, period, or hyphen with an underscore,
+producing a string that is a safe single path segment, for example for a
+\code{site=<value>} directory name.
 }
 \examples{
 sanitize_partition_value("Site A/B 2020")

@@ -2,32 +2,35 @@
 % Please edit documentation in R/repoquet.R
 \name{log_msg}
 \alias{log_msg}
-\title{Timestamped atomic log write with connectivity-loss buffering}
+\title{Writes a timestamped message to the console and to a log file}
 \usage{
 log_msg(msg, log_path = NULL, run_id = NULL)
 }
 \arguments{
-\item{msg}{Character scalar. Message body (timestamp is prepended).}
+\item{msg}{Character scalar. Message body. A timestamp is prepended to it
+before it is written.}
 
-\item{log_path}{Character. Path to the log file. Defaults to \code{LogPath}.}
+\item{log_path}{Character scalar. Path to the log file. Accepts a file
+path, which is used as the log file for this call. Also accepts
+\code{NULL}, which uses the value of \code{LogPath} found in the calling
+environment, or, if none is found, a file inside the session temporary
+directory.}
 
-\item{run_id}{Character scalar (optional). Run identifier appended to the
-log line as \code{[run_id=...]}. Defaults to the run-scoped identifier
-set by \code{\link{begin_repository_run}}, or omitted entirely if none
-is active.}
+\item{run_id}{Character scalar. Run identifier appended to the log line as
+\code{[run_id=...]}. Accepts a character string, which is used as the
+run identifier for this call. Also accepts \code{NULL}, which uses the
+identifier set by \code{\link{begin_repository_run}}, or omits the tag
+entirely when no such identifier is set.}
 }
 \value{
-\code{invisible(NULL)}. Called for side effects.
+\code{invisible(NULL)}.
 }
 \description{
 Writes a timestamped message to the console and appends it to
-\code{log_path}. If the file write fails (e.g. network path temporarily
-unreachable), the message is held in an in-session memory buffer and
-flushed to disk automatically on the next call that succeeds. This
-means no messages are lost within a session when the network hiccups
-during a large Parquet write -- the buffer drains as soon as
-connectivity is restored, preserving message order and keeping a
-single authoritative log file.
+\code{log_path}. When the write to \code{log_path} fails, the message is
+held in a memory buffer for the session instead, and that buffer,
+together with any earlier buffered messages, is written to
+\code{log_path} on the next call that succeeds.
 }
 \examples{
 \dontrun{

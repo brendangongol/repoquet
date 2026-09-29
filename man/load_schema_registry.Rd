@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{load_schema_registry}
 \alias{load_schema_registry}
-\title{Read or create a schema registry workbook or CSV}
+\title{Reads or creates a schema registry workbook or CSV file}
 \usage{
 load_schema_registry(
   SchemaRegistryPath = NULL,
@@ -11,38 +11,44 @@ load_schema_registry(
 )
 }
 \arguments{
-\item{SchemaRegistryPath}{Character (optional). Path to an \code{.xlsx},
-\code{.xlsm}, \code{.xls}, or CSV registry file. \code{NULL} or an empty
-string returns the built-in default registry without reading or writing
-any file.}
+\item{SchemaRegistryPath}{Character scalar. Path to an \code{.xlsx},
+\code{.xlsm}, \code{.xls}, or CSV registry file. Accepts such a
+path. Accepts \code{NULL} or an empty string, which returns the
+built in default registry without reading or writing any file.
+Defaults to \code{NULL}.}
 
-\item{create_if_missing}{Logical. If \code{TRUE} (default) and
-\code{SchemaRegistryPath} does not already exist, the default registry
-for \code{profile} is written to that path before being returned.}
+\item{create_if_missing}{Logical. Accepts \code{TRUE}, which, when
+\code{SchemaRegistryPath} does not already exist, writes the
+default registry for \code{profile} to that path before returning
+it. Accepts \code{FALSE}, which does not write it. Defaults to
+\code{TRUE}.}
 
-\item{profile}{Character. One of \code{"generic"} (default) or
-\code{"hcup"}; selects the fallback/default registry and which built-in
-policies are enforced.}
+\item{profile}{Character scalar. Accepts one of two values,
+\code{"generic"} or \code{"hcup"}, selecting the fallback and
+default registry and which built in policies are enforced. Defaults
+to \code{"generic"}.}
 }
 \value{
-A \code{data.table} schema registry with (at least) the columns
+A data.table schema registry with at least the columns
   \code{ColumnPattern}, \code{CanonicalType}, \code{AppliesTo}, and
   \code{Profile}.
 }
 \description{
-Loads a repository schema registry -- a small table of column-name
-patterns, canonical types, and roles used to override or supplement type
-inference (see \code{\link{apply_schema_registry}}). If
-\code{SchemaRegistryPath} is \code{NULL} or empty, the built-in
-\code{\link{build_default_schema_registry}} template for \code{profile} is
-returned directly without touching disk. If the path does not yet exist,
-the default registry is built and (when \code{create_if_missing = TRUE})
-written to \code{SchemaRegistryPath} as a starting point for user edits.
-In every case the loaded registry is validated -- \code{ColumnPattern} and
-\code{CanonicalType} are required columns, every \code{CanonicalType} must
-be an allowed canonical type, every \code{ColumnPattern} must be a valid
-Perl-compatible regular expression -- and non-negotiable built-in policies
-for \code{profile} are (re-)applied on top of whatever was loaded.
+Loads a repository schema registry, a small table of column name
+patterns, canonical types, and roles, used to override or supplement
+type inference, see \code{\link{apply_schema_registry}}. When
+\code{SchemaRegistryPath} is \code{NULL} or empty, the built in
+\code{\link{build_default_schema_registry}} template for
+\code{profile} is returned directly, without touching disk. When the
+path does not yet exist, the default registry is built and, when
+\code{create_if_missing} is \code{TRUE}, written to
+\code{SchemaRegistryPath} as a starting point for a person's edits. In
+every case, the loaded registry is validated, \code{ColumnPattern} and
+\code{CanonicalType} are required columns, every \code{CanonicalType}
+must be an allowed canonical type, every \code{ColumnPattern} must be
+a valid, Perl compatible regular expression, and the schema policies
+that cannot be overridden for \code{profile} are reapplied on top of
+whatever was loaded.
 }
 \examples{
 tmp <- tempfile(fileext = ".csv")

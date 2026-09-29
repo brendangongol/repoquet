@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{remove_parquet_manifest_rows}
 \alias{remove_parquet_manifest_rows}
-\title{Remove manifest rows matching one or more fields}
+\title{Removes manifest rows matching one or more fields}
 \usage{
 remove_parquet_manifest_rows(
   ManifestPath,
@@ -13,6 +13,6 @@ remove_parquet_manifest_rows(
 )
 }
 \description{
-Remove manifest rows matching one or more fields
+Removes manifest rows matching one or more fields
 }
 \keyword{internal}

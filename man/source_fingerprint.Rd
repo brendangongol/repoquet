@@ -2,36 +2,38 @@
 % Please edit documentation in R/repoquet.R
 \name{source_fingerprint}
 \alias{source_fingerprint}
-\title{Fingerprint a source file for checkpoint invalidation}
+\title{Computes an identity for a source file}
 \usage{
 source_fingerprint(path, mode = c("metadata", "sha256", "none"))
 }
 \arguments{
-\item{path}{Character scalar. Path to the source file to fingerprint. If
-the file does not exist or its size cannot be determined, an NA
-fingerprint is returned rather than an error.}
+\item{path}{Character scalar. Path to the source file. Accepts a path to
+an existing file whose size can be determined, which is used to compute
+the identity. Accepts a path to a file that does not exist or whose
+size cannot be determined, in which case the returned
+\code{fingerprint} is \code{NA}.}
 
-\item{mode}{Character scalar, one of \code{"metadata"} (default; combines
-file size and UTC modification time -- fast, no file content read),
-\code{"sha256"} (a full-content SHA-256 hash via the \code{digest}
-package, cached per size/mtime combination for the session -- detects
-in-place edits that don't change size/mtime, at the cost of reading
-every byte), or \code{"none"} (fingerprinting disabled; the returned
-\code{fingerprint} is \code{NA}).}
+\item{mode}{Character scalar. Accepts one of three values.
+\code{"metadata"} combines the file size and UTC modification time into
+the identity, without reading the file content. \code{"sha256"}
+computes a SHA256 hash of the full file content using the
+\code{digest} package, and caches that hash for the session under the
+file's size and modification time, so that a repeated call against an
+unchanged file does not read the content again. \code{"none"} disables
+fingerprinting, so the returned \code{fingerprint} is \code{NA}.
+Defaults to \code{"metadata"}.}
 }
 \value{
-A list with elements \code{path}, \code{size} (bytes),
-  \code{mtime_utc} (ISO-8601 UTC timestamp string), \code{sha256} (only
-  populated when \code{mode = "sha256"}), \code{fingerprint} (the
+A list with elements \code{path}, \code{size} in bytes,
+  \code{mtime_utc} as an ISO 8601 UTC timestamp string, \code{sha256}
+  (populated only when \code{mode} is \code{"sha256"}), \code{fingerprint}
+  as the
   composed identity string used in checkpoint keys, or \code{NA} for
   \code{mode = "none"} or an unreadable file), and \code{mode}.
 }
 \description{
-Computes a lightweight identity for a source file so checkpoints can
-detect when a file's content has changed since it was last loaded, even
-if its logical \code{Path} in the MDT stayed the same. Fingerprints (not
-raw sizes/timestamps) are embedded in checkpoint keys by
-\code{repository_checkpoint_key()} via \code{SourceFingerprintMode}.
+Computes an identity for a source file, used to detect whether the file's
+content has changed since it was last loaded.
 }
 \examples{
 tmp <- tempfile(fileext = ".txt")

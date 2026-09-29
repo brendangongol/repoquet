@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{checkpoint_completed_mask}
 \alias{checkpoint_completed_mask}
-\title{Flag which MDT rows are already recorded as completed in a checkpoint}
+\title{Flags which rows of an MDT are already recorded as completed}
 \usage{
 checkpoint_completed_mask(
   MDT,
@@ -15,35 +15,33 @@ checkpoint_completed_mask(
 \arguments{
 \item{MDT}{Data frame. Current Master Database Table.}
 
-\item{completed_checkpoint}{Character vector of completed-file keys, as
+\item{completed_checkpoint}{Character vector. Completed file keys, as
 returned by \code{\link{load_checkpoint}}.}
 
-\item{accept_legacy}{Logical. If \code{TRUE} (default), also match legacy
-value-only keys and unambiguous bare paths in \code{completed_checkpoint}.}
+\item{accept_legacy}{Logical. Accepts \code{TRUE}, which also matches, as
+an entry of \code{completed_checkpoint}, a legacy key that records only
+the row's partition values, without the partition key names, and also
+matches a bare source path when that path belongs to only one row of
+\code{MDT}. Accepts \code{FALSE}, which matches only the current key
+format. Defaults to \code{TRUE}.}
 
-\item{MasterDBPath}{Character scalar or \code{NULL}. Root directory used to
-resolve each row's source file for fingerprinting. Required when
+\item{MasterDBPath}{Character scalar. Root directory used to resolve each
+row's source file for fingerprinting. Required when
 \code{SourceFingerprintMode} is not \code{"none"}.}
 
-\item{SourceFingerprintMode}{Character scalar, one of \code{"none"}
-(default), \code{"metadata"}, or \code{"sha256"} -- must match the mode
-used when the checkpoint was written. See \code{\link{source_fingerprint}}.}
+\item{SourceFingerprintMode}{Character scalar. Accepts one of three
+values: \code{"none"}, \code{"metadata"}, or \code{"sha256"}. Must
+match the mode used when the checkpoint was written. See
+\code{\link{source_fingerprint}}. Defaults to \code{"none"}.}
 }
 \value{
-Logical vector the same length as \code{nrow(MDT)}; \code{TRUE}
+Logical vector the same length as \code{nrow(MDT)}. \code{TRUE}
   where that row is already recorded as completed.
 }
 \description{
-Compares each row's current checkpoint key (see \code{repository_checkpoint_key()})
-against a checkpoint's completed-file entries, returning a logical mask over
-\code{MDT}. This is the standard way to subset a Master Database Table down
-to only the sources a prior run already finished -- for example before
-registering DuckDB views for a partially completed load. When
-\code{accept_legacy} is \code{TRUE} (default), entries written in older
-formats (value-only legacy keys, or bare source paths for a file that is
-the only row using that path) are also honored, so switching
-\code{SourceFingerprintMode} or upgrading repoquet does not strand
-already-completed files.
+Compares each row's current checkpoint key (see
+\code{\link{repository_checkpoint_key}}) against the completed file
+entries of a checkpoint, and returns a logical mask over \code{MDT}.
 }
 \examples{
 MDT <- data.frame(Database = "DEMO", TableName = "Core", MDBDir = ".",

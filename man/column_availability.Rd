@@ -2,39 +2,39 @@
 % Please edit documentation in R/repoquet.R
 \name{column_availability}
 \alias{column_availability}
-\title{Report non-NA percentage per column per partition from a Parquet table}
+\title{Reports the percentage of non missing values per column per partition from a Parquet table}
 \usage{
 column_availability(con, table_name, ParquetBasePath)
 }
 \arguments{
 \item{con}{A DBI connection to an open DuckDB database.}
 
-\item{table_name}{Character. Name of the table (must correspond to a
-subdirectory of \code{ParquetBasePath}).}
+\item{table_name}{Character scalar. Name of the table. Must
+correspond to a subdirectory of \code{ParquetBasePath}.}
 
-\item{ParquetBasePath}{Character. Root directory of the Parquet store.}
+\item{ParquetBasePath}{Character scalar. Root directory of the
+Parquet store.}
 }
 \value{
-A named list with four elements:
-\describe{
-  \item{\code{PercentageNonNA}}{Wide \code{data.frame}: columns are partitions,
-    rows are column names, values are \code{pct_non_na} (0--100).}
-  \item{\code{ContainsValues}}{Wide logical \code{data.frame}: \code{TRUE}
-    where \code{pct_non_na > 0}.}
-  \item{\code{mostly_empty}}{Rows of \code{PercentageNonNA} where the
-    maximum across years is \eqn{\leq 1\%}.}
-  \item{\code{inconsistent}}{Rows where some partitions have \code{> 1\%}
-    non-NA and others have \eqn{\leq 1\%} -- i.e., the column is present
-    in some partitions but effectively absent in others.}
-}
+A named list with four elements. \code{PercentageNonNA} is a
+  wide data frame whose columns are partitions, whose rows are
+  column names, and whose values are \code{pct_non_na}, from 0 to
+  100. \code{ContainsValues} is a wide logical data frame,
+  \code{TRUE} where \code{pct_non_na > 0}. \code{mostly_empty} is
+  the rows of \code{PercentageNonNA} where the maximum across years
+  is at most 1 percent. \code{inconsistent} is the rows where some
+  partitions have more than 1 percent of non missing values and
+  others have at most 1 percent, that is, where the column is
+  present in some partitions but effectively absent in others.
 }
 \description{
-For each Hive partition directory of \code{table_name} under
+For each hive partition directory of \code{table_name} under
 \code{ParquetBasePath}, runs \code{SUMMARIZE} in DuckDB to obtain the
-\code{null_percentage} for every column without pulling any column data
-into R.  Returns the results as a wide matrix (column \eqn{\times} partition)
-alongside a boolean presence matrix and pre-computed lists of mostly-empty
-and partition-inconsistent columns.
+\code{null_percentage} for every column, without pulling any column
+data into R. Returns the results as a wide matrix, columns are
+partitions and rows are column names, together with a logical
+presence matrix and already computed lists of a mostly empty column
+and a column inconsistent across partitions.
 }
 \examples{
 base <- tempfile("parquet_base_")

@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{decode_column}
 \alias{decode_column}
-\title{Query a DuckDB table with one coded column decoded}
+\title{Queries a DuckDB table with one coded column decoded}
 \usage{
 decode_column(
   con,
@@ -17,41 +17,48 @@ decode_column(
 )
 }
 \arguments{
-\item{con}{Live DBI/DuckDB connection with \code{table} registered.}
+\item{con}{Live DBI or DuckDB connection with \code{table}
+registered.}
 
-\item{table}{Character scalar. DuckDB table (or view) name to query.}
+\item{table}{Character scalar. DuckDB table or view name to
+query.}
 
-\item{column}{Character scalar. Coded column to decode; matched against
-\code{ColumnDictionary} after canonicalization via
+\item{column}{Character scalar. Coded column to decode, matched
+against \code{ColumnDictionary} after canonicalization through
 \code{canonical_colnames}.}
 
-\item{TableSchemaPath}{Character. Path to the schema catalog holding the
-\code{ColumnDictionary} sheet (see \code{\link{load_column_dictionary}}).}
+\item{TableSchemaPath}{Character scalar. Path to the schema
+catalog holding the \code{ColumnDictionary} sheet. See
+\code{\link{load_column_dictionary}}.}
 
-\item{Database}{Character scalar (optional). Restricts dictionary lookup to
-this database when \code{table} name alone is ambiguous.}
+\item{Database}{Character scalar. Restricts the dictionary lookup
+to this database when the \code{table} name alone is ambiguous.
+Defaults to \code{NULL}.}
 
-\item{TableName}{Character scalar (optional). Restricts dictionary lookup to
-this logical table name.}
+\item{TableName}{Character scalar. Restricts the dictionary
+lookup to this logical table name. Defaults to \code{NULL}.}
 
-\item{label_column}{Character scalar. Name of the generated label column.
-Defaults to \code{<column>_LABEL} (canonicalized).}
+\item{label_column}{Character scalar. Name of the generated label
+column. Defaults to \code{<column>_LABEL}, canonicalized.}
 
-\item{where}{Character scalar (optional). Additional raw SQL \code{WHERE}
-clause appended to the generated query.}
+\item{where}{Character scalar. Additional raw SQL \code{WHERE}
+clause appended to the generated query. Defaults to \code{NULL}.}
 
-\item{limit}{Integer (optional). Maximum rows returned. Default 1000L;
-pass \code{NULL} to remove the cap and return every matching row.}
+\item{limit}{Integer. Maximum rows returned. Defaults to
+\code{1000}. Pass \code{NULL} to remove the cap and return every
+matching row.}
 }
 \value{
-A data.frame: every column of \code{table} plus \code{label_column}
-  holding the decoded label (\code{NA} where no dictionary entry matches).
+A data.frame: every column of \code{table} plus
+  \code{label_column} holding the decoded label, with \code{NA}
+  where no dictionary entry matches.
 }
 \description{
-Adds a label column using the approved semantic dictionary. Partition-
-specific mappings take precedence over mappings whose partition scope is
-\code{"*"}. A conservative 1,000-row default prevents accidental retrieval
-of an entire large table; pass \code{limit = NULL} explicitly to remove it.
+Adds a label column using the approved semantic dictionary. A
+partition specific mapping takes precedence over a mapping whose
+partition scope is \code{"*"}. A conservative default of 1,000
+rows prevents accidental retrieval of an entire large table. Pass
+\code{limit = NULL} explicitly to remove it.
 }
 \examples{
 con <- DBI::dbConnect(duckdb::duckdb())

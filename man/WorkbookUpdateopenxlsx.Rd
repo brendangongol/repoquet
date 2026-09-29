@@ -2,25 +2,25 @@
 % Please edit documentation in R/repoquet.R
 \name{WorkbookUpdateopenxlsx}
 \alias{WorkbookUpdateopenxlsx}
-\title{Add a sheet to an existing \pkg{openxlsx} workbook}
+\title{Adds a sheet to an existing \pkg{openxlsx} workbook}
 \usage{
 WorkbookUpdateopenxlsx(WBPath, DTAdd, SheetName)
 }
 \arguments{
-\item{WBPath}{Character. Path to an existing \code{.xlsx} workbook.}
+\item{WBPath}{Character scalar. Path to an existing \code{.xlsx}
+workbook.}
 
-\item{DTAdd}{A \code{data.frame} or \code{data.table} to write into the
-new sheet.}
+\item{DTAdd}{A data frame or data.table to write into the new sheet.}
 
-\item{SheetName}{Character. Name of the new worksheet.}
+\item{SheetName}{Character scalar. Name of the new worksheet.}
 }
 \value{
-\code{invisible(NULL)}.  Called for its side effects.
+\code{invisible(NULL)}.
 }
 \description{
 Loads the workbook at \code{WBPath}, adds a new sheet named
-\code{SheetName}, writes \code{DTAdd} to it, and saves the workbook back
-to the same path.
+\code{SheetName}, writes \code{DTAdd} to it, and saves the workbook
+back to the same path.
 }
 \seealso{
 \code{\link{ColumnAvailabilityCompile}}

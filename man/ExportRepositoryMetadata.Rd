@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{ExportRepositoryMetadata}
 \alias{ExportRepositoryMetadata}
-\title{Export the transactional repository manifest to an accessible Excel catalog}
+\title{Exports the transactional repository manifest to an accessible Excel catalog}
 \usage{
 ExportRepositoryMetadata(
   ManifestPath,
@@ -14,39 +14,45 @@ ExportRepositoryMetadata(
 )
 }
 \arguments{
-\item{ManifestPath}{Character. Path to the authoritative DuckDB or CSV
-manifest, as read by \code{\link{read_parquet_manifest}}.}
+\item{ManifestPath}{Character scalar. Path to the authoritative
+DuckDB or CSV manifest, as read by
+\code{\link{read_parquet_manifest}}.}
 
-\item{OutputPath}{Character. Destination \code{.xlsx} path; must end in
-\code{.xlsx}. Defaults to \code{\link{metadata_workbook_path_default}(ManifestPath)},
-i.e. beside the manifest with the same base file name.}
+\item{OutputPath}{Character scalar. Destination \code{.xlsx} path,
+which must end in \code{.xlsx}. Defaults to
+\code{\link{metadata_workbook_path_default}(ManifestPath)}, that
+is, beside the manifest, with the same base file name.}
 
 \item{MaxRowsPerSheet}{Integer. Maximum detail rows per numbered
-\code{Manifest_*} sheet (Excel's per-sheet row limit is 1,048,576).
-Default \code{200000L}.}
+\code{Manifest_*} sheet. Excel's row limit per sheet is
+1,048,576. Defaults to \code{200000}.}
 
-\item{IncludeDetails}{Logical. If \code{TRUE} (default), the complete raw
-manifest snapshot is written to one or more \code{Manifest_*} sheets; if
-\code{FALSE}, only the summary/navigation sheets are written.}
+\item{IncludeDetails}{Logical. Accepts \code{TRUE}, which writes the
+complete raw manifest snapshot to one or more \code{Manifest_*}
+sheets. Accepts \code{FALSE}, which writes only the summary and
+navigation sheets. Defaults to \code{TRUE}.}
 
-\item{LogPath}{Character (optional). Log file path passed to
-\code{\link{log_msg}} for the completion message.}
+\item{LogPath}{Character scalar. Log file path passed to
+\code{\link{log_msg}} for the completion message. Defaults to
+\code{NULL}.}
 
-\item{RunId}{Character (optional). Run identifier passed to
-\code{\link{log_msg}} for the completion message.}
+\item{RunId}{Character scalar. Run identifier passed to
+\code{\link{log_msg}} for the completion message. Defaults to
+\code{NULL}.}
 }
 \value{
-Invisibly, a list with elements \code{path} (normalized output
-  path), \code{manifest_rows} (row count of the source manifest),
-  \code{detail_sheets} (number of \code{Manifest_*} sheets written), and
-  \code{generated_at} (UTC timestamp string).
+Invisibly, a list with elements \code{path}, the normalized
+  output path, \code{manifest_rows}, the row count of the source
+  manifest, \code{detail_sheets}, the number of \code{Manifest_*}
+  sheets written, and \code{generated_at}, a UTC timestamp string.
 }
 \description{
-Reads one consistent snapshot from \code{RepositoryMetadata.duckdb} (or a
-legacy CSV manifest) and creates a presentation-only workbook. The DuckDB
-manifest remains authoritative; editing this workbook never changes the
-repository. Every manifest row is included in numbered \code{Manifest_*}
-sheets, with summary and navigation sheets placed first.
+Reads one consistent snapshot from \code{RepositoryMetadata.duckdb},
+or a legacy CSV manifest, and creates a workbook for presentation
+only. The DuckDB manifest remains authoritative; editing this
+workbook never changes the repository. Every manifest row is
+included in numbered \code{Manifest_*} sheets, with the summary and
+navigation sheets placed first.
 }
 \examples{
 manifest <- tempfile(fileext = ".csv")

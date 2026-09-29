@@ -2,33 +2,32 @@
 % Please edit documentation in R/repoquet.R
 \name{verify_source_empty}
 \alias{verify_source_empty}
-\title{Verify that a source file truly contains zero data rows}
+\title{Verifies that a source file truly contains zero data rows}
 \usage{
 verify_source_empty(full_path, reader, reader_options = list())
 }
 \arguments{
 \item{full_path}{Character scalar. Full path to the source file to check.}
 
-\item{reader}{Character scalar naming a registered reader type (see
-\code{\link{supported_file_types}} for the values the MDT's
-\code{FileType} column maps to, e.g. \code{"csv"} or \code{"sav"}), or a
-reader specification list as returned internally by the reader
-registry.}
+\item{reader}{Character scalar naming a registered reader type. Accepts
+a value from \code{\link{supported_file_types}}, such as \code{"csv"}
+or \code{"sav"}, matching the MDT's \code{FileType} column. Also
+accepts a reader specification list, as returned internally by the
+reader registry.}
 
-\item{reader_options}{List (optional). Reader-specific options (e.g.
-encoding, delimiter) forwarded to the reader's \code{count_rows} or
-\code{read_full} method.}
+\item{reader_options}{List. Options specific to the reader, such as
+encoding or delimiter, forwarded to the reader's \code{count_rows} or
+\code{read_full} method. Defaults to an empty list.}
 }
 \value{
-\code{TRUE} only when the file can be re-read successfully and
-  contains exactly zero rows; \code{FALSE} for a nonzero row count
-  \emph{or} any read error.
+\code{TRUE} when the file can be read again successfully and
+  contains exactly zero rows. \code{FALSE} for a nonzero row count or for
+  any read error.
 }
 \description{
-Distinguishes a legitimately empty source (readable, 0 rows) from a failed
-read, which also surfaces as an empty data frame in the safe readers. Only
-a successful re-read confirming 0 rows returns TRUE; any read error returns
-FALSE so genuine failures keep failing loudly.
+Distinguishes a source that is legitimately empty, readable with zero
+rows, from a failed read, which also produces an empty data frame in the
+safe readers, by reading the file again and checking the result.
 }
 \examples{
 tmp <- tempfile(fileext = ".csv")

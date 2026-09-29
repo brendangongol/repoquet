@@ -2,11 +2,11 @@
 % Please edit documentation in R/repoquet.R
 \name{write_schema_registry}
 \alias{write_schema_registry}
-\title{Write schema registry as an Excel workbook or CSV fallback}
+\title{Writes a schema registry as an Excel workbook, or as a CSV file when the path is not one}
 \usage{
 write_schema_registry(reg, SchemaRegistryPath)
 }
 \description{
-Write schema registry as an Excel workbook or CSV fallback
+Writes a schema registry as an Excel workbook, or as a CSV file when the path is not one
 }
 \keyword{internal}

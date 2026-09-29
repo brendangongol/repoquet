@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{read_fn}
 \alias{read_fn}
-\title{Dispatch a single source file to the appropriate reader and writer}
+\title{Dispatches a single source file to the appropriate reader and writer}
 \usage{
 read_fn(
   path,
@@ -43,192 +43,212 @@ read_fn(
 )
 }
 \arguments{
-\item{path}{Character. Relative file path as it appears in
-\code{MDTSelect$Path} (used to look up \code{MDTSelect$MDBDir}).}
+\item{path}{Character scalar. Relative file path as it appears in
+\code{MDTSelect$Path}, used to look up \code{MDTSelect$MDBDir}.}
 
-\item{out_path}{Character (optional). Full output path for a
-single-file (non-chunked) Parquet write. Passed through to
-\code{\link{safe_read_sav_chunked}}.}
+\item{out_path}{Character scalar. Full output path for a single
+file, not chunked, Parquet write. Passed through to
+\code{\link{safe_read_sav_chunked}}. Defaults to \code{NULL}.}
 
-\item{all_cols}{Character vector (optional). Union of all
-columns for this table, passed to \code{\link{align_columns}}.}
+\item{all_cols}{Character vector. Union of every column for this
+table, passed to \code{\link{align_columns}}. Defaults to
+\code{NULL}.}
 
-\item{year_dir}{Character (optional). Hive-partitioned year
-directory (e.g. \code{".../NIS_Core/year=2019"}) where chunk files are
-written when chunking is used.}
+\item{year_dir}{Character scalar. Hive partitioned year directory,
+for example \code{".../NIS_Core/year=2019"}, where chunk files are
+written when chunking is used. Defaults to \code{NULL}.}
 
-\item{table_dir}{Character (optional). Table-level directory above the
-partition directories. Derived from \code{year_dir} by stripping one
-directory level per entry in \code{partition_keys} when not supplied.}
+\item{table_dir}{Character scalar. Table level directory above the
+partition directories. Defaults to \code{NULL}, which derives it
+from \code{year_dir} by removing one directory level for each
+entry of \code{partition_keys}.}
 
-\item{col_classes}{Named list (optional). Column class map from
-\code{\link{build_col_classes}}.}
+\item{col_classes}{Named list. Column class map from
+\code{\link{build_col_classes}}. Defaults to \code{NULL}.}
 
-\item{year_val}{Integer or character (optional). Derived value recorded in
-legacy manifest fields when \code{YEAR} is an explicit partition key.}
+\item{year_val}{Integer or character scalar. Value recorded in
+legacy manifest fields when \code{YEAR} is an explicit partition
+key. Defaults to \code{NULL}.}
 
-\item{PrintStatus}{Logical. If \code{TRUE}, prints progress
-messages to the console in addition to the log file. Default \code{FALSE}.}
+\item{PrintStatus}{Logical. Accepts \code{TRUE}, which prints a
+progress message to the console in addition to the log file.
+Accepts \code{FALSE}, which does not. Defaults to \code{FALSE}.}
 
-\item{TerminalHivePartition}{Logical. If \code{TRUE}, chunk files are
-written to source-specific \code{batch_id=<stem>_<NNNNN>/data.parquet}
-subdirectories instead of flat \code{<stem>_<NNNNN>.parquet} files. Passed to
-\code{\link{safe_read_sav_chunked}}.}
+\item{TerminalHivePartition}{Logical. Accepts \code{TRUE}, which
+writes chunk files to source specific
+\code{batch_id=<stem>_<NNNNN>/data.parquet} subdirectories instead
+of flat \code{<stem>_<NNNNN>.parquet} files. Passed to
+\code{\link{safe_read_sav_chunked}}. Accepts \code{FALSE}, which
+does not. Defaults to \code{FALSE}.}
 
 \item{MDTSelect}{Data frame. Subset of the master database table
 for the current database, used to resolve \code{path} to a full
-filesystem path via \code{MDTSelect$MDBDir}.}
+file system path with \code{MDTSelect$MDBDir}.}
 
-\item{MasterDBPath}{Character. Root directory containing the
-source SAV/CSV files.}
+\item{MasterDBPath}{Character scalar. Root directory containing the
+source SAV or CSV files.}
 
-\item{reader}{Character. Registered reader name (see
-\code{\link{get_file_reader}}), e.g. \code{"sav"} or \code{"csv"}.}
+\item{reader}{Character scalar. Registered reader name, as
+registered with \code{\link{get_file_reader}}, for example
+\code{"sav"} or \code{"csv"}.}
 
-\item{PartitionBy}{Character. One of \code{"NRows"},
-\code{"RAMEstimate"}, or \code{"FAIL"}. See Details.}
+\item{PartitionBy}{Character scalar. Accepts one of three values:
+\code{"NRows"}, \code{"RAMEstimate"}, or \code{"FAIL"}. See the
+Details section.}
 
 \item{SAV_ROW_THRESHOLD}{Integer. Row count above which the
 \code{"NRows"} strategy chunks a file.}
 
-\item{RAMThreshold}{Numeric. Estimated size in GB above which the
-\code{"RAMEstimate"} strategy chunks a file. Also used (as
-\code{RAMThreshold * 1024} MB) to derive a safe whole-file memory budget
-for source-defined partition routing on delimited files.}
+\item{RAMThreshold}{Numeric scalar. Estimated size, in gigabytes,
+above which the \code{"RAMEstimate"} strategy chunks a file. Also
+used, as \code{RAMThreshold * 1024} megabytes, to derive a safe
+whole file memory budget for source defined partition routing on a
+delimited file.}
 
 \item{SAV_CHUNK_SIZE}{Integer. Rows per chunk, passed to
-\code{\link{safe_read_sav_chunked}}, and the starting chunk size for
-\code{FailProbeMode = "subprocess"}'s adaptive fallback.}
+\code{\link{safe_read_sav_chunked}}, and the starting chunk size
+for the adaptive fallback under \code{FailProbeMode = "subprocess"}.}
 
-\item{DelimitedChunkMaxMB}{Numeric. Per-chunk memory cap (MB) passed to
-\code{\link{read_delimited_chunked}} as \code{MaxChunkMemoryMB}.}
+\item{DelimitedChunkMaxMB}{Numeric scalar. Memory cap per chunk, in
+megabytes, passed to \code{\link{read_delimited_chunked}} as
+\code{MaxChunkMemoryMB}.}
 
-\item{DelimitedPartitionMaxMB}{Numeric (optional). Per-partition memory
-cap (MB) for source-defined partition routing. \code{NULL} lets
+\item{DelimitedPartitionMaxMB}{Numeric scalar. Memory cap per
+partition, in megabytes, for source defined partition routing.
+Defaults to \code{NULL}, which lets
 \code{\link{read_delimited_chunked}} derive a conservative default.}
 
-\item{FailProbeMode}{Character. One of \code{"subprocess"} (default;
-attempts the direct read-and-write in an isolated \code{Rscript}
-subprocess so a crash or hang only kills the child), \code{"in_process"}
-(attempts the direct read in the current session, as in earlier
-versions), or \code{"disabled"} (always uses the adaptive chunked
-reader). Only consulted when \code{PartitionBy = "FAIL"} and
-\code{reader} is a delimited type.}
+\item{FailProbeMode}{Character scalar. Accepts one of three values.
+\code{"subprocess"} attempts the direct read and write in an
+isolated \code{Rscript} subprocess, so that a crash or a hang only
+ends the child process. \code{"in_process"} attempts the direct
+read in the current session, as in an earlier version.
+\code{"disabled"} always uses the adaptive chunked reader.
+Consulted only when \code{PartitionBy} is \code{"FAIL"} and
+\code{reader} is a delimited type. Defaults to \code{"subprocess"}.}
 
-\item{FailProbeTimeoutSeconds}{Numeric. Timeout for the isolated
-subprocess under \code{FailProbeMode = "subprocess"}. Default 7200.}
+\item{FailProbeTimeoutSeconds}{Numeric scalar. Timeout, in seconds,
+for the isolated subprocess under \code{FailProbeMode = "subprocess"}.
+Defaults to \code{7200}.}
 
-\item{FailProbeSourcePath}{Character (optional). Path to the repoquet
-source file the subprocess worker should \code{source()}; falls back to
-\code{REPOQUET_SOURCE}, \code{getOption("repoquet.source.path")}, or the
-installed package.}
+\item{FailProbeSourcePath}{Character scalar. Path to the repoquet
+source file the subprocess worker sources. Defaults to
+\code{NULL}, which falls back to \code{REPOQUET_SOURCE}, to
+\code{getOption("repoquet.source.path")}, or to the installed
+package.}
 
-\item{chunk_size_decrement}{Integer (optional). Passed through to
-\code{\link{safe_read_sav_chunked}} and \code{\link{read_delimited_chunked}}.
-\code{NULL} (the default) lets each reader compute its own default (10\%
-of the starting chunk size).}
+\item{chunk_size_decrement}{Integer. Passed through to
+\code{\link{safe_read_sav_chunked}} and
+\code{\link{read_delimited_chunked}}. Defaults to \code{NULL},
+which lets each reader compute its own default, 10 percent of the
+starting chunk size.}
 
-\item{min_chunk_size}{Integer (optional). Passed through to
-\code{\link{safe_read_sav_chunked}} and \code{\link{read_delimited_chunked}}.
-\code{NULL} (the default) lets each reader compute its own default
-(equal to \code{chunk_size_decrement}).}
+\item{min_chunk_size}{Integer. Passed through to
+\code{\link{safe_read_sav_chunked}} and
+\code{\link{read_delimited_chunked}}. Defaults to \code{NULL},
+which lets each reader compute its own default, equal to
+\code{chunk_size_decrement}.}
 
-\item{partition_keys}{Character vector. Canonical Hive partition column
-name(s), e.g. \code{"YEAR"}. Default \code{"YEAR"}.}
+\item{partition_keys}{Character vector. Canonical hive partition
+column names, for example \code{"YEAR"}. Defaults to \code{"YEAR"}.}
 
-\item{partition_values}{Named list or data frame row (optional). Declared
-partition value(s) for this file when they are not read from the data
-itself (i.e. when source-defined partition routing does not apply).}
+\item{partition_values}{Named list, or one row of a data frame.
+Declared partition value for this file, used when it is not read
+from the data itself, that is, when source defined partition
+routing does not apply. Defaults to \code{NULL}.}
 
-\item{max_coerce_na_pct}{Numeric (optional). Passed to
-\code{\link{align_columns}}; fails the file when type coercion turns
-more than this percentage of a column's values into \code{NA}.}
+\item{max_coerce_na_pct}{Numeric scalar. Passed to
+\code{\link{align_columns}}. Stops the file when type coercion
+turns more than this percentage of a column's values into
+\code{NA}. Defaults to \code{NULL}.}
 
-\item{ManifestPath, Database, TableName, DuckDBTable, SourcePath, SchemaHash}{Manifest bookkeeping passed through to the chunked writers so each chunk
-is recorded via \code{\link{update_parquet_manifest}}.}
+\item{ManifestPath, Database, TableName, DuckDBTable, SourcePath, SchemaHash}{Used for manifest bookkeeping, passed through to the chunked
+writers, so that each chunk is recorded with
+\code{\link{update_parquet_manifest}}.}
 
-\item{MaxFileStemTruncate}{Logical. Passed through to the chunked writers
-to shorten generated chunk filenames on filesystems with path-length
-limits.}
+\item{MaxFileStemTruncate}{Logical. Passed through to the chunked
+writers to shorten a generated chunk file name on a file system
+with a path length limit.}
 
 \item{accept_partial}{Logical. Passed through to
-\code{\link{safe_read_sav_chunked}}; if \code{TRUE}, a file that fails
-partway through chunked reading keeps the chunks already written instead
-of failing the whole file.}
+\code{\link{safe_read_sav_chunked}}. Accepts \code{TRUE}, which,
+when a file fails partway through chunked reading, keeps the
+chunks already written instead of failing the whole file. Accepts
+\code{FALSE}, which fails the whole file.}
 
-\item{RepositoryLock}{Repository lock handle (optional), from
-\code{\link{acquire_repository_lock}}, touched periodically during long
-chunked reads so the lock does not expire mid-file.}
+\item{RepositoryLock}{Repository lock handle, from
+\code{\link{acquire_repository_lock}}. Touched periodically during
+a long chunked read, so the lock does not expire partway through
+the file. Defaults to \code{NULL}.}
 }
 \value{
-Either:
-\itemize{
-  \item a \code{data.table} containing the full file contents (direct read
-    under \code{PartitionBy = "NRows"} or \code{"RAMEstimate"}), or
-  \item a list with \code{data}, \code{pre_aligned}, and
-    \code{written = FALSE} (direct read under \code{PartitionBy = "FAIL"}
-    with \code{FailProbeMode != "subprocess"}), or
-  \item a list with \code{written = TRUE} and chunk/partition metadata
-    (chunked or partition-routed read succeeded and wrote Parquet files
-    directly), or
-  \item \code{data.frame()} (file not found, or a non-chunkable reader's
-    read failed).
-}
+Either a data.table containing the full file contents, for a
+  direct read under \code{PartitionBy = "NRows"} or
+  \code{"RAMEstimate"}, or a list with \code{data}, \code{pre_aligned},
+  and \code{written = FALSE}, for a direct read under
+  \code{PartitionBy = "FAIL"} with \code{FailProbeMode} other than
+  \code{"subprocess"}, or a list with \code{written = TRUE} and chunk
+  or partition metadata, when a chunked or partition routed read
+  succeeded and wrote Parquet files directly, or an empty data frame,
+  when the file was not found, or a non chunkable reader's read
+  failed.
 }
 \description{
-For each source file, \code{read_fn} determines the row count, applies the
-\code{PartitionBy} strategy to decide whether the file can be loaded
-directly into memory or must be processed in memory-bounded chunks, and
-then delegates to \code{\link{safe_read_csv}}, \code{\link{safe_read_sav}},
-\code{\link{safe_read_sav_chunked}}, or \code{\link{read_delimited_chunked}}
-accordingly.
+For each source file, \code{read_fn} determines the row count, applies
+the \code{PartitionBy} strategy to decide whether the file can be
+loaded directly into memory or must be processed in chunks bounded by
+memory, and then delegates to \code{\link{safe_read_csv}},
+\code{\link{safe_read_sav}}, \code{\link{safe_read_sav_chunked}}, or
+\code{\link{read_delimited_chunked}} accordingly.
 }
 \details{
-\code{read_fn} was originally defined as a nested closure inside
-\code{\link{generic_db_loader}}, relying on lexical scoping to access
-\code{MDTSelect}, \code{MasterDBPath}, \code{reader}, \code{PartitionBy},
-\code{SAV_ROW_THRESHOLD}, \code{RAMThreshold}, and \code{SAV_CHUNK_SIZE}
-from \code{generic_db_loader}'s frame. It is now a standalone top-level
-function and all of these values must be passed explicitly as arguments.
+Every value that \code{generic_db_loader} used to supply through
+lexical scoping, \code{MDTSelect}, \code{MasterDBPath}, \code{reader},
+\code{PartitionBy}, \code{SAV_ROW_THRESHOLD}, \code{RAMThreshold}, and
+\code{SAV_CHUNK_SIZE}, must now be passed explicitly as arguments.
 }
-\section{Row-count determination}{
+\section{Row count determination}{
 
-The exact row count (\code{ncases}) is obtained via
-\code{haven::read_sav(full_path, col_select = 1L)} -- reading a single
-column keeps peak RAM proportional to one column's width times the row
-count, regardless of how wide the file is.
+The exact row count, \code{ncases}, is obtained with
+\code{haven::read_sav(full_path, col_select = 1L)}. Reading a single
+column keeps peak memory use proportional to one column's width times
+the row count, regardless of how wide the file is.
 }
 
 \section{PartitionBy strategies}{
 
 \describe{
-  \item{\code{"NRows"}}{Chunked reading is used when \code{ncases} exceeds
-    \code{SAV_ROW_THRESHOLD} (or when \code{ncases} cannot be determined).}
-  \item{\code{"RAMEstimate"}}{A single-row sample (\code{n_max = 1}) is read
-    to estimate per-row byte width from column types (8 bytes for numeric /
-    \code{haven_labelled} columns, \code{nchar + 56} for character columns).
-    The estimated total size (with a 4x safety multiplier) is compared to
-    \code{RAMThreshold} (in GB) to decide whether to chunk.}
-  \item{\code{"FAIL"}}{For delimited files, an isolated subprocess (see
-    \code{FailProbeMode}) attempts a full direct read-and-write; if it
-    fails or times out, the adaptive chunked reader takes over in the main
-    process. For SAV files, a full direct read, strip, sanitise, align,
-    and year-assignment is attempted inside a \code{tryCatch}, falling
-    back to chunked reading on error (most commonly out-of-memory during
-    \code{haven::read_sav()}). This strategy is the most accurate but also
-    the most expensive when the direct attempt fails, since it is
-    attempted and discarded before falling back.}
+  \item{\code{"NRows"}}{Chunked reading is used when \code{ncases}
+    exceeds \code{SAV_ROW_THRESHOLD}, or when \code{ncases} cannot be
+    determined.}
+  \item{\code{"RAMEstimate"}}{A single row sample, \code{n_max = 1},
+    is read to estimate the byte width per row from the column types,
+    8 bytes for a numeric or \code{haven_labelled} column, and
+    \code{nchar + 56} for a character column. The estimated total
+    size, with a 4 times safety multiplier, is compared to
+    \code{RAMThreshold}, in gigabytes, to decide whether to chunk.}
+  \item{\code{"FAIL"}}{For a delimited file, an isolated subprocess,
+    see \code{FailProbeMode}, attempts a full direct read and write.
+    When it fails or times out, the adaptive chunked reader takes
+    over in the main process. For a SAV file, a full direct read,
+    with stripping, sanitizing, aligning, and assigning the year, is
+    attempted inside a \code{tryCatch}, falling back to chunked
+    reading on an error, most commonly running out of memory during
+    \code{haven::read_sav()}. This strategy is the most accurate, and
+    also the most expensive when the direct attempt fails, since it
+    is attempted and discarded before falling back.}
 }
 }
 
-\section{Source-defined partition routing}{
+\section{Source defined partition routing}{
 
 When \code{reader} is a delimited type and the file's header already
-contains every column named in \code{partition_keys}, rows are routed
-directly to their own Hive partitions (e.g. a single combined multi-year
-CSV writes straight to \code{year=2020/}, \code{year=2021/}, ...) instead
-of all being written under one \code{year_dir}. This forces chunked
-writing even when \code{PartitionBy} would otherwise choose a direct read.
+contains every column named in \code{partition_keys}, a row is
+routed directly to its own hive partition, for example a single CSV
+spanning several years writes directly to \code{year=2020/},
+\code{year=2021/}, and so on, instead of everything being written
+under one \code{year_dir}. This forces chunked writing even when
+\code{PartitionBy} would otherwise choose a direct read.
 }
 
 \examples{

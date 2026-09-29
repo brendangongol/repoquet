@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{BuildRepositorySchema}
 \alias{BuildRepositorySchema}
-\title{Build a repository schema object for a database subset}
+\title{Builds a repository schema object for a database subset}
 \usage{
 BuildRepositorySchema(
   MDTSelect,
@@ -18,62 +18,73 @@ BuildRepositorySchema(
 )
 }
 \arguments{
-\item{MDTSelect}{Data frame. Subset of the Master Database Table (typically
-one database's rows) with, at minimum, \code{Database}, \code{MDBDir},
-\code{Path}, \code{TableName}, \code{FileType}, \code{PartitionKey}, and
-\code{PartitionValue}.}
+\item{MDTSelect}{Data frame. Subset of the master database table,
+typically one database's rows, with at minimum \code{Database},
+\code{MDBDir}, \code{Path}, \code{TableName}, \code{FileType},
+\code{PartitionKey}, and \code{PartitionValue}.}
 
-\item{MasterDBPath}{Character. Root directory of the source files, used
-with \code{MDBDir}/\code{Path} to resolve each row's full path.}
+\item{MasterDBPath}{Character scalar. Root directory of the
+source files, used with \code{MDBDir} and \code{Path} to
+resolve each row's full path.}
 
-\item{Database}{Character (optional). When \code{MDTSelect} spans more than
-one database and this is a single value, rows are filtered to it first.
-Defaults to every database present in \code{MDTSelect}.}
+\item{Database}{Character scalar. When \code{MDTSelect} spans
+more than one database and this is a single value, a row is
+filtered to it first. Defaults to every database present in
+\code{MDTSelect}.}
 
-\item{n_workers}{Integer. Parallel workers for column-sampling scans (see
-\code{\link{build_comprehensive}}, \code{\link{build_col_classes}}).}
+\item{n_workers}{Integer. Parallel workers for a column sampling
+scan. See \code{\link{build_comprehensive}} and
+\code{\link{build_col_classes}}. Defaults to \code{1}.}
 
-\item{SchemaRegistryPath}{Character (optional). Registry path passed to
-\code{\link{load_schema_registry}} when \code{schema_registry} is not
-supplied directly (created if missing).}
+\item{SchemaRegistryPath}{Character scalar. Registry path passed
+to \code{\link{load_schema_registry}} when \code{schema_registry}
+is not supplied directly, created when missing. Defaults to
+\code{NULL}.}
 
-\item{TableSchemaPath}{Character (optional). Destination for the written
-catalog when \code{write_catalog = TRUE} (see
-\code{\link{write_table_schema_catalog}}).}
+\item{TableSchemaPath}{Character scalar. Destination for the
+written catalog when \code{write_catalog} is \code{TRUE}. See
+\code{\link{write_table_schema_catalog}}. Defaults to \code{NULL}.}
 
-\item{schema_registry}{data.table (optional). Pre-loaded registry (see
-\code{\link{build_default_schema_registry}}); loaded from
-\code{SchemaRegistryPath} when \code{NULL}.}
+\item{schema_registry}{A data.table. A registry already loaded.
+See \code{\link{build_default_schema_registry}}. Loaded from
+\code{SchemaRegistryPath} when \code{NULL}. Defaults to
+\code{NULL}.}
 
-\item{write_catalog}{Logical. If \code{TRUE} (default), writes the combined
-schema catalog (and any harvested labels) to \code{TableSchemaPath}.}
+\item{write_catalog}{Logical. Accepts \code{TRUE}, which writes
+the combined schema catalog, and any harvested label, to
+\code{TableSchemaPath}. Accepts \code{FALSE}, which does not.
+Defaults to \code{TRUE}.}
 
-\item{known_col_classes}{Named list (optional), keyed by \code{TableName},
-of already-approved column-to-type maps (as in
-\code{load_table_schema_catalog()$col_classes[[Database]]}). Columns
-present in the catalog keep their approved type; any column newly present
-in the source files is inferred and logged for a future
-\code{\link{BuildRepositoryCatalog}} run.}
+\item{known_col_classes}{A named list, keyed by \code{TableName},
+of an already approved column to type map, as in
+\code{load_table_schema_catalog()$col_classes[[Database]]}. A
+column present in the catalog keeps its approved type. A column
+newly present in the source files is inferred and logged for a
+future \code{\link{BuildRepositoryCatalog}} run. Defaults to
+\code{NULL}.}
 
-\item{harvest_labels}{Logical. If \code{TRUE}, also harvests variable/value
-labels (see \code{\link{harvest_source_labels}}) for every table whose
-reader supports labels, newest partition first.}
+\item{harvest_labels}{Logical. Accepts \code{TRUE}, which also
+harvests a variable and value label, see
+\code{\link{harvest_source_labels}}, for every table whose
+reader supports labels, newest partition first. Accepts
+\code{FALSE}, which does not.}
 }
 \value{
 An object of class \code{"RepositorySchema"}: a list with
-  \code{comprehensive} (per-table union of column names),
-  \code{col_classes} (per-table resolved column-to-canonical-type maps),
-  \code{table_schema} (long-form data.table -- one row per
-  Database/TableName/Column, as written to the catalog),
-  \code{label_catalog} (data.table of harvested labels, empty if
-  \code{harvest_labels = FALSE}), \code{schema_registry} (the registry
-  used), and \code{TableSchemaPath}.
+  \code{comprehensive}, a per table union of column names,
+  \code{col_classes}, a per table resolved column to canonical
+  type map, \code{table_schema}, a long form data.table, one row
+  per Database, TableName, and Column, as written to the catalog,
+  \code{label_catalog}, a data.table of a harvested label, empty
+  when \code{harvest_labels} is \code{FALSE}, \code{schema_registry},
+  the registry used, and \code{TableSchemaPath}.
 }
 \description{
-This is the phase-2 schema engine. It infers schemas per Database/TableName,
-applies the repository schema registry, writes a transparent long-form schema
-catalog, and returns the comprehensive column map plus table-specific class maps
-needed by the writer.
+This is the phase two schema engine. It infers a schema per
+Database and TableName, applies the repository schema registry,
+writes a transparent, long form schema catalog, and returns the
+comprehensive column map plus a table specific class map needed
+by the writer.
 }
 \examples{
 src <- tempfile("mdb_"); dir.create(file.path(src, "DEMO"), recursive = TRUE)

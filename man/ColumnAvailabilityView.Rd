@@ -2,34 +2,33 @@
 % Please edit documentation in R/repoquet.R
 \name{ColumnAvailabilityView}
 \alias{ColumnAvailabilityView}
-\title{Visualise column availability as a heatmap}
+\title{Visualizes column availability as a heatmap}
 \usage{
 ColumnAvailabilityView(SupportingInfoPath, table_name)
 }
 \arguments{
-\item{SupportingInfoPath}{Character. Path to the \code{.xlsx} workbook
-produced by \code{\link{ColumnAvailabilityCompile}}.}
+\item{SupportingInfoPath}{Character scalar. Path to the
+\code{.xlsx} workbook produced by
+\code{\link{ColumnAvailabilityCompile}}.}
 
-\item{table_name}{Character. Sheet name (i.e. table name) to read and
-plot.}
+\item{table_name}{Character scalar. The table name, used as the
+sheet name to read and plot.}
 }
 \value{
-A named list with three elements:
-\describe{
-  \item{\code{table}}{The raw \code{data.frame} read from the workbook.}
-  \item{\code{heatmap}}{A \code{ComplexHeatmap::Heatmap} object ready
-    to print or save.}
-  \item{\code{sheet}}{Character. The resolved worksheet name that was read
-    (may differ from \code{table_name} if it was sanitized/de-duplicated
-    for Excel by \code{\link{WorkbookUpdateopenxlsx}}).}
-}
+A named list with three elements. \code{table} is the raw
+  data frame read from the workbook. \code{heatmap} is a
+  \code{ComplexHeatmap::Heatmap} object, ready to print or save.
+  \code{sheet} is the resolved worksheet name that was read, which
+  may differ from \code{table_name} when it was sanitized or
+  deduplicated for Excel by \code{\link{WorkbookUpdateopenxlsx}}.
 }
 \description{
-Reads the \code{PercentageNonNA} sheet for \code{table_name} from the
-Excel workbook written by \code{\link{ColumnAvailabilityCompile}} and
-renders a \pkg{ComplexHeatmap} heatmap where each cell is coloured by
-the percentage of non-\code{NA} values (0--100), with grey cells
-indicating columns that are fully absent in a given partition.
+Reads the \code{PercentageNonNA} sheet for \code{table_name} from
+the Excel workbook written by \code{\link{ColumnAvailabilityCompile}}
+and renders a \pkg{ComplexHeatmap} heatmap where each cell is
+colored by the percentage of values that are not \code{NA}, from 0
+to 100, with a grey cell indicating a column that is fully absent
+in a given partition.
 }
 \examples{
 \donttest{

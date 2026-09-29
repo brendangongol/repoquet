@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{create_repository_project}
 \alias{create_repository_project}
-\title{Scaffold a new repository project in a directory}
+\title{Scaffolds a new repository project in a directory}
 \usage{
 create_repository_project(
   dir,
@@ -12,25 +12,29 @@ create_repository_project(
 )
 }
 \arguments{
-\item{dir}{Project directory (created if needed).}
+\item{dir}{Project directory. Created when it does not exist.}
 
-\item{MasterDBPath}{Where source files live; defaults to
+\item{MasterDBPath}{Where the source files live. Defaults to
 \code{<dir>/source_data}.}
 
-\item{profile}{Schema-registry profile: "generic" (default) or "hcup".}
+\item{profile}{Schema registry profile. Accepts \code{"generic"} or
+\code{"hcup"}. Defaults to \code{"generic"}.}
 
-\item{overwrite}{Logical. Refuse to clobber existing scaffold files unless TRUE.}
+\item{overwrite}{Logical. Accepts \code{FALSE}, which refuses to
+overwrite an existing scaffold file. Accepts \code{TRUE}, which
+overwrites it. Defaults to \code{FALSE}.}
 }
 \value{
 Invisibly, a named list of the created paths.
 }
 \description{
-Generates everything a new user needs to run the workflow against their own
-data, with no hard-coded paths: a \code{repository_config.R}, an empty MDT
-workbook with the correct headers, a schema registry (the \code{"generic"}
-profile by default; \code{"hcup"} for HCUP data), and a commented
-\code{run_repository.R} script that executes the full pipeline
-(preflight -> catalog -> load -> views -> reconciliation).
+Generates everything a new user needs to run the workflow against
+their own data, with no path hard coded into it: a
+\code{repository_config.R}, an empty MDT workbook with the correct
+headers, a schema registry, the \code{"generic"} profile by
+default, or \code{"hcup"} for HCUP data, and a commented
+\code{run_repository.R} script that runs the full pipeline:
+preflight, then catalog, then load, then views, then reconciliation.
 }
 \examples{
 dir <- tempfile("repoquet_project_")
@@ -40,5 +44,6 @@ file.exists(paths$ConfigPath)
 unlink(dir, recursive = TRUE)
 }
 \seealso{
-\code{\link{generate_example_repository}} for a runnable synthetic example.
+\code{\link{generate_example_repository}} for a runnable
+  synthetic example.
 }

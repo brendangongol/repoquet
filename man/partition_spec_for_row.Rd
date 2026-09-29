@@ -2,26 +2,27 @@
 % Please edit documentation in R/repoquet.R
 \name{partition_spec_for_row}
 \alias{partition_spec_for_row}
-\title{Resolve the hive partition keys and values for one MDT row}
+\title{Resolves the hive partition keys and values for one MDT row}
 \usage{
 partition_spec_for_row(row_meta)
 }
 \arguments{
-\item{row_meta}{One row of the MDT (data.frame or data.table).}
+\item{row_meta}{One row of the MDT, as a data frame or data.table.}
 }
 \value{
-A list with \code{keys} (canonical uppercase character vector),
-  \code{values} (sanitized character vector, same length), and \code{dir}
-  (the relative partition directory, e.g. \code{"site=MGH/year=2019"}).
-  Directory key names are lowercased to match the historical \code{year=}
-  layout; DuckDB matches hive partition columns case-insensitively.
+A list with \code{keys}, a character vector of the canonical
+  uppercase partition key names, \code{values}, a character vector of
+  the same length holding the sanitized partition values, and \code{dir},
+  the relative partition directory, for example
+  \code{"site=MGH/year=2019"}. Directory key names are lowercased to
+  match the historical \code{year=} layout. DuckDB matches hive partition
+  columns without regard to letter case.
 }
 \description{
-Returns the partition specification driving where a source file's Parquet
-output lands, or the validated anchor when the source carries multiple
-physical values for all configured partition keys. Both
-\code{PartitionKey} and \code{PartitionValue} are required; no column-name
-or year-based defaults are inferred.
+Returns the partition specification that determines where a source
+file's Parquet output is written. \code{PartitionKey} and
+\code{PartitionValue} are both required; no default is inferred from a
+column name or from a year value.
 }
 \examples{
 row <- data.frame(PartitionKey = "SITE;YEAR", PartitionValue = "MGH;2020",
@@ -32,6 +33,6 @@ spec$values
 spec$dir
 }
 \seealso{
-\code{\link{ValidateMDTPreflight}} which enforces per-table key
-  consistency before any file is written.
+\code{\link{ValidateMDTPreflight}}, which enforces consistent
+  partition keys within a table before any file is written.
 }

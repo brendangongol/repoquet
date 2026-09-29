@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{search_diagnosis_codes}
 \alias{search_diagnosis_codes}
-\title{Search DuckDB tables for diagnosis / procedure codes}
+\title{Searches DuckDB tables for diagnosis and procedure codes}
 \usage{
 search_diagnosis_codes(
   con,
@@ -17,51 +17,54 @@ search_diagnosis_codes(
 \arguments{
 \item{con}{A DBI connection to an open DuckDB database.}
 
-\item{codes}{Character vector. Diagnosis or procedure codes to search for.}
+\item{codes}{Character vector. Diagnosis or procedure codes to
+search for.}
 
-\item{tables}{Character vector (optional). Table names to restrict the
-search to.  \code{NULL} (default) searches all tables in \code{con}.
-Names not found in the database trigger a \code{warning()}, and the
-search proceeds with whatever names were found.}
+\item{tables}{Character vector. Table names to restrict the search
+to. Defaults to \code{NULL}, which searches every table in
+\code{con}. A name not found in the database triggers a
+\code{warning()}, and the search proceeds with whatever names were
+found.}
 
-\item{match_type}{Character scalar.  One of \code{"exact"} (default;
-fastest, uses an index when available), \code{"prefix"} (matches all
-sub-codes; cannot use a standard index), or \code{"any"} (broadest;
-always a full scan).}
+\item{match_type}{Character scalar. Accepts one of three values.
+\code{"exact"} matches a whole code, is fastest, and uses an index
+when one is available. \code{"prefix"} matches every code that
+shares this prefix, and cannot use a standard index. \code{"any"}
+matches this text anywhere in the value, is the broadest, and is
+always a full scan. Defaults to \code{"exact"}.}
 
-\item{col_filter}{Character scalar. Regular expression applied to column
-names to restrict which \code{VARCHAR} columns are searched.  Pass
-\code{NULL} to search every \code{VARCHAR} column.}
+\item{col_filter}{Character scalar. Regular expression applied to
+column names to restrict which \code{VARCHAR} columns are
+searched. Pass \code{NULL} to search every \code{VARCHAR} column.}
 
-\item{min_rows}{Integer. Minimum matching row count for a result to be
-included.  Default \code{1L}.}
+\item{min_rows}{Integer. Minimum matching row count for a result to
+be included. Defaults to \code{1}.}
 
-\item{verbose}{Logical. If \code{TRUE} (default), prints per-table
-progress messages.}
+\item{verbose}{Logical. Accepts \code{TRUE}, which prints a progress
+message for each table. Accepts \code{FALSE}, which does not.
+Defaults to \code{TRUE}.}
 }
 \value{
-A named list with two elements:
-\describe{
-  \item{\code{DiagnosisSearch}}{A \code{data.table} with columns
-    \code{database_table}, \code{column_name}, \code{code},
-    \code{n_rows}, \code{total_rows}, \code{pct_of_table},
-    \code{match_type}.}
-  \item{\code{DiagnosisSearchSummary}}{A rolled-up \code{data.table}
-    with one row per code showing \code{n_tables}, \code{n_columns},
-    \code{total_rows}, \code{tables_found}, and \code{columns_found}.}
-}
+A named list with two elements. \code{DiagnosisSearch} is a
+  data.table with columns \code{database_table}, \code{column_name},
+  \code{code}, \code{n_rows}, \code{total_rows}, \code{pct_of_table},
+  and \code{match_type}. \code{DiagnosisSearchSummary} is a
+  data.table rolled up to one row per code, with \code{n_tables},
+  \code{n_columns}, \code{total_rows}, \code{tables_found}, and
+  \code{columns_found}.
 }
 \description{
-Scans every qualifying \code{VARCHAR} column in each of the specified
-tables for a vector of codes using a single \code{UNPIVOT}-based query
-per table (falling back to a \code{UNION ALL} if \code{UNPIVOT} is not
-supported for a given table).  Returns a detailed \code{data.table} plus
-a rolled-up summary in a named list.
+Scans every qualifying \code{VARCHAR} column in each of the
+specified tables for a vector of codes, using a single query per
+table based on \code{UNPIVOT}, falling back to a query based on
+\code{UNION ALL} when \code{UNPIVOT} is not supported for a given
+table. Returns a detailed data.table, plus a summary rolled up by
+code, in a named list.
 }
 \details{
-Using \code{UNPIVOT} means DuckDB scans each table once regardless of how
-many codes or columns are searched, rather than issuing one query per code
-per column.
+Using \code{UNPIVOT} means DuckDB scans each table once regardless
+of how many codes or columns are searched, rather than issuing one
+query per code per column.
 }
 \examples{
 con <- DBI::dbConnect(duckdb::duckdb(), dbdir = ":memory:")

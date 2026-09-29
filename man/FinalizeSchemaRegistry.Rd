@@ -2,29 +2,32 @@
 % Please edit documentation in R/repoquet.R
 \name{FinalizeSchemaRegistry}
 \alias{FinalizeSchemaRegistry}
-\title{Finalize the reviewed registry using the existing table-catalog contract}
+\title{Finalizes the reviewed registry using the existing table catalog contract}
 \usage{
 FinalizeSchemaRegistry(SchemaReviewPath, TableSchemaPath, strict = TRUE)
 }
 \arguments{
-\item{SchemaReviewPath}{Character. Path to the schema review workbook
-with review decisions applied; see \code{\link{FinalizeRepositorySchema}}.}
+\item{SchemaReviewPath}{Character scalar. Path to the schema
+review workbook with review decisions applied. See
+\code{\link{FinalizeRepositorySchema}}.}
 
-\item{TableSchemaPath}{Character. Output path for the finalized table
-schema catalog.}
+\item{TableSchemaPath}{Character scalar. Output path for the
+finalized table schema catalog.}
 
-\item{strict}{Logical. If \code{TRUE} (default), stop on unresolved
-decisions or invalid types.}
+\item{strict}{Logical. Accepts \code{TRUE}, which stops on an
+unresolved decision or an invalid type. Accepts \code{FALSE},
+which does not. Defaults to \code{TRUE}.}
 }
 \value{
 Invisibly, the result of
-  \code{\link{load_table_schema_catalog}(TableSchemaPath)}; see
+  \code{\link{load_table_schema_catalog}(TableSchemaPath)}. See
   \code{\link{FinalizeRepositorySchema}}.
 }
 \description{
-Thin wrapper around \code{\link{FinalizeRepositorySchema}}, kept as a
-stable name for the last step of the \code{\link{PrepareSchemaRegistry}}
-workflow. Arguments and behavior are identical.
+A thin wrapper around \code{\link{FinalizeRepositorySchema}}, kept
+as a stable name for the last step of the
+\code{\link{PrepareSchemaRegistry}} workflow. Its arguments and
+behavior are identical.
 }
 \examples{
 \donttest{

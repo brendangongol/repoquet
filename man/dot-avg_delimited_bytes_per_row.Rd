@@ -2,15 +2,16 @@
 % Please edit documentation in R/repoquet.R
 \name{.avg_delimited_bytes_per_row}
 \alias{.avg_delimited_bytes_per_row}
-\title{Average on-disk bytes per row for a delimited source}
+\title{Computes the average number of bytes on disk per row for a delimited source}
 \usage{
 .avg_delimited_bytes_per_row(path, total_rows)
 }
 \description{
-Shared estimator used to translate a memory budget (MB) into a row count.
-Returns \code{NA_real_} when the size can't be trusted -- compressed files
-don't reveal their decompressed size, and a missing/zero row or byte count
-means there's nothing to divide -- callers should treat \code{NA} as "fall
-back to a conservative fixed size" rather than guessing further.
+Shared estimator used to translate a memory budget, in megabytes, into a
+row count. Returns \code{NA_real_} when the size cannot be trusted: a
+compressed file does not reveal its decompressed size, and a missing or
+zero row or byte count leaves nothing to divide. A caller treats
+\code{NA} as a signal to fall back to a conservative fixed size, rather
+than guessing further.
 }
 \keyword{internal}

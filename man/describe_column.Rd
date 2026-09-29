@@ -2,36 +2,40 @@
 % Please edit documentation in R/repoquet.R
 \name{describe_column}
 \alias{describe_column}
-\title{Describe a repository column and its observed and semantic values}
+\title{Describes a repository column and its observed and semantic values}
 \usage{
 describe_column(TableSchemaPath, Database, TableName, Column)
 }
 \arguments{
-\item{TableSchemaPath}{Character. Path to the schema catalog written by
-\code{\link{write_table_schema_catalog}}.}
+\item{TableSchemaPath}{Character scalar. Path to the schema
+catalog written by \code{\link{write_table_schema_catalog}}.}
 
-\item{Database}{Character scalar. Database name as recorded in the catalog.}
+\item{Database}{Character scalar. Database name as recorded in
+the catalog.}
 
-\item{TableName}{Character scalar. Logical table name (as in the MDT
-\code{TableName} column, not the physical DuckDB table name).}
+\item{TableName}{Character scalar. Logical table name, as in the
+MDT \code{TableName} column, not the physical DuckDB table
+name.}
 
-\item{Column}{Character scalar. Column name (canonicalized internally via
-\code{canonical_colnames} before matching).}
+\item{Column}{Character scalar. Column name, canonicalized
+internally through \code{canonical_colnames} before matching.}
 }
 \value{
-An object of class \code{"repoquet_column_description"}: a list
-  with \code{schema} (the matching schema-catalog row(s), a data.table),
-  \code{observed_values} (matching \code{ValueDictionary} rows, or
-  \code{NULL}), and \code{dictionary} (matching \code{ColumnDictionary}
-  rows, or \code{NULL}).
+An object of class \code{"repoquet_column_description"}:
+  a list with \code{schema}, the matching schema catalog row or
+  rows as a data.table, \code{observed_values}, the matching
+  \code{ValueDictionary} rows, or \code{NULL}, and
+  \code{dictionary}, the matching \code{ColumnDictionary} rows, or
+  \code{NULL}.
 }
 \description{
-One-stop lookup for a single Database/TableName/Column triple: pulls its
-schema-catalog row (canonical type, role, source), any low-cardinality
-\code{ValueDictionary} evidence observed during schema survey, and any
-approved \code{ColumnDictionary} semantic labels -- the three pieces
-\code{\link{search_labels}} would otherwise require separate calls to
-assemble for one column.
+A one stop lookup for a single Database, TableName, and Column
+triple: pulls its schema catalog row, its canonical type, role,
+and source, any low cardinality \code{ValueDictionary} evidence
+observed during a schema survey, and any approved
+\code{ColumnDictionary} semantic label, the three pieces
+\code{\link{search_labels}} would otherwise require a separate
+call to assemble for one column.
 }
 \examples{
 tmp <- tempfile(fileext = ".csv")

@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{write_table_schema_catalog}
 \alias{write_table_schema_catalog}
-\title{Write the table schema catalog as Excel or CSV}
+\title{Writes the table schema catalog as Excel or CSV}
 \usage{
 write_table_schema_catalog(
   table_schema,
@@ -13,41 +13,43 @@ write_table_schema_catalog(
 )
 }
 \arguments{
-\item{table_schema}{A data frame or data.table of finalized columns (one
-row per Database/TableName/Column), written to the main
-\code{TableSchemas} sheet/file.}
+\item{table_schema}{A data frame or data.table of finalized
+columns, one row per Database, TableName, and Column, written to
+the main \code{TableSchemas} sheet or file.}
 
-\item{TableSchemaPath}{Character. Output path (\code{.xlsx} or
-\code{.csv}). \code{NULL} or blank is a no-op.}
+\item{TableSchemaPath}{Character scalar. Output path, accepting
+either an \code{.xlsx} or a \code{.csv} extension. \code{NULL}
+or a blank value is a no op.}
 
-\item{label_catalog}{Data frame (optional). Variable/value-label catalog.
-\code{NULL} re-reads any existing catalog via
-\code{\link{load_label_catalog}}.}
+\item{label_catalog}{Data frame. Variable and value label catalog.
+Defaults to \code{NULL}, which reads back any existing catalog
+through \code{\link{load_label_catalog}}.}
 
-\item{value_dictionary}{Data frame (optional). Low-cardinality value
-dictionary. \code{NULL} re-reads any existing one from
-\code{TableSchemaPath}.}
+\item{value_dictionary}{Data frame. Low cardinality value
+dictionary. Defaults to \code{NULL}, which reads back any
+existing dictionary from \code{TableSchemaPath}.}
 
-\item{column_dictionary}{Data frame (optional). Approved semantic-code
-dictionary. \code{NULL} re-reads any existing one from
-\code{TableSchemaPath}.}
+\item{column_dictionary}{Data frame. Approved semantic code
+dictionary. Defaults to \code{NULL}, which reads back any
+existing dictionary from \code{TableSchemaPath}.}
 }
 \value{
-Invisibly, \code{TableSchemaPath} (or \code{NULL} when it is
-  \code{NULL}/blank, in which case nothing is written).
+Invisibly, \code{TableSchemaPath}, or \code{NULL} when it
+  is \code{NULL} or blank, in which case nothing is written.
 }
 \description{
-Writes the finalized per-column schema (as produced by
-\code{\link{FinalizeRepositorySchema}}) to \code{TableSchemaPath}. For an
-Excel path, writes a \code{TableSchemas} sheet plus derived
-\code{MergeKeys} and \code{ColumnInventory} reference sheets, and, when
-supplied, \code{ValueDictionary}, \code{ColumnDictionary}, and
-\code{Labels} sheets. For a CSV path, writes the main catalog plus a
-sibling \verb{*_Labels.csv} / value-dictionary / column-dictionary file
-for each optional table that is supplied and non-empty. Any dictionary
-argument left \code{NULL} is re-read from an existing file at
-\code{TableSchemaPath} first, so calling this repeatedly does not
-silently drop previously written dictionaries.
+Writes the finalized per column schema, as produced by
+\code{\link{FinalizeRepositorySchema}}, to \code{TableSchemaPath}.
+For an Excel path, writes a \code{TableSchemas} sheet plus a
+derived \code{MergeKeys} and \code{ColumnInventory} reference
+sheet, and, when supplied, a \code{ValueDictionary},
+\code{ColumnDictionary}, and \code{Labels} sheet. For a CSV path,
+writes the main catalog plus a sibling \verb{*_Labels.csv}, value
+dictionary, or column dictionary file for each optional table
+that is supplied and non empty. A dictionary argument left
+\code{NULL} is read back from an existing file at
+\code{TableSchemaPath} first, so that calling this repeatedly does
+not silently drop a previously written dictionary.
 }
 \examples{
 table_schema <- data.frame(

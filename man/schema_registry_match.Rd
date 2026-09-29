@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{schema_registry_match}
 \alias{schema_registry_match}
-\title{Get registry metadata for a column}
+\title{Gets registry metadata for a column}
 \usage{
 schema_registry_match(
   column,
@@ -12,32 +12,33 @@ schema_registry_match(
 )
 }
 \arguments{
-\item{column}{Character scalar. Column name to match (canonicalized
-internally via \code{canonical_colnames}).}
+\item{column}{Character scalar. Column name to match,
+canonicalized internally through \code{canonical_colnames}.}
 
-\item{schema_registry}{data.table of registry rows (see
-\code{\link{build_default_schema_registry}}, \code{\link{load_schema_registry}}),
-or \code{NULL}.}
+\item{schema_registry}{A data.table of registry rows. See
+\code{\link{build_default_schema_registry}} and
+\code{\link{load_schema_registry}}. Defaults to \code{NULL}.}
 
-\item{database}{Character scalar (optional). Database name used to
-evaluate each row's \code{AppliesTo} scope.}
+\item{database}{Character scalar. Database name used to evaluate
+each row's \code{AppliesTo} scope. Defaults to \code{NULL}.}
 
-\item{table_name}{Character scalar (optional). Table name used to evaluate
-each row's \code{AppliesTo} scope.}
+\item{table_name}{Character scalar. Table name used to evaluate
+each row's \code{AppliesTo} scope. Defaults to \code{NULL}.}
 }
 \value{
-A one-row data.table/data.frame (the first matching registry row),
-  or \code{NULL} when \code{schema_registry} is \code{NULL}/empty or no row
-  matches.
+A one row data.table or data.frame, the first matching
+  registry row, or \code{NULL} when \code{schema_registry} is
+  \code{NULL} or empty, or no row matches.
 }
 \description{
-Finds the first \code{schema_registry} row whose \code{AppliesTo} scope
-matches \code{database}/\code{table_name} (see
-\code{schema_registry_applies}) and whose \code{ColumnPattern}
-matches \code{column} (after canonicalization), and returns that row in
-full -- including any \code{Role} used to annotate the schema catalog.
-Unlike \code{\link{apply_schema_registry}}, this returns the matching
-registry row itself rather than an overridden type map.
+Finds the first \code{schema_registry} row whose \code{AppliesTo}
+scope matches \code{database} and \code{table_name}, see
+\code{schema_registry_applies}, and whose \code{ColumnPattern}
+matches \code{column} after canonicalization, and returns that
+row in full, including any \code{Role} used to annotate the
+schema catalog. Unlike \code{\link{apply_schema_registry}}, this
+returns the matching registry row itself rather than an
+overridden type map.
 }
 \examples{
 registry <- data.table::data.table(

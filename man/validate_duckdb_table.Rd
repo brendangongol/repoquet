@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{validate_duckdb_table}
 \alias{validate_duckdb_table}
-\title{Validate a registered DuckDB view and compare important columns to registry}
+\title{Validates a registered DuckDB view and compares important columns to registry}
 \usage{
 validate_duckdb_table(
   con,
@@ -13,44 +13,51 @@ validate_duckdb_table(
 )
 }
 \arguments{
-\item{con}{Live DBI connection to the DuckDB database containing
+\item{con}{A live DBI connection to the DuckDB database containing
 \code{table_name}.}
 
-\item{table_name}{Character. Name of the registered table/view to
-validate.}
+\item{table_name}{Character scalar. Name of the registered table or
+view to validate.}
 
-\item{schema_registry}{Schema registry \code{data.frame}/\code{data.table}
-(see \code{\link{load_schema_registry}}), or \code{NULL} (default) to
-skip pattern-based validation. The logical database/table used for
-\code{AppliesTo} scoping is taken from \code{table_schema} when
-possible, otherwise inferred by splitting \code{table_name} on the
-first \code{"_"}.}
+\item{schema_registry}{Schema registry, as a data frame or
+data.table, see \code{\link{load_schema_registry}}. Accepts such a
+registry, which enables the pattern based check. Accepts
+\code{NULL}, which skips it. Defaults to \code{NULL}. The logical
+database and table used for \code{AppliesTo} scoping is taken from
+\code{table_schema} when possible, and otherwise inferred by
+splitting \code{table_name} on the first \code{"_"}.}
 
-\item{strict}{Logical. If \code{TRUE}, any failure (a failed
-\code{DESCRIBE}/\code{COUNT}, or any type mismatch) raises an error via
-\code{stop()}. If \code{FALSE} (default), failures are logged and the
-function returns \code{invisible(FALSE)}.}
+\item{strict}{Logical. Accepts \code{TRUE}, which raises an error,
+with \code{stop()}, on any failure, whether a failed
+\code{DESCRIBE} or \code{COUNT}, or a type mismatch. Accepts
+\code{FALSE}, which logs a failure and returns
+\code{invisible(FALSE)}. Defaults to \code{FALSE}.}
 
-\item{table_schema}{Data frame/\code{data.table} (optional) with columns
-\code{Column} and \code{CanonicalType} (and either \code{DuckDBTable},
-or \code{Database} plus \code{TableName} used to derive it), giving the
-authoritative column catalog for \code{table_name}. \code{NULL}
-(default) skips this exact-match check.}
+\item{table_schema}{Data frame or data.table, with columns
+\code{Column} and \code{CanonicalType}, and either
+\code{DuckDBTable}, or \code{Database} together with
+\code{TableName} used to derive it. Accepts such a table, giving
+the authoritative column catalog for \code{table_name}, which
+enables the exact match check. Accepts \code{NULL}, which skips
+it. Defaults to \code{NULL}.}
 }
 \value{
-Invisibly, \code{TRUE} if \code{table_name} described, counted,
-  and passed every supplied check; \code{FALSE} if any check failed and
-  \code{strict = FALSE} (with \code{strict = TRUE} a failure raises an
-  error instead of returning).
+Invisibly, \code{TRUE} when \code{table_name} was described,
+  counted, and passed every supplied check. \code{FALSE} when a
+  check failed and \code{strict} is \code{FALSE}. When \code{strict}
+  is \code{TRUE}, a failure raises an error instead of returning.
 }
 \description{
-Confirms \code{table_name} can be described and counted in \code{con},
-then optionally cross-checks its column types against two independent
-sources of truth: a pattern-based \code{schema_registry} (tolerant of
-numeric-family substitutions, e.g. \code{INTEGER} satisfies an expected
-\code{"numeric"}) and/or an exact \code{table_schema} column catalog
-(which also flags catalog columns missing from the table, and logs -- but
-does not fail on -- table columns absent from the catalog).
+Confirms that \code{table_name} can be described and counted in
+\code{con}, then optionally cross checks its column types against two
+independent sources of truth: a pattern based \code{schema_registry},
+tolerant of a numeric family substitution, for example \code{INTEGER}
+satisfies an expected \code{"numeric"}, except for a column the
+\code{table_schema} catalog already records as reviewed and
+deliberately not forced to a matching pattern, and an exact
+\code{table_schema} column catalog, which also flags a catalog column
+missing from the table, and logs, without failing on, a table column
+absent from the catalog.
 }
 \examples{
 con <- DBI::dbConnect(duckdb::duckdb(), dbdir = ":memory:")

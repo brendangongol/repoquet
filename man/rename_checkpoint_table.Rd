@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{rename_checkpoint_table}
 \alias{rename_checkpoint_table}
-\title{Migrate checkpoint and manifest entries after renaming a table in the MDT}
+\title{Migrates checkpoint and manifest entries after renaming a table in the MDT}
 \usage{
 rename_checkpoint_table(
   CheckpointPath,
@@ -18,47 +18,55 @@ rename_checkpoint_table(
 )
 }
 \arguments{
-\item{CheckpointPath}{Character. Checkpoint .rds path.}
+\item{CheckpointPath}{Character scalar. Path to the checkpoint
+\code{.rds} file.}
 
 \item{MDT}{Data frame. Workbook rows already using \code{NewTableName}.}
 
-\item{Database, OldTableName, NewTableName}{Character. The rename to migrate.}
+\item{Database, OldTableName, NewTableName}{Character scalars. The
+rename to migrate.}
 
-\item{ManifestPath}{Character (optional). Manifest CSV to rewrite too.}
+\item{ManifestPath}{Character scalar. Manifest CSV to rewrite too.
+Defaults to \code{NULL}, which does not rewrite a manifest.}
 
-\item{DryRun}{Logical. TRUE (default) reports what would change.}
+\item{DryRun}{Logical. Accepts \code{TRUE}, which reports what would
+change without writing anything. Accepts \code{FALSE}, which writes
+the change. Defaults to \code{TRUE}.}
 
-\item{ParquetBasePath}{Character (optional). Root of the Parquet store.
-When supplied and the physical table directory name actually changes,
-the on-disk directory is renamed from \code{OldPhysicalTableName} to
-\code{NewPhysicalTableName} (via a same-filesystem intermediate rename)
-and the manifest's \code{ParquetPath} entries for this table are
-rewritten to match. Without it, only the checkpoint/manifest bookkeeping
-is migrated -- no files move.}
+\item{ParquetBasePath}{Character scalar. Root of the Parquet store.
+Accepts a path, such that when the physical table directory name
+actually changes, the directory on disk is renamed from
+\code{OldPhysicalTableName} to \code{NewPhysicalTableName}, through
+an intermediate rename on the same file system, and the manifest's
+\code{ParquetPath} entries for this table are rewritten to match.
+Accepts \code{NULL}, in which case only the checkpoint and manifest
+bookkeeping is migrated, and no file moves. Defaults to \code{NULL}.}
 
-\item{OldPhysicalTableName}{Character (optional). Physical Parquet
+\item{OldPhysicalTableName}{Character scalar. Physical Parquet
 directory name before the rename. Defaults to
 \code{paste(Database, OldTableName, sep = "_")}.}
 
-\item{NewPhysicalTableName}{Character (optional). Physical Parquet
-directory name after the rename. Defaults to the physical table name
-derived from \code{MDT}'s (already-renamed) rows via
+\item{NewPhysicalTableName}{Character scalar. Physical Parquet
+directory name after the rename. Defaults to the physical table
+name derived from the already renamed rows of \code{MDT}, with
 \code{repository_table_name_for_row}.}
 }
 \value{
 Invisibly, a list with \code{n_checkpoint_migrated} and
-  \code{n_manifest_migrated} (counts of entries updated, or that would be
-  updated under \code{DryRun = TRUE}).
+  \code{n_manifest_migrated}, the number of entries updated, or that
+  would be updated when \code{DryRun} is \code{TRUE}.
 }
 \description{
-Changing a row's \code{TableName} in the workbook (e.g. normalizing
-\code{NRD_CORE} to \code{NRD_Core} after a case-collision preflight error)
-changes that row's checkpoint identity, so already-loaded files would be
-re-ingested. This helper rewrites the affected checkpoint entries (both the
-generalized and legacy key formats) and the manifest's TableName/DuckDBTable
-fields in place, so completed files stay completed under the new name.
-Run it once on the loading machine after editing the workbook; the MDT you
-pass must already carry the NEW TableName.
+Changing a row's \code{TableName} in the workbook, for example
+normalizing \code{NRD_CORE} to \code{NRD_Core} after a preflight error
+about a case collision, changes that row's checkpoint identity, so an
+already loaded file would be loaded again. This function rewrites the
+affected checkpoint entries, in both the generalized and legacy key
+formats, and the manifest's \code{TableName} and \code{DuckDBTable}
+fields, in place, so that a completed file stays completed under the
+new name. Run it once on the loading machine after editing the
+workbook. The \code{MDT} passed to it must already carry the new
+\code{TableName}.
 }
 \examples{
 #### MDT already carries the NEW TableName ("Core") ####

@@ -2,32 +2,34 @@
 % Please edit documentation in R/repoquet.R
 \name{begin_repository_run}
 \alias{begin_repository_run}
-\title{Start a run-scoped logging context}
+\title{Starts a run scoped logging context}
 \usage{
 begin_repository_run(LogPath = NULL, RunId = NULL)
 }
 \arguments{
-\item{LogPath}{Character scalar (optional). Path to the run's log file.
-If \code{NULL}, blank, or \code{NA}, the run has no explicit log path
-and \code{\link{log_msg}} falls back to its own path resolution.}
+\item{LogPath}{Character scalar. Path to the run's log file.
+Defaults to \code{NULL}. When \code{NULL}, blank, or \code{NA},
+the run has no explicit log path and \code{\link{log_msg}}
+falls back to its own path resolution.}
 
-\item{RunId}{Character scalar (optional). Explicit run identifier to use.
-If \code{NULL}, blank, or \code{NA}, one is generated with
-\code{\link{new_repository_run_id}}.}
+\item{RunId}{Character scalar. Explicit run identifier to use.
+Defaults to \code{NULL}. When \code{NULL}, blank, or \code{NA},
+one is generated with \code{\link{new_repository_run_id}}.}
 }
 \value{
-Invisibly, a list with elements \code{run_id} and \code{log_path}
-  holding the \emph{previous} run context (before this call), suitable for
-  passing to \code{restore_repository_run()}.
+Invisibly, a list with elements \code{run_id} and
+  \code{log_path} holding the previous run context, before this
+  call, suitable for passing to \code{restore_repository_run()}.
 }
 \description{
-Establishes the run identifier and log path used by \code{\link{log_msg}}
-and other repository functions for the remainder of the session (or until
-\code{restore_repository_run()} is called with the returned value). Nested
-calls are supported: the previous context is returned invisibly so a
-caller can restore it in an \code{on.exit()} handler, as
-\code{\link{MaterializeRemoteSources}} and \code{\link{ValidateMDTPreflight}}
-do internally.
+Establishes the run identifier and log path used by
+\code{\link{log_msg}} and other repository functions for the
+remainder of the session, or until \code{restore_repository_run()}
+is called with the returned value. A nested call is supported: the
+previous context is returned invisibly so that a caller can
+restore it in an \code{on.exit()} handler, as
+\code{\link{MaterializeRemoteSources}} and
+\code{\link{ValidateMDTPreflight}} do internally.
 }
 \examples{
 previous <- begin_repository_run(LogPath = tempfile(fileext = ".txt"), RunId = "demo_run")

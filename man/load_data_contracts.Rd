@@ -2,35 +2,38 @@
 % Please edit documentation in R/repoquet.R
 \name{load_data_contracts}
 \alias{load_data_contracts}
-\title{Read a repository data-contract file, optionally creating an empty one}
+\title{Reads a repository data contract file, optionally creating an empty one}
 \usage{
 load_data_contracts(DataContractPath, create_if_missing = FALSE)
 }
 \arguments{
-\item{DataContractPath}{Character. Path to the data-contract file
-(\code{.xlsx} or \code{.csv}). \code{NULL} or an empty string returns an
-empty table.}
+\item{DataContractPath}{Character scalar. Path to the data contract
+file, \code{.xlsx} or \code{.csv}. Accepts \code{NULL} or an empty
+string, which returns an empty table.}
 
-\item{create_if_missing}{Logical. If \code{TRUE} and the file does not
-exist, write an empty template to \code{DataContractPath} before
-returning it. Default \code{FALSE}.}
+\item{create_if_missing}{Logical. Accepts \code{TRUE}, which, when
+the file does not exist, writes an empty template to
+\code{DataContractPath} before returning it. Accepts \code{FALSE},
+which does not write it. Defaults to \code{FALSE}.}
 }
 \value{
-A \code{data.table} of contract rules (possibly 0 rows), or an
-  empty \code{data.table} when \code{DataContractPath} is \code{NULL}/blank
-  or absent with \code{create_if_missing = FALSE}.
+A data.table of contract rules, possibly with zero rows, or
+  an empty data.table when \code{DataContractPath} is \code{NULL},
+  blank, or absent with \code{create_if_missing} \code{FALSE}.
 }
 \description{
-Reads the workbook or CSV of declarative data-contract rules used by
-\code{\link{validate_data_contracts}}. When \code{DataContractPath} is
-\code{NULL} or blank, an empty contract table is returned with no error.
-When the file does not exist and \code{create_if_missing = TRUE}, a new
-file is written from \code{\link{build_data_contract_template}} (Excel via
-a \code{DataContracts} sheet, or CSV) and the empty template is returned.
-Once read, optional columns missing from the file are filled with
-defaults (\code{Severity = "error"}, \code{Enabled = TRUE}, etc.), and
-\code{Rule}/\code{Severity} are validated for enabled rows: \code{Rule}
-must be one of \code{not_null}, \code{unique}, \code{range}, \code{allowed},
+Reads the workbook or CSV of declarative data contract rules used by
+\code{\link{validate_data_contracts}}. When \code{DataContractPath}
+is \code{NULL} or blank, an empty contract table is returned with no
+error. When the file does not exist and \code{create_if_missing} is
+\code{TRUE}, a new file is written from
+\code{\link{build_data_contract_template}}, as an Excel workbook
+with a \code{DataContracts} sheet, or as CSV, and the empty template
+is returned. Once read, an optional column missing from the file is
+filled with a default, for example \code{Severity = "error"} and
+\code{Enabled = TRUE}, and \code{Rule} and \code{Severity} are
+validated for an enabled row: \code{Rule} must be one of
+\code{not_null}, \code{unique}, \code{range}, \code{allowed},
 \code{regex}, or \code{foreign_key}, and \code{Severity} must be
 \code{"error"} or \code{"warning"}.
 }

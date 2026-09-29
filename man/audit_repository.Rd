@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{audit_repository}
 \alias{audit_repository}
-\title{Reconcile the four sources of truth: checkpoint, manifest, disk, DuckDB}
+\title{Reconciles the four sources of truth: the checkpoint, the manifest, disk, and DuckDB}
 \usage{
 audit_repository(
   MDT,
@@ -16,55 +16,66 @@ audit_repository(
 )
 }
 \arguments{
-\item{MDT}{Data frame. Master Database Table (current workbook).}
+\item{MDT}{Data frame. Master Database Table, the current workbook.}
 
-\item{ParquetBasePath}{Character. Root of the Parquet store.}
+\item{ParquetBasePath}{Character scalar. Root of the Parquet store.}
 
-\item{CheckpointPath}{Character. Checkpoint .rds path.}
+\item{CheckpointPath}{Character scalar. Path to the checkpoint
+\code{.rds} file.}
 
-\item{ManifestPath}{Character (optional). Manifest CSV; several checks are
-skipped without it.}
+\item{ManifestPath}{Character scalar. Manifest CSV. Accepts a path,
+which enables every check. Accepts \code{NULL}, which skips several
+checks. Defaults to \code{NULL}.}
 
-\item{con}{Optional live DuckDB connection for count reconciliation.}
+\item{con}{A live DuckDB connection, used for the row count check.
+Defaults to \code{NULL}, which skips that check.}
 
-\item{verbose}{Logical. Log a per-check summary via \code{log_msg}.}
+\item{verbose}{Logical. Accepts \code{TRUE}, which logs a summary of
+each check with \code{log_msg}. Accepts \code{FALSE}, which does
+not. Defaults to \code{TRUE}.}
 
-\item{LogPath}{Character (optional). Log file for this run. When supplied
-(together with, or in place of, \code{RunId}), a run-scoped logging
-context is started via \code{\link{begin_repository_run}} for the
-duration of the audit and restored afterwards.}
+\item{LogPath}{Character scalar. Log file for this run. Accepts a
+file path, which, together with, or in place of, \code{RunId},
+starts a logging context for this run with
+\code{\link{begin_repository_run}}, for the duration of the audit,
+restored afterward. Defaults to \code{NULL}.}
 
-\item{RunId}{Character (optional). Run identifier tagged onto log lines
-(see \code{\link{begin_repository_run}}); auto-generated when
-\code{LogPath} is supplied but \code{RunId} is not.}
+\item{RunId}{Character scalar. Run identifier tagged onto log lines,
+see \code{\link{begin_repository_run}}. Generated automatically
+when \code{LogPath} is supplied but \code{RunId} is not. Defaults
+to \code{NULL}.}
 }
 \value{
-Invisibly, a list: \code{issues} (summary data.table with Check,
-  Severity, N), one detail data.table per check (\code{stale_checkpoint},
+Invisibly, a list with \code{issues}, a summary data.table
+  with columns \code{Check}, \code{Severity}, and \code{N}, one
+  detail data.table per check, \code{stale_checkpoint},
   \code{checkpointed_no_output}, \code{manifest_missing_file},
-  \code{orphan_parquet}, \code{duckdb_count_mismatch}), plus
-  \code{empty_files} and \code{partial_accepted_files} for informational
-  context.
+  \code{orphan_parquet}, and \code{duckdb_count_mismatch}, and
+  \code{empty_files} and \code{partial_accepted_files} for
+  informational context.
 }
 \description{
-Non-destructive fsck for the Parquet repository. Cross-checks:
+Checks the Parquet repository without changing anything. Cross checks:
 \itemize{
-  \item \code{stale_checkpoint}: checkpoint entries matching no current MDT
-    row (workbook rows renamed/removed after loading).
-  \item \code{checkpointed_no_output}: MDT rows the checkpoint marks
-    complete whose partition directory holds no Parquet -- unless the
-    manifest records the file as verified \code{empty}.
-  \item \code{manifest_missing_file}: manifest \code{written} rows whose
-    Parquet file has vanished from disk (crash, manual deletion, sync loss).
-  \item \code{orphan_parquet}: Parquet files on disk no manifest row claims
-    (aborted runs from before manifest tracking, stray copies).
-  \item \code{duckdb_count_mismatch}: per table, \code{COUNT(*)} over the
-    hive directory vs the sum of manifest \code{written} row counts.
-    Requires \code{con}; reads the Parquet directly so it does not depend
-    on views being registered.
+  \item \code{stale_checkpoint}: a checkpoint entry matching no current
+    MDT row, from a workbook row renamed or removed after loading.
+  \item \code{checkpointed_no_output}: an MDT row the checkpoint marks
+    complete whose partition directory holds no Parquet file, unless
+    the manifest records the file as verified \code{empty}.
+  \item \code{manifest_missing_file}: a manifest \code{written} row
+    whose Parquet file has vanished from disk, from a crash, a manual
+    deletion, or a lost synchronization.
+  \item \code{orphan_parquet}: a Parquet file on disk that no manifest
+    row claims, from a run aborted before manifest tracking existed,
+    or a stray copy.
+  \item \code{duckdb_count_mismatch}: for each table, a comparison of
+    \code{COUNT(*)} over the hive directory against the sum of the
+    manifest's \code{written} row counts. Requires \code{con}, and
+    reads the Parquet directly, so it does not depend on the views
+    being registered.
 }
-Also reports verified-\code{empty} and \code{partial_accepted} files as
-informational context.
+Also reports a verified \code{empty} or \code{partial_accepted} file
+as informational context.
 }
 \examples{
 MDT <- data.frame(Database = "NRD", TableName = "Core", MDBDir = "NRD",

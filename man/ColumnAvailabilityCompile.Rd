@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{ColumnAvailabilityCompile}
 \alias{ColumnAvailabilityCompile}
-\title{Run \code{column_availability()} for a list of tables and write to Excel}
+\title{Runs \code{column_availability()} for a list of tables and writes to Excel}
 \usage{
 ColumnAvailabilityCompile(
   con,
@@ -19,29 +19,33 @@ ColumnAvailabilityCompile(
 
 \item{tables}{Character vector of table names to process.}
 
-\item{ParquetBasePath}{Character. Root directory of the Parquet store.}
+\item{ParquetBasePath}{Character scalar. Root directory of the
+Parquet store.}
 
-\item{SupportingInfoPath}{Character. Path to the output \code{.xlsx}
-workbook.}
+\item{SupportingInfoPath}{Character scalar. Path to the output
+\code{.xlsx} workbook.}
 
-\item{verbose}{Logical. If \code{TRUE} (default), logs or prints a
-per-table summary line.}
+\item{verbose}{Logical. Accepts \code{TRUE}, which logs or prints a
+summary line for each table. Accepts \code{FALSE}, which does not.
+Defaults to \code{TRUE}.}
 
-\item{logStatus}{Logical. If \code{TRUE} (default), messages are written
-via \code{\link{log_msg}}; otherwise they are printed to the console.}
+\item{logStatus}{Logical. Accepts \code{TRUE}, which writes messages
+with \code{\link{log_msg}}. Accepts \code{FALSE}, which prints
+them to the console. Defaults to \code{TRUE}.}
 
-\item{StartAt}{Integer. Index into \code{tables} at which to begin (for
-resuming an interrupted run).  Default \code{1}.}
+\item{StartAt}{Integer. Index into \code{tables} at which to begin,
+for resuming an interrupted run. Defaults to \code{1}.}
 }
 \value{
-\code{invisible(NULL)}.  Called for its side effects.
+\code{invisible(NULL)}.
 }
 \description{
-Iterates over \code{tables}, calls \code{\link{column_availability}} for
-each, and writes the \code{PercentageNonNA} matrix to a sheet in an Excel
-workbook at \code{SupportingInfoPath}.  Creates the workbook on the first
-table if it does not yet exist; appends a new sheet for each subsequent
-table via \code{\link{WorkbookUpdateopenxlsx}}.
+Iterates over \code{tables}, calls \code{\link{column_availability}}
+for each, and writes the \code{PercentageNonNA} matrix to a sheet in
+an Excel workbook at \code{SupportingInfoPath}. Creates the workbook
+on the first table when it does not yet exist, and appends a new
+sheet for each subsequent table with
+\code{\link{WorkbookUpdateopenxlsx}}.
 }
 \examples{
 base <- tempfile("parquet_base_")

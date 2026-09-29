@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{open_duckdb}
 \alias{open_duckdb}
-\title{Open a DuckDB connection with standard configuration}
+\title{Opens a DuckDB connection with standard configuration}
 \usage{
 open_duckdb(
   FormattedDBPath,
@@ -14,24 +14,27 @@ open_duckdb(
 )
 }
 \arguments{
-\item{FormattedDBPath}{Character. Directory containing the DuckDB file.}
+\item{FormattedDBPath}{Character scalar. Directory containing the
+DuckDB file.}
 
-\item{DBName}{Character. Name of the DuckDB file.  Defaults to
+\item{DBName}{Character scalar. Name of the DuckDB file. Defaults to
 \code{"DuckDBRelationalDatabase.duckdb"}.}
 
-\item{TempDirPath}{Character. Path DuckDB will use to spill intermediate
-results when \code{memory_limit} is exceeded.}
+\item{TempDirPath}{Character scalar. Path DuckDB uses to spill
+intermediate results when \code{memory_limit} is exceeded.}
 
-\item{GB}{Character. Memory limit string passed to DuckDB's
-\code{memory_limit} setting (e.g. \code{"48GB"}).  Defaults to
-\code{"48GB"}.}
+\item{GB}{Character scalar. Memory limit string passed to DuckDB's
+\code{memory_limit} setting, for example \code{"48GB"}. Defaults
+to \code{"48GB"}.}
 
-\item{ReadOnly}{Logical. If \code{TRUE} (default), the connection is
-opened read-only, which allows multiple concurrent readers and is safer
-for analyst sessions.}
+\item{ReadOnly}{Logical. Accepts \code{TRUE}, which opens the
+connection restricted to reading, allowing multiple concurrent
+readers, and safer for an analyst's session. Accepts \code{FALSE},
+which opens it for reading and writing. Defaults to \code{TRUE}.}
 
-\item{ProgressBar}{Logical. If \code{TRUE} (default), DuckDB's built-in
-progress bar is enabled for long-running queries.}
+\item{ProgressBar}{Logical. Accepts \code{TRUE}, which enables
+DuckDB's own progress bar for a long running query. Accepts
+\code{FALSE}, which disables it. Defaults to \code{TRUE}.}
 }
 \value{
 An open DBI connection to the DuckDB database.

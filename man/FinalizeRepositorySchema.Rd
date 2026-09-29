@@ -2,38 +2,42 @@
 % Please edit documentation in R/repoquet.R
 \name{FinalizeRepositorySchema}
 \alias{FinalizeRepositorySchema}
-\title{Finalize a reviewed schema proposal into the writer catalog}
+\title{Finalizes a reviewed schema proposal into the writer catalog}
 \usage{
 FinalizeRepositorySchema(SchemaReviewPath, TableSchemaPath, strict = TRUE)
 }
 \arguments{
-\item{SchemaReviewPath}{Character. Path to the schema review workbook
-written by \code{\link{WriteSchemaProposal}} (or
-\code{\link{PrepareSchemaRegistry}}), with review decisions applied.}
+\item{SchemaReviewPath}{Character scalar. Path to the schema
+review workbook written by \code{\link{WriteSchemaProposal}} or
+\code{\link{PrepareSchemaRegistry}}, with review decisions
+applied.}
 
-\item{TableSchemaPath}{Character. Output path for the finalized table
-schema catalog (\code{.xlsx} or \code{.csv}).}
+\item{TableSchemaPath}{Character scalar. Output path for the
+finalized table schema catalog, accepting either an
+\code{.xlsx} or a \code{.csv} extension.}
 
-\item{strict}{Logical. If \code{TRUE} (default), stop on unresolved
-decisions, blocking source errors, or invalid types. If \code{FALSE},
-log a warning instead and proceed where possible.}
+\item{strict}{Logical. Accepts \code{TRUE}, which stops on an
+unresolved decision, a blocking source error, or an invalid
+type. Accepts \code{FALSE}, which logs a warning instead and
+proceeds where possible. Defaults to \code{TRUE}.}
 }
 \value{
 Invisibly, the result of
-  \code{\link{load_table_schema_catalog}(TableSchemaPath)}: a list with
-  \code{table_schema} (data.table of finalized columns),
-  \code{col_classes} (nested per-database/table column-class maps), and
-  \code{TableSchemaPath}.
+  \code{\link{load_table_schema_catalog}(TableSchemaPath)}: a list
+  with \code{table_schema}, a data.table of finalized columns,
+  \code{col_classes}, a nested set of per database and table
+  column class maps, and \code{TableSchemaPath}.
 }
 \description{
-Reads a completed \code{\link{WriteSchemaProposal}} review workbook,
-overlays any edits made on the \code{ColumnDecisions},
-\code{CompatibilityDecisions}, and \code{DictionaryReview} tabs onto the
-hidden machine-readable registries, enforces that every row requiring
-review has a resolved \code{Decision} (\code{"Accept"} or
-\code{"Override"}, or \code{"Ignore"} for compatibility/dictionary rows),
-applies approved cross-table compatibility groups, and writes the
-resulting per-column catalog via \code{\link{write_table_schema_catalog}}.
+Reads a completed \code{\link{WriteSchemaProposal}} review
+workbook, overlays an edit made on the \code{ColumnDecisions},
+\code{CompatibilityDecisions}, and \code{DictionaryReview} tabs
+onto the hidden, machine readable registries, enforces that every
+row requiring review has a resolved \code{Decision}, either
+\code{"Accept"} or \code{"Override"}, or \code{"Ignore"} for a
+compatibility or dictionary row, applies an approved cross table
+compatibility group, and writes the resulting per column catalog
+through \code{\link{write_table_schema_catalog}}.
 }
 \examples{
 \donttest{

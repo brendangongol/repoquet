@@ -2,25 +2,21 @@
 % Please edit documentation in R/repoquet.R
 \name{repository_table_names}
 \alias{repository_table_names}
-\title{Physical table names for every row of an MDT}
+\title{Returns the physical table name for every row of an MDT}
 \usage{
 repository_table_names(MDT)
 }
 \arguments{
-\item{MDT}{Data frame. The master database table, or any subset of it
-with at least \code{Database} and \code{TableName} columns (and
-optionally \code{PhysicalTableName}).}
+\item{MDT}{Data frame. The master database table, or any subset of it.
+Requires \code{Database} and \code{TableName} columns, and optionally a
+\code{PhysicalTableName} column.}
 }
 \value{
-Character vector, one physical table name per row of \code{MDT}.
+Character vector. One physical table name per row of \code{MDT}.
 }
 \description{
-For each row, returns \code{PhysicalTableName} verbatim if present and
-non-blank, otherwise \code{"<Database>_<TableName>"}. This is the naming
-convention used for DuckDB view registration
-(\code{\link{register_parquet_view_compile}}) and Parquet output
-directories, so a caller can compute the exact set of tables a load will
-produce without re-deriving the naming rule itself.
+For each row, returns \code{PhysicalTableName} if it is present and not
+blank, and otherwise returns \code{"<Database>_<TableName>"}.
 }
 \examples{
 MDT <- data.frame(Database = c("SALES", "SALES"), TableName = c("Orders", "Orders"),

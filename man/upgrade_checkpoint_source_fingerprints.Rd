@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{upgrade_checkpoint_source_fingerprints}
 \alias{upgrade_checkpoint_source_fingerprints}
-\title{Upgrade legacy checkpoint entries to content-aware source fingerprints}
+\title{Rewrites checkpoint keys to a new source fingerprint mode}
 \usage{
 upgrade_checkpoint_source_fingerprints(
   checkpoint,
@@ -12,30 +12,32 @@ upgrade_checkpoint_source_fingerprints(
 )
 }
 \arguments{
-\item{checkpoint}{Character vector. Completed-file keys as currently
-stored (e.g. loaded via \code{\link{load_checkpoint}}).}
+\item{checkpoint}{Character vector. Completed file keys, as currently
+stored, for example as loaded by \code{\link{load_checkpoint}}.}
 
 \item{MDT}{Data frame. Current Master Database Table.}
 
 \item{MasterDBPath}{Character scalar. Root directory used to resolve each
-MDT row's source file for fingerprinting.}
+row's source file for fingerprinting.}
 
-\item{SourceFingerprintMode}{Character scalar, one of \code{"metadata"}
-(default) or \code{"sha256"} -- the fingerprint mode the checkpoint is
-being upgraded \emph{to}. See \code{\link{source_fingerprint}}.}
+\item{SourceFingerprintMode}{Character scalar. Accepts one of two
+values, the fingerprint mode the checkpoint is being upgraded to.
+\code{"metadata"} computes a fingerprint from the file size and
+modification time. \code{"sha256"} computes a fingerprint from a
+SHA256 hash of the full file content. See
+\code{\link{source_fingerprint}}. Defaults to \code{"metadata"}.}
 }
 \value{
-Character vector of upgraded, de-duplicated checkpoint keys.
+Character vector of upgraded, deduplicated checkpoint keys.
 }
 \description{
-Rewrites a checkpoint's completed-file keys (which may be plain
-\code{SourceFingerprintMode="none"} keys, legacy value-only keys, or bare
-paths) into the current \code{SourceFingerprintMode} format by matching
-each entry against the current MDT and substituting the freshly computed,
-fingerprint-bearing key. Entries that match no current MDT row (by any of
-the three formats) are left unchanged. This lets a repository switch from
-\code{SourceFingerprintMode="none"} to \code{"metadata"} or \code{"sha256"}
-without forcing every already-completed file to reload.
+Rewrites the entries of a checkpoint (each a plain key with
+\code{SourceFingerprintMode = "none"}, a legacy key that records only
+partition values, or a bare path) into the current
+\code{SourceFingerprintMode} format, by matching each entry against the
+current MDT and substituting a freshly computed key that carries a
+fingerprint. An entry that matches no row of the current MDT, under any
+of the three formats, is left unchanged.
 }
 \examples{
 tmp_dir <- tempfile("demo_"); dir.create(tmp_dir)

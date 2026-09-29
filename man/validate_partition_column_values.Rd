@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{validate_partition_column_values}
 \alias{validate_partition_column_values}
-\title{Validate a physical partition column's contents against the workbook value}
+\title{Validates a physical partition column's contents against the workbook value}
 \usage{
 validate_partition_column_values(
   df,
@@ -12,39 +12,36 @@ validate_partition_column_values(
 )
 }
 \arguments{
-\item{df}{A data frame or data.table containing the just-read source
-data, including any physical partition column(s), prior to those
-columns being dropped.}
+\item{df}{Data frame or data.table. The data just read from a source,
+including any physical partition columns, before those columns are
+dropped.}
 
-\item{partition_keys}{Character vector. Partition key names (as returned
-by \code{\link{partition_spec_for_row}}'s \code{keys} element) to check
-for a matching physical column in \code{df}. Keys with no matching
-column are skipped.}
+\item{partition_keys}{Character vector. Partition key names, as returned
+in the \code{keys} element of \code{\link{partition_spec_for_row}}, to
+check for a matching physical column in \code{df}. A key with no
+matching column is skipped.}
 
-\item{partition_values}{Character vector, same length as
-\code{partition_keys}. The expected (workbook-declared) value for each
-key.}
+\item{partition_values}{Character vector, the same length as
+\code{partition_keys}. The value declared in the workbook for each key.}
 
-\item{source_label}{Character scalar. Human-readable source identifier
-used in the error message if a mismatch is found.}
+\item{source_label}{Character scalar. Identifier for the source, used in
+the error message when a mismatch is found.}
 }
 \value{
-Invisibly \code{TRUE} if every present partition column agrees
-  with its expected value, or if \code{partition_values} is empty or its
-  length disagrees with \code{partition_keys} (in which case the check is
-  skipped entirely). Throws an error naming the offending column, source,
-  and disagreeing values otherwise.
+Invisibly, \code{TRUE} when every present partition column
+  agrees with its expected value, and also when \code{partition_values}
+  is empty or its length disagrees with \code{partition_keys}, in which
+  case the check is skipped entirely. Stops with an error naming the
+  offending column, source, and disagreeing values otherwise.
 }
 \description{
-The writers drop partition columns from the data because hive injects them
-from the directory name at read time. Before that column is destroyed, its
-contents must agree with the workbook's PartitionValue -- otherwise a
-mis-labeled MDT row (e.g. a copy-paste year error) would silently assign
-every row of the file to the wrong partition with the physical evidence
-deleted. Values are compared after the same canonicalization the directory
-names use; NA and empty-string entries carry no information and are
-tolerated. Any other disagreement is a hard error naming the file, the
-expected value, and examples of what was found.
+Compares the contents of a physical partition column, still present in
+data just read from a source file, against the partition value declared
+for that source in the workbook, after applying the same
+canonicalization used for partition directory names. An \code{NA} or
+empty string entry carries no information and is treated as agreeing.
+Any other disagreement stops with an error naming the file, the expected
+value, and examples of the values found.
 }
 \examples{
 df <- data.frame(YEAR = c(2020, 2020, 2020), X = 1:3)

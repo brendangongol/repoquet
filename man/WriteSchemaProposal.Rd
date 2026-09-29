@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{WriteSchemaProposal}
 \alias{WriteSchemaProposal}
-\title{Write a compact, user-reviewable schema proposal workbook}
+\title{Writes a compact, user reviewable schema proposal workbook}
 \usage{
 WriteSchemaProposal(proposal, SchemaReviewPath, PreserveDecisions = TRUE)
 }
@@ -10,32 +10,37 @@ WriteSchemaProposal(proposal, SchemaReviewPath, PreserveDecisions = TRUE)
 \item{proposal}{A \code{"RepositorySchemaProposal"} object from
 \code{\link{RecommendRepositorySchema}}.}
 
-\item{SchemaReviewPath}{Character. Output \code{.xlsx} path for the review
-workbook.}
+\item{SchemaReviewPath}{Character scalar. Output \code{.xlsx} path
+for the review workbook.}
 
-\item{PreserveDecisions}{Logical. If \code{TRUE} (default), carry forward
-matching prior decisions from an existing workbook at
-\code{SchemaReviewPath}.}
+\item{PreserveDecisions}{Logical. Accepts \code{TRUE}, which
+carries forward a matching prior decision from an existing
+workbook at \code{SchemaReviewPath}. Accepts \code{FALSE}, which
+does not. Defaults to \code{TRUE}.}
 }
 \value{
 Invisibly, \code{SchemaReviewPath}, with an attribute
-  \code{"ReviewStatus"}: a list with \code{ColumnDecisions},
-  \code{CompatibilityDecisions}, \code{DictionaryDecisions}, and
-  \code{BlockingSourceErrors} counts, and \code{ReadyToFinalize} (logical).
+  named \code{"ReviewStatus"}: a list with \code{ColumnDecisions},
+  \code{CompatibilityDecisions}, and \code{DictionaryDecisions}
+  counts, \code{BlockingSourceErrors} count, and
+  \code{ReadyToFinalize}, a logical value.
 }
 \description{
-Converts a \code{\link{RecommendRepositorySchema}} proposal into the
-\code{SchemaReview.xlsx} workbook used for human review: a
-\code{StartHere} summary tab, action tabs limited to rows that still need
-a decision (\code{ColumnDecisions}, \code{CompatibilityDecisions},
-\code{DictionaryReview}), reference overview tabs, and hidden
-machine-readable \code{Registry}/\code{CompatibilityRegistry}/
-\code{DictionaryRegistry}/\code{Settings} tabs consumed by
-\code{\link{FinalizeRepositorySchema}}. When \code{PreserveDecisions =
-TRUE} and a workbook already exists at \code{SchemaReviewPath}, previously
-recorded \code{Accept}/\code{Override}/\code{Ignore} decisions are carried
-forward for rows whose evidence signature is unchanged, so re-running the
-survey does not discard completed review work.
+Converts a \code{\link{RecommendRepositorySchema}} proposal into
+the \code{SchemaReview.xlsx} workbook used for human review: a
+\code{StartHere} summary tab, an action tab limited to a row that
+still needs a decision, \code{ColumnDecisions},
+\code{CompatibilityDecisions}, \code{DictionaryReview}, a
+reference overview tab, and a hidden, machine readable
+\code{Registry}, \code{CompatibilityRegistry},
+\code{DictionaryRegistry}, and \code{Settings} tab, consumed by
+\code{\link{FinalizeRepositorySchema}}. When
+\code{PreserveDecisions} is \code{TRUE} and a workbook already
+exists at \code{SchemaReviewPath}, a previously recorded
+\code{Accept}, \code{Override}, or \code{Ignore} decision is
+carried forward for a row whose evidence signature is unchanged,
+so that rerunning the survey does not discard completed review
+work.
 }
 \examples{
 \donttest{

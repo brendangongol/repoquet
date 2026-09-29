@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{validate_data_contracts}
 \alias{validate_data_contracts}
-\title{Validate repository tables against declarative data contracts}
+\title{Validates repository tables against declarative data contracts}
 \usage{
 validate_data_contracts(
   con,
@@ -14,43 +14,51 @@ validate_data_contracts(
 )
 }
 \arguments{
-\item{con}{An open DBI/DuckDB connection to the repository database.}
+\item{con}{An open DBI or DuckDB connection to the repository
+database.}
 
-\item{DataContractPath}{Character. Path to the data-contract file read by
-\code{\link{load_data_contracts}}.}
+\item{DataContractPath}{Character scalar. Path to the data contract
+file read by \code{\link{load_data_contracts}}.}
 
-\item{strict}{Logical. If \code{TRUE} (default), stop with an error
-listing the failure count when any \code{Severity = "error"} rule has
-\code{Status} \code{"fail"} or \code{"error"}. If \code{FALSE}, return
-the results table instead of stopping.}
+\item{strict}{Logical. Accepts \code{TRUE}, which stops with an
+error listing the failure count when any \code{Severity = "error"}
+rule has \code{Status} \code{"fail"} or \code{"error"}. Accepts
+\code{FALSE}, which returns the results table instead of
+stopping. Defaults to \code{TRUE}.}
 
-\item{logStatus}{Logical. If \code{TRUE} (default), log one line per rule
-via \code{\link{log_msg}} recording its pass/fail/error status.}
+\item{logStatus}{Logical. Accepts \code{TRUE}, which logs one line
+per rule with \code{\link{log_msg}}, recording whether it passed,
+failed, or errored. Accepts \code{FALSE}, which does not. Defaults
+to \code{TRUE}.}
 
-\item{LogPath}{Character (optional). Log file path for this call; also
-opens a scoped run via \code{begin_repository_run()} when supplied
-together with, or instead of, \code{RunId}.}
+\item{LogPath}{Character scalar. Log file path for this call. Also
+starts a logging context with \code{begin_repository_run()} when
+supplied together with, or instead of, \code{RunId}. Defaults to
+\code{NULL}.}
 
-\item{RunId}{Character (optional). Run identifier tagged onto log lines.}
+\item{RunId}{Character scalar. Run identifier tagged onto log
+lines. Defaults to \code{NULL}.}
 }
 \value{
-Invisibly, a \code{data.table} with one row per enabled contract
-  rule: \code{ContractName}, \code{DuckDBTable}, \code{Column}, \code{Rule},
-  \code{Severity}, \code{Violations}, \code{Status} (\code{"pass"},
-  \code{"fail"}, or \code{"error"}), and \code{Message} (the error text
-  when \code{Status = "error"}).
+Invisibly, a data.table with one row per enabled contract
+  rule: \code{ContractName}, \code{DuckDBTable}, \code{Column},
+  \code{Rule}, \code{Severity}, \code{Violations}, \code{Status},
+  one of \code{"pass"}, \code{"fail"}, or \code{"error"}, and
+  \code{Message}, the error text when \code{Status = "error"}.
 }
 \description{
-Loads the enabled rules from \code{DataContractPath} via
-\code{\link{load_data_contracts}} and, for each rule, runs the matching
-DuckDB query against \code{con}: \code{not_null} counts NULLs,
-\code{unique} counts duplicate non-null values, \code{range} counts values
-outside a \code{"minimum;maximum"} \code{Value}, \code{allowed} counts
-values outside a semicolon-separated allow-list, \code{regex} counts
-values that fail \code{regexp_matches()}, and \code{foreign_key} counts
-child values with no matching row in \code{ReferenceTable}/
-\code{ReferenceColumn}. A missing table or column, or a malformed rule, is
-recorded as \code{Status = "error"} rather than stopping the whole run.
+Loads the enabled rules from \code{DataContractPath} with
+\code{\link{load_data_contracts}} and, for each rule, runs the
+matching DuckDB query against \code{con}. \code{not_null} counts a
+\code{NULL} value. \code{unique} counts a duplicate, not null,
+value. \code{range} counts a value outside a \code{"minimum;maximum"}
+\code{Value}. \code{allowed} counts a value outside a list of
+values separated by a semicolon. \code{regex} counts a value that
+fails \code{regexp_matches()}. \code{foreign_key} counts a child
+value with no matching row in \code{ReferenceTable} and
+\code{ReferenceColumn}. A missing table or column, or a malformed
+rule, is recorded with \code{Status = "error"} rather than stopping
+the whole run.
 }
 \examples{
 con <- DBI::dbConnect(duckdb::duckdb())

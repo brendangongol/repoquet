@@ -2,27 +2,30 @@
 % Please edit documentation in R/repoquet.R
 \name{harvest_sav_labels}
 \alias{harvest_sav_labels}
-\title{Harvest SPSS variable and value labels from SAV headers}
+\title{Harvests SPSS variable and value labels from SAV headers}
 \usage{
 harvest_sav_labels(files, n_workers = 1)
 }
 \arguments{
-\item{files}{Character vector of full paths to \code{.sav} files, ordered
-most-authoritative first (the first non-empty label per column wins, so
-pass the newest year first).}
+\item{files}{Character vector of full paths to a \code{.sav}
+file, ordered with the most authoritative first. The first non
+blank label for a column wins, so pass the newest year first.}
 
-\item{n_workers}{Parallel workers for the header reads.}
+\item{n_workers}{Integer. Parallel workers for the header read.
+Defaults to \code{1}.}
 }
 \value{
-data.table with Column, VariableLabel, ValueLabels, SourceFile --
-  one row per column that carries at least one label.
+A data.table with \code{Column}, \code{VariableLabel},
+  \code{ValueLabels}, and \code{SourceFile}, one row per column
+  that carries at least one label.
 }
 \description{
-Reads each file with \code{n_max = 0} (schema only -- no data rows) and
-collects, per column, the human-readable variable label and the value-label
-map that \code{strip_haven} discards during loading. This is the raw
-material for the \code{Labels} sheet of the schema catalog: a searchable
-data dictionary spanning every table.
+Reads each file with \code{n_max = 0}, schema only, with no data
+rows, and collects, per column, the human readable variable label
+and the value label map that \code{strip_haven} discards during
+loading. This is the raw material for the \code{Labels} sheet of
+the schema catalog: a searchable data dictionary spanning every
+table.
 }
 \examples{
 tmp_sav <- tempfile(fileext = ".sav")

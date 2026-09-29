@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{validate_against_dictionary}
 \alias{validate_against_dictionary}
-\title{Validate table contents against the data dictionary's value domains}
+\title{Validates table contents against the data dictionary's value domains}
 \usage{
 validate_against_dictionary(
   con,
@@ -13,35 +13,42 @@ validate_against_dictionary(
 )
 }
 \arguments{
-\item{con}{Live DuckDB connection with the views registered (or readable
-tables of the same names).}
+\item{con}{Live DuckDB connection with the views registered, or a
+readable table of the same name.}
 
-\item{TableSchemaPath}{Path to the schema catalog holding the Labels sheet.}
+\item{TableSchemaPath}{Character scalar. Path to the schema
+catalog holding the \code{Labels} sheet.}
 
-\item{tables}{Optional character vector restricting which DuckDB tables run.}
+\item{tables}{Character vector. Restricts which DuckDB table
+runs. Defaults to \code{NULL}, which runs every table.}
 
-\item{min_domain}{Integer. Only validate columns whose parsed domain has a
-least this many codes (default 2).}
+\item{min_domain}{Integer. Validates only a column whose parsed
+domain has at least this many codes. Defaults to \code{2}.}
 
-\item{verbose}{Logical. Log a summary line per table.}
+\item{verbose}{Logical. Accepts \code{TRUE}, which logs a summary
+line per table. Accepts \code{FALSE}, which does not.}
 }
 \value{
-data.table: DuckDBTable, Column, DomainSize, Domain (first codes),
-  Total, NNull, OutOfDomain, PctOutOfDomain -- sorted worst-first.
+A data.table with \code{DuckDBTable}, \code{Column},
+  \code{DomainSize}, \code{Domain}, its first codes, \code{Total},
+  \code{NNull}, \code{OutOfDomain}, and \code{PctOutOfDomain},
+  sorted with the worst case first.
 }
 \description{
-Content-integrity companion to \code{\link{audit_repository}}: for every
-column whose harvested value labels define a code domain (e.g.
-\code{DIED} in \{0, 1\}), reports how many stored values fall outside it.
-This catches the silent-coercion class of problem -- source values the type
-normalization turned into NA, or codes that drifted between releases.
+A content integrity companion to \code{\link{audit_repository}}:
+for every column whose harvested value labels define a code
+domain, for example \code{DIED} in \{0, 1\}, reports how many
+stored values fall outside it. This catches the class of problem
+where a silent coercion turned a source value into \code{NA}, or a
+code drifted between releases.
 }
 \details{
-Interpretation caveat: HCUP labels continuous variables' \emph{special}
-codes only (e.g. AGE might label just \code{999 = missing}), so a high
-out-of-domain share is not automatically an error -- it can simply mean the
-column is continuous. Filter on \code{DomainSize} or sort by
-\code{PctOutOfDomain} and judge; nothing here mutates data.
+Interpretation note: HCUP labels only a continuous variable's
+special codes, for example AGE might label only
+\code{999 = missing}, so a high out of domain share is not
+automatically an error. It can simply mean the column is
+continuous. Filter on \code{DomainSize} or sort by
+\code{PctOutOfDomain} and judge. Nothing here mutates data.
 }
 \examples{
 con <- DBI::dbConnect(duckdb::duckdb())

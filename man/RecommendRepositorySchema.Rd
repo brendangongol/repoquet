@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{RecommendRepositorySchema}
 \alias{RecommendRepositorySchema}
-\title{Recommend canonical table schemas from observed evidence}
+\title{Recommends canonical table schemas from observed evidence}
 \usage{
 RecommendRepositorySchema(
   survey = NULL,
@@ -17,51 +17,60 @@ RecommendRepositorySchema(
 }
 \arguments{
 \item{survey}{A \code{"RepositorySchemaSurvey"} object from
-\code{\link{SurveyRepositorySchema}}. If supplied, its
-\code{observations} and value-preview settings are reused and
+\code{\link{SurveyRepositorySchema}}. When supplied, its
+\code{observations} and value preview settings are reused and
 \code{ObservationPath} is not required.}
 
-\item{ObservationPath}{Character (optional). Path to a Parquet
-observation file (as an alternative to \code{survey}), read via
-\code{\link{GetSchemaObservations}}.}
+\item{ObservationPath}{Character scalar. Path to a Parquet
+observation file, used as an alternative to \code{survey}, read
+through \code{\link{GetSchemaObservations}}. Defaults to
+\code{NULL}.}
 
-\item{SchemaRegistryPath}{Character (optional). Path to a schema-registry
-workbook to load when \code{schema_registry} is not supplied directly.}
+\item{SchemaRegistryPath}{Character scalar. Path to a schema
+registry workbook, loaded when \code{schema_registry} is not
+supplied directly. Defaults to \code{NULL}.}
 
-\item{schema_registry}{A schema-registry object (from
-\code{\link{load_schema_registry}}), pre-loaded. Takes precedence over
-\code{SchemaRegistryPath}.}
+\item{schema_registry}{A schema registry object, from
+\code{\link{load_schema_registry}}, already loaded. Takes
+precedence over \code{SchemaRegistryPath}. Defaults to
+\code{NULL}.}
 
-\item{SchemaProfile}{Character. One of \code{"none"} (default),
-\code{"generic"}, or \code{"hcup"}; the packaged registry profile to
-load when neither \code{schema_registry} nor \code{SchemaRegistryPath}
-is supplied.}
+\item{SchemaProfile}{Character scalar. Accepts one of three
+values: \code{"none"}, \code{"generic"}, or \code{"hcup"}, the
+packaged registry profile loaded when neither
+\code{schema_registry} nor \code{SchemaRegistryPath} is
+supplied. Defaults to \code{"none"}.}
 
-\item{ValuePreviewMaxDistinct}{Integer (optional). Overrides the survey's
-recorded value-preview cardinality cutoff.}
+\item{ValuePreviewMaxDistinct}{Integer. Overrides the survey's
+recorded value preview cardinality cutoff. Defaults to
+\code{NULL}, which keeps the survey's setting.}
 
-\item{ValuePreviewTypes}{Character vector (optional). Overrides the
-survey's recorded value-preview eligible types.}
+\item{ValuePreviewTypes}{Character vector. Overrides the survey's
+recorded value preview eligible types. Defaults to \code{NULL},
+which keeps the survey's setting.}
 
-\item{ValuePreviewIdentifiers}{Logical (optional). Overrides whether
-identifier-like columns are included in the value preview.}
+\item{ValuePreviewIdentifiers}{Logical. Overrides whether an
+identifier like column is included in the value preview.
+Defaults to \code{NULL}, which keeps the survey's setting.}
 }
 \value{
-An object of class \code{"RepositorySchemaProposal"}: a list with
-  \code{registry} (one row per Database/Table/Column with its recommended
-  and approved type), \code{compatibility} (cross-table compatibility
-  candidates), \code{history} (evidence for columns whose type changed or
-  that raised reader warnings), \code{source_issues}, \code{value_preview},
-  \code{dictionary_review}, \code{summary}, \code{ObservationPath}, and the
-  resolved value-preview settings.
+An object of class \code{"RepositorySchemaProposal"}: a
+  list with \code{registry}, one row per Database, Table, and
+  Column with its recommended and approved type, \code{compatibility},
+  a set of cross table compatibility candidates, \code{history},
+  evidence for a column whose type changed or that raised a reader
+  warning, \code{source_issues}, \code{value_preview},
+  \code{dictionary_review}, \code{summary}, \code{ObservationPath},
+  and the resolved value preview settings.
 }
 \description{
-Turns the per-column evidence from a \code{\link{SurveyRepositorySchema}}
-survey (or a previously-written \code{ObservationPath}) into one
-recommended canonical type per Database/Table/Column, applying any
-optional schema-registry policy (see \code{\link{load_schema_registry}})
-and flagging columns and cross-table column groups that need a human
-decision before \code{\link{FinalizeRepositorySchema}} can run.
+Turns the per column evidence from a \code{\link{SurveyRepositorySchema}}
+survey, or a previously written \code{ObservationPath}, into one
+recommended canonical type per Database, Table, and Column,
+applying an optional schema registry policy, see
+\code{\link{load_schema_registry}}, and flagging a column and a
+cross table column group that needs a human decision before
+\code{\link{FinalizeRepositorySchema}} can run.
 }
 \examples{
 \donttest{

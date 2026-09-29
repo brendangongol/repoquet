@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{discover_schema_relationships}
 \alias{discover_schema_relationships}
-\title{Discover candidate table relationships from compatible schema columns}
+\title{Discovers candidate table relationships from compatible schema columns}
 \usage{
 discover_schema_relationships(table_schema, include_candidates = TRUE)
 }
@@ -11,27 +11,28 @@ discover_schema_relationships(table_schema, include_candidates = TRUE)
 \code{DuckDBTable}, \code{Column}, and \code{CanonicalType}, and
 optionally \code{Role}, \code{MergeGroup}, and \code{MergeReviewed}.}
 
-\item{include_candidates}{Logical. If \code{TRUE} (default), also surface
-pairs whose shared column name merely looks like a merge-key candidate
-even without an explicit \code{MergeGroup} or \code{join_key} role. If
-\code{FALSE}, only explicitly grouped or declared join keys are
-reported.}
+\item{include_candidates}{Logical. Accepts \code{TRUE}, which also
+surfaces a pair whose shared column name merely looks like a merge
+key candidate, even without an explicit \code{MergeGroup} or
+\code{join_key} role. Accepts \code{FALSE}, which reports only an
+explicitly grouped or declared join key. Defaults to \code{TRUE}.}
 }
 \value{
 A data.table with one row per candidate relationship:
-  \code{LeftTable}, \code{RightTable}, \code{Column}, \code{CanonicalType},
-  and \code{Detection} (\code{"approved_group"}, \code{"declared"}, or
-  \code{"candidate"}).
+  \code{LeftTable}, \code{RightTable}, \code{Column},
+  \code{CanonicalType}, and \code{Detection}, one of
+  \code{"approved_group"}, \code{"declared"}, or \code{"candidate"}.
 }
 \description{
-Scans a finalized \code{table_schema} catalog (as returned in
-\code{FinalizeRepositorySchema()$table_schema}) for columns that are
-likely join keys across tables: columns already assigned to the same
-\code{MergeGroup}, columns with \code{Role} \code{"join_key"} or
-\code{"partition"}, and (when \code{include_candidates = TRUE}) columns
-whose name looks like a merge key even if no decision was ever recorded.
-Only columns sharing the same canonical type are paired. Returns an empty
-table if \code{table_schema} lacks the required columns or has no rows.
+Scans a finalized \code{table_schema} catalog, as returned in
+\code{FinalizeRepositorySchema()$table_schema}, for a column that is
+likely a join key across tables: a column already assigned to the
+same \code{MergeGroup}, a column with \code{Role} \code{"join_key"}
+or \code{"partition"}, and, when \code{include_candidates} is
+\code{TRUE}, a column whose name looks like a merge key even when no
+decision was ever recorded. Only a column sharing the same canonical
+type is paired. Returns an empty table when \code{table_schema}
+lacks the required columns or has no row.
 }
 \examples{
 schema <- data.frame(

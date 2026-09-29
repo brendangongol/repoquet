@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{scan_for_new_source_files}
 \alias{scan_for_new_source_files}
-\title{Scan source directories for files not yet in the MDT workbook}
+\title{Scans source directories for files not yet in the MDT workbook}
 \usage{
 scan_for_new_source_files(
   MasterDBPath,
@@ -12,35 +12,40 @@ scan_for_new_source_files(
 )
 }
 \arguments{
-\item{MasterDBPath}{Character. Root directory of the source files.}
+\item{MasterDBPath}{Character scalar. Root directory of the source
+files.}
 
 \item{MDT}{Data frame. Current Master Database Table.}
 
-\item{extensions}{Character vector of file extensions to consider.
-Defaults to every extension with a registered reader (see
-\code{\link{supported_file_types}}).}
+\item{extensions}{Character vector. File extensions to consider.
+Defaults to every extension with a registered reader, from
+\code{\link{supported_file_types}}.}
 
-\item{OutputPath}{Optional .xlsx/.csv path to save the candidate rows to.}
+\item{OutputPath}{Character scalar. Path to save the candidate rows to,
+ending in \code{.xlsx} or \code{.csv}. Defaults to \code{NULL}, which
+does not save the candidate rows to a file.}
 }
 \value{
-data.table of candidate MDT rows: Database, MDBDir, Path,
-  TableName, FileType, PartitionKey, PartitionValue, NeedsReview, Note.
+A data.table of candidate MDT rows, with columns
+  \code{Database}, \code{MDBDir}, \code{Path}, \code{TableName},
+  \code{FileType}, \code{PartitionKey}, \code{PartitionValue},
+  \code{NeedsReview}, and \code{Note}.
 }
 \description{
-New-release onboarding helper: walks every source directory the workbook
-already references, finds loader-compatible files (\code{.sav}/\code{.csv})
-that have no MDT row, and emits candidate rows with the Database, TableName
-and year guessed from filename patterns. Nothing is written to the workbook
--- the return value (optionally saved via \code{OutputPath}) is a proposal
-for a human to review, correct, and paste into DBSetupV2.xlsx.
+Walks every source directory the workbook already references, finds
+files whose extension has a registered reader and that have no MDT row,
+and returns candidate rows with the Database, TableName, and year
+guessed from filename patterns. Nothing is written to the workbook. The
+return value, optionally saved through \code{OutputPath}, is a proposal
+for a person to review, correct, and paste into DBSetupV2.xlsx.
 }
 \details{
-Guessing rules: \code{Database} is the workbook's dominant database for
-that \code{MDBDir}; \code{TableName} is the longest known table name of
-that database whose normalized form appears in the filename;
-\code{PartitionValue} is the four-digit year found in the basename (falling
-back to the deepest year-bearing directory component). Rows where either
-guess fails are flagged \code{NeedsReview = TRUE}.
+The Database guess is the workbook's dominant database for that
+\code{MDBDir}. The TableName guess is the longest known table name of
+that database whose normalized form appears in the filename. The
+PartitionValue guess is the four digit year found in the file name,
+falling back to the deepest year bearing directory component. A row
+where either guess fails is flagged \code{NeedsReview = TRUE}.
 }
 \examples{
 root <- tempfile("mdb_"); dir.create(file.path(root, "DEMO"), recursive = TRUE)

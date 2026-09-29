@@ -2,11 +2,11 @@
 % Please edit documentation in R/repoquet.R
 \name{.normalize_partition_value_vector}
 \alias{.normalize_partition_value_vector}
-\title{Normalize a raw partition column vector to sanitized directory-name strings}
+\title{Normalizes a raw partition column vector to sanitized directory name strings}
 \usage{
 .normalize_partition_value_vector(x)
 }
 \description{
-Normalize a raw partition column vector to sanitized directory-name strings
+Normalizes a raw partition column vector to sanitized directory name strings
 }
 \keyword{internal}

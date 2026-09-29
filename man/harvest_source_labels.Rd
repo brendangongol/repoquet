@@ -2,34 +2,37 @@
 % Please edit documentation in R/repoquet.R
 \name{harvest_source_labels}
 \alias{harvest_source_labels}
-\title{Harvest variable and value labels from any labeled source format}
+\title{Harvests variable and value labels from any labeled source format}
 \usage{
 harvest_source_labels(files, reader, n_workers = 1)
 }
 \arguments{
-\item{files}{Character vector of full paths to source files, ordered
-most-authoritative first (the first non-empty label per column wins, so
-pass the newest year first). An empty vector returns an empty result
-immediately.}
+\item{files}{Character vector of full paths to a source file,
+ordered with the most authoritative first. The first non blank
+label for a column wins, so pass the newest year first. An
+empty vector returns an empty result immediately.}
 
-\item{reader}{Character scalar. Registered reader name (see
-\code{\link{get_file_reader}}), e.g. \code{"sav"} or \code{"dta"}. If the
-reader does not declare \code{has_labels}, an empty result is returned.}
+\item{reader}{Character scalar. Registered reader name. See
+\code{\link{get_file_reader}}. For example \code{"sav"} or
+\code{"dta"}. When the reader does not declare
+\code{has_labels}, an empty result is returned.}
 
-\item{n_workers}{Integer. Parallel workers for the header-only scans.}
+\item{n_workers}{Integer. Parallel workers for the header only
+scan. Defaults to \code{1}.}
 }
 \value{
-data.table with Column, VariableLabel, ValueLabels, SourceFile --
-  one row per column that carries at least one label. Empty (zero-row, but
-  correctly typed) when \code{files} is empty, the reader has no label
-  support, or no column in any file carries a label.
+A data.table with \code{Column}, \code{VariableLabel},
+  \code{ValueLabels}, and \code{SourceFile}, one row per column
+  that carries at least one label. Returns a correctly typed but
+  zero row table when \code{files} is empty, the reader has no
+  label support, or no column in any file carries a label.
 }
 \description{
-Generalization of \code{\link{harvest_sav_labels}} across the reader
-registry: any FileType whose reader declares \code{has_labels} (SPSS
-\code{.sav}, Stata \code{.dta}, SAS \code{.sas7bdat}/\code{.xpt}) yields
-the same data-dictionary rows, since the haven family shares the label
-attribute structure.
+A generalization of \code{\link{harvest_sav_labels}} across the
+reader registry: any FileType whose reader declares
+\code{has_labels}, SPSS \code{.sav}, Stata \code{.dta}, or SAS
+\code{.sas7bdat} or \code{.xpt}, yields the same data dictionary
+row, since the haven family shares the label attribute structure.
 }
 \examples{
 tmp_dta <- tempfile(fileext = ".dta")

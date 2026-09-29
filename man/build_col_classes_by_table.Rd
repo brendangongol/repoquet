@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{build_col_classes_by_table}
 \alias{build_col_classes_by_table}
-\title{Build table-specific column-class maps and apply the schema registry}
+\title{Builds table specific column class maps and applies the schema registry}
 \usage{
 build_col_classes_by_table(
   files,
@@ -15,45 +15,53 @@ build_col_classes_by_table(
 )
 }
 \arguments{
-\item{files}{Character vector. Relative file paths for all files across
-all tables, in the form expected by \code{\link{build_col_classes}}.}
+\item{files}{Character vector. Relative file paths for every file
+across every table, in the form expected by
+\code{\link{build_col_classes}}.}
 
-\item{base_path}{Character. Root directory \code{files} are resolved
-against; passed through to \code{\link{build_col_classes}}.}
+\item{base_path}{Character scalar. Root directory that \code{files}
+is resolved against, passed through to
+\code{\link{build_col_classes}}.}
 
-\item{suffixes}{Character (or coercible) vector the same length as
-\code{files}, giving the logical table name each file belongs to. Files
-are grouped by \code{unique(suffixes)} and one column-class map is built
-per group.}
+\item{suffixes}{Character vector, or a vector coercible to character,
+the same length as \code{files}, giving the logical table name each
+file belongs to. A file is grouped by \code{unique(suffixes)}, and
+one column class map is built per group.}
 
-\item{n_workers}{Integer. Number of parallel workers passed through to
-\code{\link{build_col_classes}} for each group. Default \code{1}.}
+\item{n_workers}{Integer. Number of parallel workers passed through
+to \code{\link{build_col_classes}} for each group. Defaults to
+\code{1}.}
 
-\item{reader}{Character. Registered reader name(s) forwarded as-is to
-\code{\link{build_col_classes}} for every suffix group -- it is not
-subset per group, so it must either be a single reader name (recycled
-across every file) or a vector whose length matches the full,
-ungrouped \code{files} argument. Callers should generally pass a single
-explicit reader name (e.g. \code{"sav"} or \code{"csv"}) rather than
-rely on the two-element default.}
+\item{reader}{Character scalar or vector. Registered reader name,
+forwarded exactly as given to \code{\link{build_col_classes}} for
+every suffix group, since it is not subset per group. Must be
+either a single reader name, recycled across every file, or a
+vector whose length matches the full, ungrouped \code{files}
+argument. Pass a single explicit reader name, for example
+\code{"sav"} or \code{"csv"}, rather than relying on the two
+element default. Defaults to \code{c("sav", "csv")}.}
 
-\item{schema_registry}{Schema registry \code{data.frame}/\code{data.table}
-(see \code{\link{load_schema_registry}}), or \code{NULL} (default) to
-skip registry overrides.}
+\item{schema_registry}{Schema registry, as a data frame or
+data.table, see \code{\link{load_schema_registry}}. Accepts such a
+registry, applied for every group. Accepts \code{NULL}, which
+skips registry overrides. Defaults to \code{NULL}.}
 
-\item{database}{Character (optional). Logical database name passed to
-\code{\link{apply_schema_registry}} for \code{AppliesTo} scoping.}
+\item{database}{Character scalar. Logical database name passed to
+\code{\link{apply_schema_registry}} for \code{AppliesTo} scoping.
+Defaults to \code{NULL}.}
 }
 \value{
 A named list, one element per unique value of \code{suffixes},
-  each a column-class map as returned by \code{\link{apply_schema_registry}}.
+  each a column class map as returned by
+  \code{\link{apply_schema_registry}}.
 }
 \description{
-Groups \code{files} by \code{suffixes} (typically the logical table each
-file belongs to), calls \code{\link{build_col_classes}} separately for
-each group to sample column types from the source files, canonicalizes
-the resulting column names, and applies \code{\link{apply_schema_registry}}
-with \code{table_name} set to the suffix.
+Groups \code{files} by \code{suffixes}, typically the logical table
+each file belongs to, calls \code{\link{build_col_classes}}
+separately for each group to sample column types from the source
+files, canonicalizes the resulting column names, and applies
+\code{\link{apply_schema_registry}} with \code{table_name} set to the
+suffix.
 }
 \examples{
 tmp_dir <- tempfile("colclasses_")

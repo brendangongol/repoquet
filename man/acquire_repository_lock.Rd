@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{acquire_repository_lock}
 \alias{acquire_repository_lock}
-\title{Acquire the single-writer repository lock}
+\title{Acquires the single writer repository lock}
 \usage{
 acquire_repository_lock(
   LockPath,
@@ -12,28 +12,36 @@ acquire_repository_lock(
 )
 }
 \arguments{
-\item{LockPath}{Directory path used as the lock (created atomically).}
+\item{LockPath}{Character scalar. Directory path used as the lock,
+created atomically.}
 
-\item{stale_minutes}{Numeric. A lock whose heartbeat is older than this is
-considered abandoned (crashed run) and is taken over with a log message.
-The loader heartbeats after every completed file, so set this comfortably
-above the longest single-file load you expect. Default 720 (12 h).}
+\item{stale_minutes}{Numeric scalar. Age, in minutes, beyond which a
+lock's heartbeat is treated as abandoned, from a crashed run, and is
+taken over, with a log message. The loader sends a heartbeat after
+every completed file, so set this comfortably above the longest
+single file load expected. Defaults to \code{720}, twelve hours.}
 
-\item{owner_note}{Optional free text recorded in the owner file.}
+\item{owner_note}{Character scalar. Free text recorded in the lock's
+owner file. Defaults to \code{""}.}
 
-\item{LogPath}{Character (optional). Log file to write to. Without it,
-\code{log_msg()} falls back to whatever \code{LogPath} (if any) happens
-to be in scope in the caller, which is unset when this is called
-standalone (e.g. interactively, outside a \code{ParquetBackEndCreate()}
-run) -- pass it explicitly to log deterministically.}
+\item{LogPath}{Character scalar. Log file to write to. Accepts a file
+path, which is used for this call. Accepts \code{NULL}, which uses
+whatever \code{LogPath} happens to be in scope in the caller, unset
+when this is called on its own, for example interactively, outside
+a \code{ParquetBackEndCreate()} run. Pass it explicitly to log
+deterministically in that case. Defaults to \code{NULL}.}
 }
 \value{
 A \code{repository_lock} object to pass to
-  \code{\link{release_repository_lock}}. Stops if another live run holds
-  the lock.
+  \code{\link{release_repository_lock}}. Stops when another live run
+  holds the lock.
 }
 \description{
-Acquire the single-writer repository lock
+Creates the lock directory at \code{LockPath} atomically, so that at
+most one loader run holds it at a time. Stops with an error naming the
+current holder when another live run already holds the lock, unless
+that lock's heartbeat is older than \code{stale_minutes}, in which case
+it is taken over.
 }
 \examples{
 lock_path <- tempfile("repo_lock_")

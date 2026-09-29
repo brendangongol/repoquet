@@ -2,8 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{.plan_partition_aligned_read}
 \alias{.plan_partition_aligned_read}
-\title{Decide how to read a source-partitioned delimited file: whole file, one
-partition run at a time, or memory-capped chunks}
+\title{Decides how to read a source partitioned delimited file, as a whole file, one partition run at a time, or in chunks capped by memory}
 \usage{
 .plan_partition_aligned_read(
   path,
@@ -16,22 +15,23 @@ partition run at a time, or memory-capped chunks}
 )
 }
 \value{
-A list with \code{strategy} (\code{"whole_file"}, \code{"partition_aligned"},
-  or \code{"chunked"}), \code{chunk_row_plan} (an integer vector of row
-  counts to read in sequence, or \code{NULL} when the caller should fall
-  back to its own fixed-size stepping), and \code{message} (a log line
-  describing the decision).
+A list with \code{strategy}, one of \code{"whole_file"},
+  \code{"partition_aligned"}, or \code{"chunked"}, \code{chunk_row_plan},
+  an integer vector of row counts to read in sequence, or \code{NULL}
+  when the caller should fall back to its own fixed size stepping, and
+  \code{message}, a log line describing the decision.
 }
 \description{
-Three-tier decision, cheapest first: (1) if the whole file's estimated
-in-memory footprint fits \code{MaxWholeFileMemoryMB}, read it in one shot
-and let the caller group-and-write by partition value. (2) Otherwise, scan
-just the partition key column(s) (cheap even for huge files) and run-length
-encode them in file order; if every contiguous partition run's estimated
-footprint fits \code{MaxPartitionMemoryMB}, read the file one run at a time
-so each partition becomes as close to one piece as the file's actual
-layout allows. (3) Otherwise, defer to the existing fixed-size,
-memory-capped chunked reader -- correct regardless of how the partition
-values are interleaved, just potentially many small pieces.
+Chooses among three approaches, cheapest first. First, when the whole
+file's estimated memory footprint fits \code{MaxWholeFileMemoryMB}, it
+reads the file in one pass and leaves grouping by partition value to
+the caller. Otherwise, it scans only the partition key columns,
+inexpensive even for a huge file, and run length encodes them in file
+order. When every contiguous partition run's estimated footprint fits
+\code{MaxPartitionMemoryMB}, it reads the file one run at a time, so
+that each partition becomes as close to one piece as the file's actual
+layout allows. Otherwise, it defers to the fixed size reader capped by
+memory, which is correct regardless of how the partition values are
+interleaved, at the cost of potentially many small pieces.
 }
 \keyword{internal}

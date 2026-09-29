@@ -2,24 +2,26 @@
 % Please edit documentation in R/repoquet.R
 \name{print.RepositoryRunResult}
 \alias{print.RepositoryRunResult}
-\title{Print a repository run result}
+\title{Prints a repository run result}
 \usage{
 \method{print}{RepositoryRunResult}(x, ...)
 }
 \arguments{
 \item{x}{A \code{RepositoryRunResult} object.}
 
-\item{...}{Ignored; present for S3 method consistency.}
+\item{...}{Ignored. Present for S3 method consistency.}
 }
 \value{
-\code{x}, invisibly. Called for its side effect of printing.
+\code{x}, invisibly. Called for its side effect of
+  printing.
 }
 \description{
-S3 print method for the \code{RepositoryRunResult} object returned by
-\code{\link{ParquetBackEndCreate}} when \code{ReturnRunResult = TRUE}.
-Prints a one-line summary; the full detail (\code{completed},
-\code{file_failures}, \code{database_failures}, etc.) remains accessible
-via normal list indexing.
+An S3 print method for the \code{RepositoryRunResult} object
+returned by \code{\link{ParquetBackEndCreate}} when
+\code{ReturnRunResult} is \code{TRUE}. Prints a one line summary.
+The full detail, \code{completed}, \code{file_failures},
+\code{database_failures}, and so on, remains accessible through
+normal list indexing.
 }
 \examples{
 result <- structure(

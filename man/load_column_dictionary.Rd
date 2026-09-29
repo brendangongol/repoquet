@@ -2,26 +2,30 @@
 % Please edit documentation in R/repoquet.R
 \name{load_column_dictionary}
 \alias{load_column_dictionary}
-\title{Read approved semantic value labels from the schema catalog}
+\title{Reads approved semantic value labels from the schema catalog}
 \usage{
 load_column_dictionary(TableSchemaPath)
 }
 \arguments{
-\item{TableSchemaPath}{Character. Path to the schema catalog written by
-\code{\link{write_table_schema_catalog}} (\code{.xlsx} or \code{.csv}).}
+\item{TableSchemaPath}{Character scalar. Path to the schema
+catalog written by \code{\link{write_table_schema_catalog}},
+accepting either an \code{.xlsx} or a \code{.csv} extension.}
 }
 \value{
-A data.table of approved column-to-label mappings (all columns
-  read as character; typically includes \code{Database}, \code{TableName},
-  \code{DuckDBTable}, \code{Column}, \code{Value}, \code{Label},
-  \code{PartitionKey}, \code{PartitionValue}), or \code{NULL} when
+A data.table of approved column to label mappings, with
+  every column read as character, typically including
+  \code{Database}, \code{TableName}, \code{DuckDBTable},
+  \code{Column}, \code{Value}, \code{Label}, \code{PartitionKey},
+  and \code{PartitionValue}, or \code{NULL} when
   \code{TableSchemaPath} is missing, does not exist, has no
-  \code{ColumnDictionary} sheet/sibling file, or it is empty.
+  \code{ColumnDictionary} sheet or sibling file, or that sheet or
+  file is empty.
 }
 \description{
-Reads the partition-aware \code{ColumnDictionary} sheet written by
-\code{FinalizeSchemaRegistry()}. Unlike \code{ValueDictionary}, these rows
-are semantic mappings approved from source metadata or by a user.
+Reads the partition aware \code{ColumnDictionary} sheet written by
+\code{FinalizeSchemaRegistry()}. Unlike \code{ValueDictionary},
+this row is a semantic mapping approved from source metadata or
+by a user.
 }
 \examples{
 tmp <- tempfile(fileext = ".csv")

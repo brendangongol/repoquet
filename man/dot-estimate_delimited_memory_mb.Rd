@@ -2,11 +2,11 @@
 % Please edit documentation in R/repoquet.R
 \name{.estimate_delimited_memory_mb}
 \alias{.estimate_delimited_memory_mb}
-\title{Estimated in-memory footprint (MB) for reading n_rows at a given row size}
+\title{Estimates the memory footprint, in megabytes, of reading n_rows at a given row size}
 \usage{
 .estimate_delimited_memory_mb(n_rows, avg_bytes_per_row)
 }
 \description{
-Estimated in-memory footprint (MB) for reading n_rows at a given row size
+Estimates the memory footprint, in megabytes, of reading n_rows at a given row size
 }
 \keyword{internal}
