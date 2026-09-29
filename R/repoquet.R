@@ -72,12 +72,13 @@ utils::globalVariables(c(
 .run_env$run_id <- NA_character_
 .run_env$log_path <- NA_character_
 
-#' Generate a unique run identifier
+#' Generates a unique run identifier
 #'
-#' Builds a process- and time-scoped identifier by combining the current
-#' timestamp, process ID, and a random six-digit suffix. Used by
-#' \code{\link{begin_repository_run}} to tag every log line emitted during a
-#' repository run when the caller does not supply an explicit \code{RunId}.
+#' Builds a process and time scoped identifier by combining the
+#' current timestamp, process ID, and a random six digit suffix.
+#' Used by \code{\link{begin_repository_run}} to tag every log line
+#' emitted during a repository run when the caller does not supply
+#' an explicit \code{RunId}.
 #' @return Character scalar. A run identifier of the form
 #'   \code{"<YYYYMMDDTHHMMSS>_<pid>_<000000-999999>"}.
 #' @examples
@@ -89,24 +90,26 @@ new_repository_run_id <- function() {
   paste0(format(Sys.time(), "%Y%m%dT%H%M%S"), "_", Sys.getpid(), "_", sprintf("%06d", sample.int(999999L, 1L)))
 }
 
-#' Start a run-scoped logging context
+#' Starts a run scoped logging context
 #'
-#' Establishes the run identifier and log path used by \code{\link{log_msg}}
-#' and other repository functions for the remainder of the session (or until
-#' \code{restore_repository_run()} is called with the returned value). Nested
-#' calls are supported: the previous context is returned invisibly so a
-#' caller can restore it in an \code{on.exit()} handler, as
-#' \code{\link{MaterializeRemoteSources}} and \code{\link{ValidateMDTPreflight}}
-#' do internally.
-#' @param LogPath Character scalar (optional). Path to the run's log file.
-#'   If \code{NULL}, blank, or \code{NA}, the run has no explicit log path
-#'   and \code{\link{log_msg}} falls back to its own path resolution.
-#' @param RunId Character scalar (optional). Explicit run identifier to use.
-#'   If \code{NULL}, blank, or \code{NA}, one is generated with
-#'   \code{\link{new_repository_run_id}}.
-#' @return Invisibly, a list with elements \code{run_id} and \code{log_path}
-#'   holding the \emph{previous} run context (before this call), suitable for
-#'   passing to \code{restore_repository_run()}.
+#' Establishes the run identifier and log path used by
+#' \code{\link{log_msg}} and other repository functions for the
+#' remainder of the session, or until \code{restore_repository_run()}
+#' is called with the returned value. A nested call is supported: the
+#' previous context is returned invisibly so that a caller can
+#' restore it in an \code{on.exit()} handler, as
+#' \code{\link{MaterializeRemoteSources}} and
+#' \code{\link{ValidateMDTPreflight}} do internally.
+#' @param LogPath Character scalar. Path to the run's log file.
+#'   Defaults to \code{NULL}. When \code{NULL}, blank, or \code{NA},
+#'   the run has no explicit log path and \code{\link{log_msg}}
+#'   falls back to its own path resolution.
+#' @param RunId Character scalar. Explicit run identifier to use.
+#'   Defaults to \code{NULL}. When \code{NULL}, blank, or \code{NA},
+#'   one is generated with \code{\link{new_repository_run_id}}.
+#' @return Invisibly, a list with elements \code{run_id} and
+#'   \code{log_path} holding the previous run context, before this
+#'   call, suitable for passing to \code{restore_repository_run()}.
 #' @examples
 #' previous <- begin_repository_run(LogPath = tempfile(fileext = ".txt"), RunId = "demo_run")
 #' log_msg("hello from a tagged run")
@@ -127,15 +130,16 @@ begin_repository_run <- function(LogPath = NULL, RunId = NULL) {
   invisible(previous)
 }
 
-#' Restore a previous run-scoped logging context
+#' Sets the run identifier and log path back to a previous logging context
 #'
-#' Reverses \code{\link{begin_repository_run}}: restores the run identifier
-#' and log path that were active before it was called. Typically used in an
-#' \code{on.exit()} so a nested operation's run-scoped logging context
-#' doesn't leak into the caller's.
-#' @param previous The list returned (invisibly) by
-#'   \code{\link{begin_repository_run}}. If \code{NULL}, this is a no-op.
-#' @return \code{invisible(NULL)}. Called for its side effect.
+#' Sets the run identifier and log path to the values recorded in
+#' \code{previous}, reversing \code{\link{begin_repository_run}}.
+#' @param previous List. The context returned invisibly by
+#'   \code{\link{begin_repository_run}}. Accepts such a list, which is
+#'   restored as the current run identifier and log path. Also accepts
+#'   \code{NULL}, which leaves the current run identifier and log path
+#'   unchanged.
+#' @return \code{invisible(NULL)}.
 #' @seealso \code{\link{begin_repository_run}}
 #' @examples
 #' previous <- begin_repository_run(LogPath = tempfile(fileext = ".txt"), RunId = "demo_run")
@@ -191,24 +195,26 @@ resolve_log_path <- function(log_path = NULL) {
   file.path(tempdir(), "repoquet_load_log.txt")
 }
 
-#' Timestamped atomic log write with connectivity-loss buffering
+#' Writes a timestamped message to the console and to a log file
 #'
 #' Writes a timestamped message to the console and appends it to
-#' \code{log_path}. If the file write fails (e.g. network path temporarily
-#' unreachable), the message is held in an in-session memory buffer and
-#' flushed to disk automatically on the next call that succeeds. This
-#' means no messages are lost within a session when the network hiccups
-#' during a large Parquet write -- the buffer drains as soon as
-#' connectivity is restored, preserving message order and keeping a
-#' single authoritative log file.
-#'
-#' @param msg    Character scalar. Message body (timestamp is prepended).
-#' @param log_path Character. Path to the log file. Defaults to \code{LogPath}.
-#' @param run_id Character scalar (optional). Run identifier appended to the
-#'   log line as \code{[run_id=...]}. Defaults to the run-scoped identifier
-#'   set by \code{\link{begin_repository_run}}, or omitted entirely if none
-#'   is active.
-#' @return \code{invisible(NULL)}. Called for side effects.
+#' \code{log_path}. When the write to \code{log_path} fails, the message is
+#' held in a memory buffer for the session instead, and that buffer,
+#' together with any earlier buffered messages, is written to
+#' \code{log_path} on the next call that succeeds.
+#' @param msg Character scalar. Message body. A timestamp is prepended to it
+#'   before it is written.
+#' @param log_path Character scalar. Path to the log file. Accepts a file
+#'   path, which is used as the log file for this call. Also accepts
+#'   \code{NULL}, which uses the value of \code{LogPath} found in the calling
+#'   environment, or, if none is found, a file inside the session temporary
+#'   directory.
+#' @param run_id Character scalar. Run identifier appended to the log line as
+#'   \code{[run_id=...]}. Accepts a character string, which is used as the
+#'   run identifier for this call. Also accepts \code{NULL}, which uses the
+#'   identifier set by \code{\link{begin_repository_run}}, or omits the tag
+#'   entirely when no such identifier is set.
+#' @return \code{invisible(NULL)}.
 #' @examples
 #' \dontrun{
 #' tmp_log <- tempfile(fileext = ".txt")
@@ -283,18 +289,14 @@ repository_table_name_for_row <- function(row_meta) {
   paste(as.character(row_meta$Database[1]), as.character(row_meta$TableName[1]), sep = "_")
 }
 
-#' Physical table names for every row of an MDT
+#' Returns the physical table name for every row of an MDT
 #'
-#' For each row, returns \code{PhysicalTableName} verbatim if present and
-#' non-blank, otherwise \code{"<Database>_<TableName>"}. This is the naming
-#' convention used for DuckDB view registration
-#' (\code{\link{register_parquet_view_compile}}) and Parquet output
-#' directories, so a caller can compute the exact set of tables a load will
-#' produce without re-deriving the naming rule itself.
-#' @param MDT Data frame. The master database table, or any subset of it
-#'   with at least \code{Database} and \code{TableName} columns (and
-#'   optionally \code{PhysicalTableName}).
-#' @return Character vector, one physical table name per row of \code{MDT}.
+#' For each row, returns \code{PhysicalTableName} if it is present and not
+#' blank, and otherwise returns \code{"<Database>_<TableName>"}.
+#' @param MDT Data frame. The master database table, or any subset of it.
+#'   Requires \code{Database} and \code{TableName} columns, and optionally a
+#'   \code{PhysicalTableName} column.
+#' @return Character vector. One physical table name per row of \code{MDT}.
 #' @seealso \code{\link{register_parquet_view_compile}}
 #' @examples
 #' MDT <- data.frame(Database = c("SALES", "SALES"), TableName = c("Orders", "Orders"),
@@ -307,26 +309,28 @@ repository_table_names <- function(MDT) {
 
 .fingerprint_env <- new.env(parent = emptyenv())
 
-#' Fingerprint a source file for checkpoint invalidation
+#' Computes an identity for a source file
 #'
-#' Computes a lightweight identity for a source file so checkpoints can
-#' detect when a file's content has changed since it was last loaded, even
-#' if its logical \code{Path} in the MDT stayed the same. Fingerprints (not
-#' raw sizes/timestamps) are embedded in checkpoint keys by
-#' \code{repository_checkpoint_key()} via \code{SourceFingerprintMode}.
-#' @param path Character scalar. Path to the source file to fingerprint. If
-#'   the file does not exist or its size cannot be determined, an NA
-#'   fingerprint is returned rather than an error.
-#' @param mode Character scalar, one of \code{"metadata"} (default; combines
-#'   file size and UTC modification time -- fast, no file content read),
-#'   \code{"sha256"} (a full-content SHA-256 hash via the \code{digest}
-#'   package, cached per size/mtime combination for the session -- detects
-#'   in-place edits that don't change size/mtime, at the cost of reading
-#'   every byte), or \code{"none"} (fingerprinting disabled; the returned
-#'   \code{fingerprint} is \code{NA}).
-#' @return A list with elements \code{path}, \code{size} (bytes),
-#'   \code{mtime_utc} (ISO-8601 UTC timestamp string), \code{sha256} (only
-#'   populated when \code{mode = "sha256"}), \code{fingerprint} (the
+#' Computes an identity for a source file, used to detect whether the file's
+#' content has changed since it was last loaded.
+#' @param path Character scalar. Path to the source file. Accepts a path to
+#'   an existing file whose size can be determined, which is used to compute
+#'   the identity. Accepts a path to a file that does not exist or whose
+#'   size cannot be determined, in which case the returned
+#'   \code{fingerprint} is \code{NA}.
+#' @param mode Character scalar. Accepts one of three values.
+#'   \code{"metadata"} combines the file size and UTC modification time into
+#'   the identity, without reading the file content. \code{"sha256"}
+#'   computes a SHA256 hash of the full file content using the
+#'   \code{digest} package, and caches that hash for the session under the
+#'   file's size and modification time, so that a repeated call against an
+#'   unchanged file does not read the content again. \code{"none"} disables
+#'   fingerprinting, so the returned \code{fingerprint} is \code{NA}.
+#'   Defaults to \code{"metadata"}.
+#' @return A list with elements \code{path}, \code{size} in bytes,
+#'   \code{mtime_utc} as an ISO 8601 UTC timestamp string, \code{sha256}
+#'   (populated only when \code{mode} is \code{"sha256"}), \code{fingerprint}
+#'   as the
 #'   composed identity string used in checkpoint keys, or \code{NA} for
 #'   \code{mode = "none"} or an unreadable file), and \code{mode}.
 #' @examples
@@ -511,46 +515,67 @@ source_path_for_row <- function(row_meta, MasterDBPath) {
   TRUE
 }
 
-#' Materialize remote source files into the repository cache
+#' Downloads remote source files into a managed local cache
 #'
-#' Rows with a non-empty \code{SourceURI} are downloaded to a managed local
-#' cache before schema discovery or loading. Original sources and the MDT
-#' workbook are never modified. \code{Path} remains the stable logical source
-#' name; the returned MDT adds \code{ResolvedSourcePath} for runtime reads and
-#' provenance fields describing the cached object.
+#' For each row of \code{MDT} with a non empty \code{SourceURI}, downloads
+#' the file into \code{DownloadCachePath} according to its download policy.
+#' A row without a \code{SourceURI} is left unchanged. The original source
+#' files and the MDT workbook are never modified. \code{Path} remains the
+#' logical source name in the returned MDT, which also gains a
+#' \code{ResolvedSourcePath} column pointing at the file to read, together
+#' with columns describing the cached copy.
 #'
-#' Remote acquisition accepts direct HTTP or HTTPS file URLs and explicit ZIP
-#' members declared with \code{ArchiveType="zip"} and \code{ArchiveMember}.
-#' It does not scrape web pages or store credentials. Use \code{DownloadFunction} for a
-#' caller-managed authenticated download without placing secrets in the MDT.
+#' Accepts direct HTTP or HTTPS file URLs, and also accepts a ZIP archive
+#' member declared with \code{ArchiveType = "zip"} and \code{ArchiveMember}.
+#' Does not access web pages other than the file URL itself, and does not
+#' store credentials.
 #'
-#' @param MDT Master Database Table data frame.
-#' @param DownloadCachePath Directory used for managed source copies.
-#' @param Offline If TRUE, never access the network and require cached copies.
-#' @param DefaultDownloadPolicy Default for blank \code{DownloadPolicy} cells:
-#'   \code{"if_missing"}, \code{"if_changed"}, \code{"always"}, or
-#'   \code{"manual"}.
-#' @param DownloadMethod Method passed to \code{utils::download.file()}.
-#' @param TimeoutSeconds Minimum download timeout in seconds.
-#' @param Strict Stop if any remote row cannot be materialized.
-#' @param DownloadFunction Optional function with arguments \code{uri} and
-#'   \code{destination}. It must write the destination file. This supports
-#'   caller-managed authentication and deterministic tests.
-#' @param Resume Logical. When TRUE (default) and \code{DownloadFunction} is
-#'   NULL, an interrupted download (network drop or exceeded
-#'   \code{TimeoutSeconds}) leaves its partial bytes in a deterministic
-#'   \code{<cache file>.part} file next to the destination, and the next
-#'   attempt continues from that byte offset with an HTTP Range request
-#'   instead of restarting from scratch. Requires the \code{curl} package;
-#'   without it (or with \code{Resume = FALSE}), every attempt restarts from
-#'   byte zero as before. If the server ignores the Range request and returns
-#'   the full file again, the partial file is discarded and the next attempt
-#'   restarts cleanly rather than risk an appended, corrupted file. Partial
-#'   \code{.part} files are never treated as a completed cached copy and are
-#'   not automatically purged; delete them from \code{DownloadCachePath} to
-#'   force a clean restart.
-#' @param LogPath,RunId Optional repository logging context.
-#' @return A copy of \code{MDT} with resolved paths and remote provenance.
+#' @param MDT Data frame. The master database table.
+#' @param DownloadCachePath Character scalar. Directory in which downloaded
+#'   copies of source files are stored.
+#' @param Offline Logical. Accepts \code{TRUE}, which prevents any network
+#'   access, so that a row whose file is not already cached is left
+#'   unresolved. Accepts \code{FALSE}, which allows network access according
+#'   to each row's download policy. Defaults to \code{FALSE}.
+#' @param DefaultDownloadPolicy Character scalar. Policy applied to a row
+#'   whose \code{DownloadPolicy} cell is blank. Accepts one of four values.
+#'   \code{"if_missing"} downloads the file only when no cached copy exists.
+#'   \code{"if_changed"} downloads the file when no cached copy exists, and
+#'   otherwise compares the cached copy against the remote source to decide
+#'   whether to download it again. \code{"always"} downloads the file on
+#'   every call. \code{"manual"} never downloads the file, and requires a
+#'   cached copy to already exist. Defaults to \code{"if_missing"}.
+#' @param DownloadMethod Character scalar. Method argument passed to
+#'   \code{utils::download.file()}. Accepts any value that function accepts.
+#'   Defaults to \code{"auto"}.
+#' @param TimeoutSeconds Numeric scalar. Minimum download timeout, in
+#'   seconds, before a download attempt is treated as failed. Defaults to
+#'   \code{10800}.
+#' @param Strict Logical. Accepts \code{TRUE}, which stops with an error if
+#'   any row with a \code{SourceURI} cannot be materialized. Accepts
+#'   \code{FALSE}, which leaves such a row unresolved and continues.
+#'   Defaults to \code{TRUE}.
+#' @param DownloadFunction Function. Accepts a function with arguments
+#'   \code{uri} and \code{destination}, which replaces the default download
+#'   behavior and is responsible for writing the destination file. Accepts
+#'   \code{NULL}, which uses the default download behavior. Defaults to
+#'   \code{NULL}.
+#' @param Resume Logical. Accepts \code{TRUE}, which, when
+#'   \code{DownloadFunction} is \code{NULL}, continues an interrupted
+#'   download from the byte offset recorded in a partial
+#'   \code{<cache file>.part} file, using an HTTP Range request, rather than
+#'   restarting the download from the first byte. This requires the
+#'   \code{curl} package and a remote server that honors the Range request;
+#'   when either condition is not met, or when \code{Resume} is
+#'   \code{FALSE}, every download attempt restarts from the first byte,
+#'   discarding any partial file first. Partial files are not deleted
+#'   automatically. Defaults to \code{TRUE}.
+#' @param LogPath Character scalar. Path to the log file for this call. See
+#'   \code{\link{begin_repository_run}}.
+#' @param RunId Character scalar. Run identifier for this call. See
+#'   \code{\link{begin_repository_run}}.
+#' @return A copy of \code{MDT} with resolved paths and columns describing
+#'   the cached copy of each remote source.
 #' @examples
 #' tmp_cache <- tempfile("remote_cache_")
 #' dir.create(tmp_cache)
@@ -796,31 +821,30 @@ MaterializeRemoteSources <- function(
   out[]
 }
 
-#' Build the checkpoint key(s) for MDT rows
+#' Builds the checkpoint key for each row of an MDT
 #'
-#' Constructs the canonical checkpoint identity used to record and look up
-#' completed loads for each row of a Master Database Table (MDT). The base
-#' key combines \code{Database}, \code{TableName}, the row's partition
-#' identity, \code{MDBDir}, and \code{Path}; when \code{SourceFingerprintMode}
-#' is not \code{"none"}, a content fingerprint of the row's resolved source
-#' file (see \code{\link{source_fingerprint}}) is appended, so a source file
-#' that changes on disk produces a different key even though its declared
-#' path did not change. \code{\link{checkpoint_completed_mask}} uses this
-#' function internally to compare \code{MDT} against a stored checkpoint; it
-#' is exported separately because it is also useful on its own for
-#' diagnosing why a row is (or is not) being recognized as already
-#' completed -- for example, printing the computed key for a row alongside
-#' the closest matching entry actually stored in the checkpoint.
-#' @param MDT Data frame. Must include \code{Database}, \code{TableName},
+#' Builds the checkpoint identity used to record and look up completed loads
+#' for each row of a Master Database Table. The base key combines
+#' \code{Database}, \code{TableName}, the row's partition identity,
+#' \code{MDBDir}, and \code{Path}. When \code{SourceFingerprintMode} is not
+#' \code{"none"}, a content fingerprint of the row's resolved source file
+#' (see \code{\link{source_fingerprint}}) is appended to the base key, so
+#' that a source file whose content changes on disk produces a different
+#' key even when its declared path is unchanged.
+#' @param MDT Data frame. Requires \code{Database}, \code{TableName},
 #'   \code{MDBDir}, \code{Path}, \code{PartitionKey}, and \code{PartitionValue}
 #'   columns.
-#' @param MasterDBPath Character. Root directory used to resolve each row's
-#'   source file. Required when \code{SourceFingerprintMode} is not
-#'   \code{"none"}; ignored otherwise.
-#' @param SourceFingerprintMode One of \code{"none"}, \code{"metadata"}, or
-#'   \code{"sha256"}. Controls whether (and how) a content fingerprint of the
-#'   resolved source file is appended to the base key.
-#' @return Character vector, one checkpoint key per row of \code{MDT}.
+#' @param MasterDBPath Character scalar. Root directory used to resolve each
+#'   row's source file. Required when \code{SourceFingerprintMode} is not
+#'   \code{"none"}. Ignored otherwise.
+#' @param SourceFingerprintMode Character scalar. Accepts one of three
+#'   values, controlling whether a content fingerprint of the resolved
+#'   source file is appended to the base key, and how it is computed.
+#'   \code{"none"} appends no fingerprint. \code{"metadata"} appends a
+#'   fingerprint of the file size and modification time. \code{"sha256"}
+#'   appends a fingerprint of a SHA256 hash of the full file content. See
+#'   \code{\link{source_fingerprint}}.
+#' @return Character vector. One checkpoint key per row of \code{MDT}.
 #' @seealso \code{\link{checkpoint_completed_mask}}, \code{\link{source_fingerprint}}
 #' @examples
 #' MDT <- data.frame(Database = "DEMO", TableName = "Core", MDBDir = ".",
@@ -860,30 +884,28 @@ repository_checkpoint_legacy_key <- function(MDT) {
   paste(MDT$Database, MDT$TableName, vals, MDT$MDBDir, MDT$Path, sep = "||")
 }
 
-#' Flag which MDT rows are already recorded as completed in a checkpoint
+#' Flags which rows of an MDT are already recorded as completed
 #'
-#' Compares each row's current checkpoint key (see \code{repository_checkpoint_key()})
-#' against a checkpoint's completed-file entries, returning a logical mask over
-#' \code{MDT}. This is the standard way to subset a Master Database Table down
-#' to only the sources a prior run already finished -- for example before
-#' registering DuckDB views for a partially completed load. When
-#' \code{accept_legacy} is \code{TRUE} (default), entries written in older
-#' formats (value-only legacy keys, or bare source paths for a file that is
-#' the only row using that path) are also honored, so switching
-#' \code{SourceFingerprintMode} or upgrading repoquet does not strand
-#' already-completed files.
+#' Compares each row's current checkpoint key (see
+#' \code{\link{repository_checkpoint_key}}) against the completed file
+#' entries of a checkpoint, and returns a logical mask over \code{MDT}.
 #' @param MDT Data frame. Current Master Database Table.
-#' @param completed_checkpoint Character vector of completed-file keys, as
+#' @param completed_checkpoint Character vector. Completed file keys, as
 #'   returned by \code{\link{load_checkpoint}}.
-#' @param accept_legacy Logical. If \code{TRUE} (default), also match legacy
-#'   value-only keys and unambiguous bare paths in \code{completed_checkpoint}.
-#' @param MasterDBPath Character scalar or \code{NULL}. Root directory used to
-#'   resolve each row's source file for fingerprinting. Required when
+#' @param accept_legacy Logical. Accepts \code{TRUE}, which also matches, as
+#'   an entry of \code{completed_checkpoint}, a legacy key that records only
+#'   the row's partition values, without the partition key names, and also
+#'   matches a bare source path when that path belongs to only one row of
+#'   \code{MDT}. Accepts \code{FALSE}, which matches only the current key
+#'   format. Defaults to \code{TRUE}.
+#' @param MasterDBPath Character scalar. Root directory used to resolve each
+#'   row's source file for fingerprinting. Required when
 #'   \code{SourceFingerprintMode} is not \code{"none"}.
-#' @param SourceFingerprintMode Character scalar, one of \code{"none"}
-#'   (default), \code{"metadata"}, or \code{"sha256"} -- must match the mode
-#'   used when the checkpoint was written. See \code{\link{source_fingerprint}}.
-#' @return Logical vector the same length as \code{nrow(MDT)}; \code{TRUE}
+#' @param SourceFingerprintMode Character scalar. Accepts one of three
+#'   values: \code{"none"}, \code{"metadata"}, or \code{"sha256"}. Must
+#'   match the mode used when the checkpoint was written. See
+#'   \code{\link{source_fingerprint}}. Defaults to \code{"none"}.
+#' @return Logical vector the same length as \code{nrow(MDT)}. \code{TRUE}
 #'   where that row is already recorded as completed.
 #' @examples
 #' MDT <- data.frame(Database = "DEMO", TableName = "Core", MDBDir = ".",
@@ -915,25 +937,27 @@ checkpoint_completed_mask <- function(MDT, completed_checkpoint, accept_legacy =
   hit
 }
 
-#' Upgrade legacy checkpoint entries to content-aware source fingerprints
+#' Rewrites checkpoint keys to a new source fingerprint mode
 #'
-#' Rewrites a checkpoint's completed-file keys (which may be plain
-#' \code{SourceFingerprintMode="none"} keys, legacy value-only keys, or bare
-#' paths) into the current \code{SourceFingerprintMode} format by matching
-#' each entry against the current MDT and substituting the freshly computed,
-#' fingerprint-bearing key. Entries that match no current MDT row (by any of
-#' the three formats) are left unchanged. This lets a repository switch from
-#' \code{SourceFingerprintMode="none"} to \code{"metadata"} or \code{"sha256"}
-#' without forcing every already-completed file to reload.
-#' @param checkpoint Character vector. Completed-file keys as currently
-#'   stored (e.g. loaded via \code{\link{load_checkpoint}}).
+#' Rewrites the entries of a checkpoint (each a plain key with
+#' \code{SourceFingerprintMode = "none"}, a legacy key that records only
+#' partition values, or a bare path) into the current
+#' \code{SourceFingerprintMode} format, by matching each entry against the
+#' current MDT and substituting a freshly computed key that carries a
+#' fingerprint. An entry that matches no row of the current MDT, under any
+#' of the three formats, is left unchanged.
+#' @param checkpoint Character vector. Completed file keys, as currently
+#'   stored, for example as loaded by \code{\link{load_checkpoint}}.
 #' @param MDT Data frame. Current Master Database Table.
 #' @param MasterDBPath Character scalar. Root directory used to resolve each
-#'   MDT row's source file for fingerprinting.
-#' @param SourceFingerprintMode Character scalar, one of \code{"metadata"}
-#'   (default) or \code{"sha256"} -- the fingerprint mode the checkpoint is
-#'   being upgraded \emph{to}. See \code{\link{source_fingerprint}}.
-#' @return Character vector of upgraded, de-duplicated checkpoint keys.
+#'   row's source file for fingerprinting.
+#' @param SourceFingerprintMode Character scalar. Accepts one of two
+#'   values, the fingerprint mode the checkpoint is being upgraded to.
+#'   \code{"metadata"} computes a fingerprint from the file size and
+#'   modification time. \code{"sha256"} computes a fingerprint from a
+#'   SHA256 hash of the full file content. See
+#'   \code{\link{source_fingerprint}}. Defaults to \code{"metadata"}.
+#' @return Character vector of upgraded, deduplicated checkpoint keys.
 #' @examples
 #' tmp_dir <- tempfile("demo_"); dir.create(tmp_dir)
 #' writeLines(c("A,B", "1,2"), file.path(tmp_dir, "demo.csv"))
@@ -965,21 +989,21 @@ upgrade_checkpoint_source_fingerprints <- function(checkpoint, MDT, MasterDBPath
   unique(out)
 }
 
-#' Rewrite legacy checkpoint entries into the generalized key format
+#' Rewrites legacy checkpoint entries into the generalized key format
 #'
-#' Checkpoints written before generalized keys existed contain value-only
-#' identities (\code{DB||Table||2019||dir||path}) or bare paths. Those formats
-#' cannot distinguish two partition schemes that share values (e.g.
-#' \code{SITE=MGH} vs \code{FACILITY=MGH}), so
-#' \code{checkpoint_completed_mask} only tolerates them as a migration
-#' bridge. This helper rewrites every legacy entry the current MDT can explain
-#' into the generalized format, after which \code{accept_legacy = FALSE} can be
-#' used. Entries no MDT row explains are left untouched and reported --
-#' investigate those with \code{\link{audit_repository}}.
-#' @param CheckpointPath Character. Checkpoint .rds path.
+#' Rewrites, in the checkpoint file at \code{CheckpointPath}, each legacy
+#' entry that the current MDT can explain, whether a key that records only
+#' partition values or a bare path, into the generalized checkpoint key
+#' format. An entry that no row of the current MDT explains is left
+#' unchanged and is reported.
+#' @param CheckpointPath Character scalar. Path to the checkpoint file.
 #' @param MDT Data frame. Current Master Database Table.
-#' @param DryRun Logical. TRUE (default) reports without writing.
-#' @return Invisibly, list(n_migrated, n_unexplained).
+#' @param DryRun Logical. Accepts \code{TRUE}, which reports the entries
+#'   that would be migrated without writing any change to
+#'   \code{CheckpointPath}. Accepts \code{FALSE}, which writes the migrated
+#'   entries to \code{CheckpointPath}. Defaults to \code{TRUE}.
+#' @return Invisibly, a list with elements \code{n_migrated} and
+#'   \code{n_unexplained}.
 #' @examples
 #' tmp_cp <- tempfile(fileext = ".rds")
 #' saveRDS("demo.csv", tmp_cp)   # legacy bare-path checkpoint entry
@@ -1051,24 +1075,23 @@ parquet_chunk_stem <- function(source_path, partition_dir = NULL,
   safe_stem
 }
 
-#' Verify that a source file truly contains zero data rows
+#' Verifies that a source file truly contains zero data rows
 #'
-#' Distinguishes a legitimately empty source (readable, 0 rows) from a failed
-#' read, which also surfaces as an empty data frame in the safe readers. Only
-#' a successful re-read confirming 0 rows returns TRUE; any read error returns
-#' FALSE so genuine failures keep failing loudly.
+#' Distinguishes a source that is legitimately empty, readable with zero
+#' rows, from a failed read, which also produces an empty data frame in the
+#' safe readers, by reading the file again and checking the result.
 #' @param full_path Character scalar. Full path to the source file to check.
-#' @param reader Character scalar naming a registered reader type (see
-#'   \code{\link{supported_file_types}} for the values the MDT's
-#'   \code{FileType} column maps to, e.g. \code{"csv"} or \code{"sav"}), or a
-#'   reader specification list as returned internally by the reader
-#'   registry.
-#' @param reader_options List (optional). Reader-specific options (e.g.
-#'   encoding, delimiter) forwarded to the reader's \code{count_rows} or
-#'   \code{read_full} method.
-#' @return \code{TRUE} only when the file can be re-read successfully and
-#'   contains exactly zero rows; \code{FALSE} for a nonzero row count
-#'   \emph{or} any read error.
+#' @param reader Character scalar naming a registered reader type. Accepts
+#'   a value from \code{\link{supported_file_types}}, such as \code{"csv"}
+#'   or \code{"sav"}, matching the MDT's \code{FileType} column. Also
+#'   accepts a reader specification list, as returned internally by the
+#'   reader registry.
+#' @param reader_options List. Options specific to the reader, such as
+#'   encoding or delimiter, forwarded to the reader's \code{count_rows} or
+#'   \code{read_full} method. Defaults to an empty list.
+#' @return \code{TRUE} when the file can be read again successfully and
+#'   contains exactly zero rows. \code{FALSE} for a nonzero row count or for
+#'   any read error.
 #' @examples
 #' tmp <- tempfile(fileext = ".csv")
 #' writeLines("A,B", tmp)   # header only, zero data rows
@@ -1158,20 +1181,21 @@ replace_file_safely <- function(tmp, path) {
   })
 }
 
-#' Robustly remove a file with retry logic
+#' Removes a file, retrying on failure
 #'
-#' Attempts to remove a file with exponential backoff retry logic. Useful for
-#' removing files that may be locked by the OS or another process during I/O
-#' operations. Logs failures if requested.
-#'
-#' @param path Character. Path to the file to remove.
-#' @param max_attempts Integer. Maximum number of removal attempts (default 3).
-#' @param wait_sec Numeric vector. Wait times (in seconds) before retries
-#'   (default c(0, 1, 5)).
-#' @param log_failures Logical. If TRUE, log failed removal to the standard
-#'   repository log (default TRUE).
-#' @return Logical. TRUE if file was removed or did not exist; FALSE if removal
-#'   failed after all retries.
+#' Attempts to remove a file, retrying with a pause between attempts when
+#' removal fails, and optionally logging a failure that persists after every
+#' attempt.
+#' @param path Character scalar. Path to the file to remove.
+#' @param max_attempts Integer. Maximum number of removal attempts. Defaults
+#'   to \code{3}.
+#' @param wait_sec Numeric vector. Number of seconds to wait before each
+#'   retry. Defaults to \code{c(0, 1, 5)}.
+#' @param log_failures Logical. Accepts \code{TRUE}, which records a failure
+#'   that persists after every attempt in the repository log. Accepts
+#'   \code{FALSE}, which does not record it. Defaults to \code{TRUE}.
+#' @return Logical scalar. \code{TRUE} when the file was removed or did not
+#'   exist. \code{FALSE} when removal failed after every attempt.
 #' @keywords internal
 safe_unlink <- function(path, max_attempts = 3L, wait_sec = c(0, 1, 5),
                         log_failures = TRUE) {
@@ -1204,35 +1228,28 @@ safe_unlink <- function(path, max_attempts = 3L, wait_sec = c(0, 1, 5),
   removed
 }
 
-#' Clean up temporary Parquet write files
+#' Removes old temporary Parquet write files
 #'
-#' Scans a directory for temporary files left behind by atomic write operations
-#' (files matching a pattern, typically `*.tmp_*.parquet`). Removes old temporary
-#' files while preserving recent ones that may still be in use.
-#'
-#' @param parent_dir Character. Root directory to scan for temporary files.
-#' @param pattern Character. Regular expression to match temporary files
-#'   (default matches `*.tmp_*.parquet`).
-#' @param max_age_hours Integer. Minimum age (in hours) before a temp file is
-#'   considered safe to remove. Default 24 hours (files < 24 hrs old are preserved).
-#' @param dry_run Logical. If TRUE, log what would be removed without actually
-#'   deleting files (default FALSE).
-#' @param verbose Logical. If TRUE, log cleanup operations (default TRUE).
-#'
-#' @return Invisibly returns a data.table with columns:
-#'   \describe{
-#'     \item{file}{Full path to the temporary file}
-#'     \item{size_bytes}{File size in bytes}
-#'     \item{age_hours}{Age of file in hours}
-#'     \item{mtime}{File modification time}
-#'   }
-#'
-#' @details
-#' This function is useful for cleaning up orphaned temporary files after
-#' crashed or interrupted write operations. It scans recursively into all
-#' subdirectories and removes only files older than \code{max_age_hours},
-#' to avoid interfering with active write operations.
-#'
+#' Scans a directory, and every subdirectory beneath it, for temporary files
+#' left behind by atomic write operations, matching \code{pattern}, and
+#' removes those older than \code{max_age_hours}, leaving more recent ones
+#' in place.
+#' @param parent_dir Character scalar. Root directory to scan for temporary
+#'   files.
+#' @param pattern Character scalar. Regular expression matching temporary
+#'   file names. Defaults to a pattern matching \code{*.tmp_*.parquet}.
+#' @param max_age_hours Integer. Minimum age, in hours, a temporary file
+#'   must reach before it is removed. Defaults to \code{24}.
+#' @param dry_run Logical. Accepts \code{TRUE}, which logs the files that
+#'   would be removed, without removing them. Accepts \code{FALSE}, which
+#'   removes them. Defaults to \code{FALSE}.
+#' @param verbose Logical. Accepts \code{TRUE}, which logs each cleanup
+#'   operation. Accepts \code{FALSE}, which logs nothing. Defaults to
+#'   \code{TRUE}.
+#' @return Invisibly, a data.table with columns \code{file}, the full path
+#'   to the temporary file, \code{size_bytes}, the file size in bytes,
+#'   \code{age_hours}, the age of the file in hours, and \code{mtime}, the
+#'   file modification time.
 #' @examples
 #' \dontrun{
 #'   # Clean temp files > 24 hours old from a Parquet directory
@@ -1309,17 +1326,17 @@ cleanup_temp_files <- function(parent_dir, pattern = "^.*\\.tmp_.*\\.parquet$",
 ################################################################################
 #### Hive partition specification ##############################################
 ################################################################################
-#' Sanitize a value for use in a hive partition directory name
+#' Sanitizes a value for use in a hive partition directory name
 #'
-#' Coerces \code{x} to character and replaces every character that is not a
-#' letter, digit, underscore, period, or hyphen with an underscore, producing
-#' a string that is always a safe single path segment (e.g. for
-#' \code{site=<value>} directory names).
-#' @param x Value(s) to sanitize; coerced with \code{as.character()} before
-#'   sanitization. May be a vector.
+#' Coerces \code{x} to character and replaces each character that is not a
+#' letter, digit, underscore, period, or hyphen with an underscore,
+#' producing a string that is a safe single path segment, for example for a
+#' \code{site=<value>} directory name.
+#' @param x Value or vector of values to sanitize. Each element is coerced
+#'   with \code{as.character()} before sanitization.
 #' @return Character vector the same length as \code{x}, with unsafe
-#'   characters replaced by \code{"_"} and leading/trailing whitespace
-#'   trimmed.
+#'   characters replaced by \code{"_"} and leading and trailing whitespace
+#'   removed.
 #' @examples
 #' sanitize_partition_value("Site A/B 2020")
 #' sanitize_partition_value(c(" MGH ", "Boston Med*Center"))
@@ -1329,21 +1346,22 @@ sanitize_partition_value <- function(x) {
   gsub("[^A-Za-z0-9_.\\-]", "_", x)
 }
 
-#' Resolve the hive partition keys and values for one MDT row
+#' Resolves the hive partition keys and values for one MDT row
 #'
-#' Returns the partition specification driving where a source file's Parquet
-#' output lands, or the validated anchor when the source carries multiple
-#' physical values for all configured partition keys. Both
-#' \code{PartitionKey} and \code{PartitionValue} are required; no column-name
-#' or year-based defaults are inferred.
-#' @param row_meta One row of the MDT (data.frame or data.table).
-#' @return A list with \code{keys} (canonical uppercase character vector),
-#'   \code{values} (sanitized character vector, same length), and \code{dir}
-#'   (the relative partition directory, e.g. \code{"site=MGH/year=2019"}).
-#'   Directory key names are lowercased to match the historical \code{year=}
-#'   layout; DuckDB matches hive partition columns case-insensitively.
-#' @seealso \code{\link{ValidateMDTPreflight}} which enforces per-table key
-#'   consistency before any file is written.
+#' Returns the partition specification that determines where a source
+#' file's Parquet output is written. \code{PartitionKey} and
+#' \code{PartitionValue} are both required; no default is inferred from a
+#' column name or from a year value.
+#' @param row_meta One row of the MDT, as a data frame or data.table.
+#' @return A list with \code{keys}, a character vector of the canonical
+#'   uppercase partition key names, \code{values}, a character vector of
+#'   the same length holding the sanitized partition values, and \code{dir},
+#'   the relative partition directory, for example
+#'   \code{"site=MGH/year=2019"}. Directory key names are lowercased to
+#'   match the historical \code{year=} layout. DuckDB matches hive partition
+#'   columns without regard to letter case.
+#' @seealso \code{\link{ValidateMDTPreflight}}, which enforces consistent
+#'   partition keys within a table before any file is written.
 #' @examples
 #' row <- data.frame(PartitionKey = "SITE;YEAR", PartitionValue = "MGH;2020",
 #'                   Path = "demo.csv", stringsAsFactors = FALSE)
@@ -1415,34 +1433,31 @@ table_partition_types <- function(rows) {
   resolved[[1]]
 }
 
-#' Validate a physical partition column's contents against the workbook value
+#' Validates a physical partition column's contents against the workbook value
 #'
-#' The writers drop partition columns from the data because hive injects them
-#' from the directory name at read time. Before that column is destroyed, its
-#' contents must agree with the workbook's PartitionValue -- otherwise a
-#' mis-labeled MDT row (e.g. a copy-paste year error) would silently assign
-#' every row of the file to the wrong partition with the physical evidence
-#' deleted. Values are compared after the same canonicalization the directory
-#' names use; NA and empty-string entries carry no information and are
-#' tolerated. Any other disagreement is a hard error naming the file, the
-#' expected value, and examples of what was found.
-#' @param df A data frame or data.table containing the just-read source
-#'   data, including any physical partition column(s), prior to those
-#'   columns being dropped.
-#' @param partition_keys Character vector. Partition key names (as returned
-#'   by \code{\link{partition_spec_for_row}}'s \code{keys} element) to check
-#'   for a matching physical column in \code{df}. Keys with no matching
-#'   column are skipped.
-#' @param partition_values Character vector, same length as
-#'   \code{partition_keys}. The expected (workbook-declared) value for each
-#'   key.
-#' @param source_label Character scalar. Human-readable source identifier
-#'   used in the error message if a mismatch is found.
-#' @return Invisibly \code{TRUE} if every present partition column agrees
-#'   with its expected value, or if \code{partition_values} is empty or its
-#'   length disagrees with \code{partition_keys} (in which case the check is
-#'   skipped entirely). Throws an error naming the offending column, source,
-#'   and disagreeing values otherwise.
+#' Compares the contents of a physical partition column, still present in
+#' data just read from a source file, against the partition value declared
+#' for that source in the workbook, after applying the same
+#' canonicalization used for partition directory names. An \code{NA} or
+#' empty string entry carries no information and is treated as agreeing.
+#' Any other disagreement stops with an error naming the file, the expected
+#' value, and examples of the values found.
+#' @param df Data frame or data.table. The data just read from a source,
+#'   including any physical partition columns, before those columns are
+#'   dropped.
+#' @param partition_keys Character vector. Partition key names, as returned
+#'   in the \code{keys} element of \code{\link{partition_spec_for_row}}, to
+#'   check for a matching physical column in \code{df}. A key with no
+#'   matching column is skipped.
+#' @param partition_values Character vector, the same length as
+#'   \code{partition_keys}. The value declared in the workbook for each key.
+#' @param source_label Character scalar. Identifier for the source, used in
+#'   the error message when a mismatch is found.
+#' @return Invisibly, \code{TRUE} when every present partition column
+#'   agrees with its expected value, and also when \code{partition_values}
+#'   is empty or its length disagrees with \code{partition_keys}, in which
+#'   case the check is skipped entirely. Stops with an error naming the
+#'   offending column, source, and disagreeing values otherwise.
 #' @examples
 #' df <- data.frame(YEAR = c(2020, 2020, 2020), X = 1:3)
 #' validate_partition_column_values(df, partition_keys = "YEAR",
@@ -1482,13 +1497,14 @@ validate_partition_column_values <- function(df, partition_keys, partition_value
   invisible(TRUE)
 }
 
-#' Resolve the (validated) partition keys shared by all rows of one table
+#' Resolves the partition keys shared by every row of one table
 #'
-#' All MDT rows of a Database/TableName group must declare the identical
-#' partition key list -- otherwise the table's directory tree would disagree
-#' with itself about its partition columns and the DuckDB view would break.
-#' @param rows_tbl MDT rows for a single Database/TableName group.
-#' @return Character vector of canonical partition key names (e.g. "YEAR").
+#' Returns the partition key list common to every MDT row of one Database
+#' and TableName group, and stops with an error when the rows declare
+#' different partition key lists.
+#' @param rows_tbl MDT rows for a single Database and TableName group.
+#' @return Character vector of canonical partition key names, for example
+#'   \code{"YEAR"}.
 #' @examples
 #' rows <- data.frame(PartitionKey = c("YEAR", "YEAR"),
 #'                    PartitionValue = c("2019", "2020"),
@@ -1509,33 +1525,37 @@ table_partition_keys <- function(rows_tbl) {
 ##########################
 #### Check run status ####
 ##########################
-#' Check MDT completion status against the loaded checkpoint
+#' Compares an MDT against a checkpoint to find files not yet completed
 #'
-#' Compares the Master Database Table (\code{MDT}) against the completed-files
-#' checkpoint to identify which files have not yet been loaded.  Also detects
-#' duplicate repository identities derived from database, table, explicit
-#' partition specification, source directory, and path, which would
-#' cause silent overwrite collisions during loading.
-#' @param MDT Data frame. Master Database Table with at minimum columns
-#'   \code{Database}, \code{TableName}, \code{MDBDir}, \code{Path},
-#'   \code{PartitionKey}, and \code{PartitionValue}.
-#' @param CheckpointPath Character. Path to the checkpoint \code{.rds} file,
-#'   read via \code{\link{load_checkpoint}}.
-#' @param verbose Logical. If \code{TRUE} (default), logs or prints the number
-#'   of already-completed files.
-#' @param logStatus Logical. If \code{TRUE} (default), messages are written via
-#'   \code{\link{log_msg}}; otherwise they are printed to the console.
-#' @param MasterDBPath Character scalar or \code{NULL} (default). Root
-#'   directory used to resolve each row's source file for fingerprinting.
-#'   Required when \code{SourceFingerprintMode} is not \code{"none"}; forwarded
-#'   to \code{\link{repository_checkpoint_key}} and
-#'   \code{\link{checkpoint_completed_mask}}.
-#' @param SourceFingerprintMode Character scalar, one of \code{"none"}
-#'   (default), \code{"metadata"}, or \code{"sha256"} -- must match the mode
-#'   used when the checkpoint was written, or a completed source can be
-#'   reported as pending (or vice versa). See \code{\link{source_fingerprint}}.
-#' @return A data frame: the subset of \code{MDT} rows whose \code{Path} has
-#'   not yet appeared in the checkpoint (i.e. files still pending).
+#' Compares \code{MDT} against the completed files recorded in a checkpoint,
+#' and returns the rows whose file has not yet been loaded. Also detects a
+#' duplicate repository identity, derived from database, table, partition
+#' specification, source directory, and path, which would cause files to
+#' silently overwrite one another during loading.
+#' @param MDT Data frame. Master Database Table. Requires \code{Database},
+#'   \code{TableName}, \code{MDBDir}, \code{Path}, \code{PartitionKey}, and
+#'   \code{PartitionValue} columns.
+#' @param CheckpointPath Character scalar. Path to the checkpoint
+#'   \code{.rds} file, read with \code{\link{load_checkpoint}}.
+#' @param verbose Logical. Accepts \code{TRUE}, which logs or prints the
+#'   number of already completed files. Accepts \code{FALSE}, which does
+#'   not. Defaults to \code{TRUE}.
+#' @param logStatus Logical. Accepts \code{TRUE}, which writes messages
+#'   with \code{\link{log_msg}}. Accepts \code{FALSE}, which prints them to
+#'   the console. Defaults to \code{TRUE}.
+#' @param MasterDBPath Character scalar. Root directory used to resolve
+#'   each row's source file for fingerprinting. Required when
+#'   \code{SourceFingerprintMode} is not \code{"none"}. Forwarded to
+#'   \code{\link{repository_checkpoint_key}} and
+#'   \code{\link{checkpoint_completed_mask}}. Defaults to \code{NULL}.
+#' @param SourceFingerprintMode Character scalar. Accepts one of three
+#'   values: \code{"none"}, \code{"metadata"}, or \code{"sha256"}. Must
+#'   match the mode used when the checkpoint was written, otherwise a
+#'   completed source can be reported as pending, or a pending source can
+#'   be reported as completed. See \code{\link{source_fingerprint}}.
+#'   Defaults to \code{"none"}.
+#' @return A data frame. The subset of \code{MDT} rows whose \code{Path} has
+#'   not yet appeared in the checkpoint.
 #' @seealso \code{\link{load_checkpoint}}, \code{\link{SummaryVerification}}
 #' @examples
 #' \dontrun{
@@ -1578,29 +1598,34 @@ MDTCompleteStatus <- function(MDT, CheckpointPath, verbose = TRUE, logStatus = T
   return(Missing)
 }
 
-#' Scan source directories for files not yet in the MDT workbook
+#' Scans source directories for files not yet in the MDT workbook
 #'
-#' New-release onboarding helper: walks every source directory the workbook
-#' already references, finds loader-compatible files (\code{.sav}/\code{.csv})
-#' that have no MDT row, and emits candidate rows with the Database, TableName
-#' and year guessed from filename patterns. Nothing is written to the workbook
-#' -- the return value (optionally saved via \code{OutputPath}) is a proposal
-#' for a human to review, correct, and paste into DBSetupV2.xlsx.
+#' Walks every source directory the workbook already references, finds
+#' files whose extension has a registered reader and that have no MDT row,
+#' and returns candidate rows with the Database, TableName, and year
+#' guessed from filename patterns. Nothing is written to the workbook. The
+#' return value, optionally saved through \code{OutputPath}, is a proposal
+#' for a person to review, correct, and paste into DBSetupV2.xlsx.
 #'
-#' Guessing rules: \code{Database} is the workbook's dominant database for
-#' that \code{MDBDir}; \code{TableName} is the longest known table name of
-#' that database whose normalized form appears in the filename;
-#' \code{PartitionValue} is the four-digit year found in the basename (falling
-#' back to the deepest year-bearing directory component). Rows where either
-#' guess fails are flagged \code{NeedsReview = TRUE}.
-#' @param MasterDBPath Character. Root directory of the source files.
+#' The Database guess is the workbook's dominant database for that
+#' \code{MDBDir}. The TableName guess is the longest known table name of
+#' that database whose normalized form appears in the filename. The
+#' PartitionValue guess is the four digit year found in the file name,
+#' falling back to the deepest year bearing directory component. A row
+#' where either guess fails is flagged \code{NeedsReview = TRUE}.
+#' @param MasterDBPath Character scalar. Root directory of the source
+#'   files.
 #' @param MDT Data frame. Current Master Database Table.
-#' @param extensions Character vector of file extensions to consider.
-#'   Defaults to every extension with a registered reader (see
-#'   \code{\link{supported_file_types}}).
-#' @param OutputPath Optional .xlsx/.csv path to save the candidate rows to.
-#' @return data.table of candidate MDT rows: Database, MDBDir, Path,
-#'   TableName, FileType, PartitionKey, PartitionValue, NeedsReview, Note.
+#' @param extensions Character vector. File extensions to consider.
+#'   Defaults to every extension with a registered reader, from
+#'   \code{\link{supported_file_types}}.
+#' @param OutputPath Character scalar. Path to save the candidate rows to,
+#'   ending in \code{.xlsx} or \code{.csv}. Defaults to \code{NULL}, which
+#'   does not save the candidate rows to a file.
+#' @return A data.table of candidate MDT rows, with columns
+#'   \code{Database}, \code{MDBDir}, \code{Path}, \code{TableName},
+#'   \code{FileType}, \code{PartitionKey}, \code{PartitionValue},
+#'   \code{NeedsReview}, and \code{Note}.
 #' @examples
 #' root <- tempfile("mdb_"); dir.create(file.path(root, "DEMO"), recursive = TRUE)
 #' writeLines(c("A,B", "1,2"), file.path(root, "DEMO", "DEMO_2021_Core.csv"))
@@ -1705,54 +1730,52 @@ arrow_schema_from_classes <- function(arrow_tbl, col_classes = NULL) {
   arrow::schema(fields)
 }
 
-#' Write a data frame to a hive-partitioned Parquet file
+#' Writes a data frame to a hive partitioned Parquet file
 #'
 #' Writes \code{df} to a Parquet file under the explicit Hive partition
 #' directory defined by \code{partition_keys} and \code{partition_values}.
-#' The output
-#' filename is derived from \code{source_path} with non-alphanumeric characters
-#' replaced by underscores, so each source SAV/CSV file produces a uniquely
-#' named Parquet file.
-#' Before writing, the function:
-#' \enumerate{
-#'   \item Converts \code{df} to a \code{data.table} in-place via
-#'     \code{strip_haven()} if needed.
-#'   \item Validates that any partition column present in \code{df} agrees
-#'     with \code{partition_values} (see
-#'     \code{\link{validate_partition_column_values}}), then drops it --
-#'     Hive injects the value back from the directory name at read time.
-#'   \item Coerces columns to \code{col_classes} via \code{enforce_col_classes()},
-#'     subject to \code{max_coerce_na_pct}.
-#'   \item Replaces \code{Inf} / \code{-Inf} values in numeric columns with
-#'     \code{NA_real_} (Arrow cannot serialise non-finite doubles).
-#' }
-#' @param df A data frame or data.table to write.
-#' @param ParquetBasePath Character. Root directory of the Parquet store.
-#' @param table_name Character. Table name used as the first directory level
-#'   (e.g. \code{"NIS_Core"}).
-#' @param year_val Integer or character. Derived year value retained for
-#'   backward compatibility with callers; partition placement is controlled by
-#'   \code{partition_keys} and \code{partition_values} (which default to
-#'   \code{"YEAR"} / \code{as.character(year_val)}).
-#' @param source_path Character. Original source file path; used to derive
-#'   the output filename.
-#' @param col_classes Named list (optional). Maps column names to their
-#'   agreed R class strings (e.g. \code{list(AGE = "integer")}).
-#' @param MaxFileStemTruncate Logical. If \code{TRUE}, truncate the derived
-#'   output filename stem so the full path stays within filesystem
-#'   path-length limits. Default \code{FALSE}.
-#' @param partition_keys Character vector. Hive partition key name(s) for
-#'   the output directory (canonicalized and lower-cased for the directory,
-#'   e.g. \code{"year"}). Defaults to \code{"YEAR"}.
-#' @param partition_values Character vector, same length as
-#'   \code{partition_keys}. The value(s) for each partition key. Defaults to
+#' The output filename is derived from \code{source_path}, with characters
+#' that are not letters or digits replaced by underscores, so that each
+#' source SAV or CSV file produces a uniquely named Parquet file. Before
+#' writing, the function converts \code{df} to a \code{data.table} in place
+#' with \code{strip_haven()} when needed, validates that a partition column
+#' present in \code{df} agrees with \code{partition_values} (see
+#' \code{\link{validate_partition_column_values}}) and then drops it, since
+#' Hive supplies the value back from the directory name when the file is
+#' read, coerces columns to \code{col_classes} with
+#' \code{enforce_col_classes()}, subject to \code{max_coerce_na_pct}, and
+#' replaces \code{Inf} and \code{-Inf} values in numeric columns with
+#' \code{NA_real_}, because Arrow cannot store a non finite double value.
+#' @param df Data frame or data.table to write.
+#' @param ParquetBasePath Character scalar. Root directory of the Parquet
+#'   store.
+#' @param table_name Character scalar. Table name used as the first
+#'   directory level, for example \code{"NIS_Core"}.
+#' @param year_val Integer or character scalar. Year value retained for
+#'   compatibility with earlier callers. Partition placement is controlled
+#'   by \code{partition_keys} and \code{partition_values}, which default to
+#'   \code{"YEAR"} and \code{as.character(year_val)}.
+#' @param source_path Character scalar. Original source file path, used to
+#'   derive the output filename.
+#' @param col_classes Named list. Maps column names to their agreed R class
+#'   strings, for example \code{list(AGE = "integer")}. Defaults to
+#'   \code{NULL}.
+#' @param MaxFileStemTruncate Logical. Accepts \code{TRUE}, which truncates
+#'   the derived output filename so the full path stays within the file
+#'   system's path length limit. Accepts \code{FALSE}, which does not
+#'   truncate it. Defaults to \code{FALSE}.
+#' @param partition_keys Character vector. Hive partition key names for the
+#'   output directory, canonicalized and lowercased for the directory name,
+#'   for example \code{"year"}. Defaults to \code{"YEAR"}.
+#' @param partition_values Character vector, the same length as
+#'   \code{partition_keys}. The value for each partition key. Defaults to
 #'   \code{as.character(year_val)}.
-#' @param max_coerce_na_pct Numeric (optional). Maximum percentage of
-#'   present values a single column's type coercion is allowed to destroy
-#'   (turn into \code{NA}) before the coercion step aborts with an error.
-#'   \code{NULL} (default) disables the check.
-#' @return \code{invisible(out_path)} where \code{out_path} is the full path
-#'   of the written Parquet file.
+#' @param max_coerce_na_pct Numeric scalar. Maximum percentage of present
+#'   values that a single column's type coercion is allowed to turn into
+#'   \code{NA} before the coercion step stops with an error. Defaults to
+#'   \code{NULL}, which disables the check.
+#' @return \code{invisible(out_path)}, where \code{out_path} is the full
+#'   path of the written Parquet file.
 #' @seealso \code{\link{safe_read_sav}}, \code{strip_haven},
 #'   \code{\link{validate_partition_column_values}}
 #' @examples
@@ -1841,38 +1864,42 @@ write_year_parquet <- function(df, ParquetBasePath, table_name, year_val, source
 #####################################################################
 #### Register a DuckDB VIEW over all Parquet files for one table ####
 #####################################################################
-#' Register a DuckDB VIEW over all Parquet files for one table
+#' Creates a DuckDB view over all Parquet files for one table
 #'
-#' Creates (or replaces) a DuckDB \code{VIEW} named \code{table_name} that
-#' reads all \code{*.parquet} files under the corresponding directory via
-#' \code{read_parquet()} with hive partitioning and schema union enabled.
-#' This allows DuckDB to query all years of a table as a single virtual table.
-#' If the table directory contains no Parquet files (e.g. all of its sources
-#' verified empty), no view is created and the function returns \code{FALSE}
-#' instead of erroring.
+#' Creates, or replaces, a DuckDB view named \code{table_name} that reads
+#' every \code{*.parquet} file under the corresponding directory with
+#' \code{read_parquet()}, with hive partitioning and schema union enabled,
+#' so that DuckDB can query every year of a table as a single virtual
+#' table. When the table directory contains no Parquet files, for example
+#' because every one of its sources was verified empty, no view is created
+#' and the function returns \code{FALSE} instead of stopping with an error.
 #' @param con A DBI connection to an open DuckDB database.
-#' @param ParquetBasePath Character. Root directory of the Parquet store;
-#'   the table's files are expected under
+#' @param ParquetBasePath Character scalar. Root directory of the Parquet
+#'   store. The table's files are expected under
 #'   \code{file.path(ParquetBasePath, table_name)}.
-#' @param table_name Character. Name of the table / view (e.g. \code{"NIS_Core"}).
-#'   Must correspond to a subdirectory of \code{ParquetBasePath}.
-#' @param schema_registry Optional schema registry object (as returned by
-#'   the package's schema-registry loader) used when \code{validate = TRUE}
-#'   to check the resulting view's columns against approved types.
-#' @param validate Logical. If \code{TRUE} (default), the newly created view
-#'   is validated against the schema registry / table schema catalog.
-#' @param strict_validation Logical. If \code{TRUE} (default), a validation
-#'   failure raises an error rather than only warning.
-#' @param table_schema Optional per-table schema/type catalog used to
-#'   resolve explicit \code{CAST} types for hive partition columns and by
-#'   validation.
-#' @return Invisibly \code{TRUE} if the view was created, or \code{FALSE} if
-#'   no Parquet files were found under the table directory (no view
-#'   created).
+#' @param table_name Character scalar. Name of the table and view, for
+#'   example \code{"NIS_Core"}. Must correspond to a subdirectory of
+#'   \code{ParquetBasePath}.
+#' @param schema_registry Schema registry object, as returned by the
+#'   package's schema registry loader. Used, when \code{validate} is
+#'   \code{TRUE}, to check the resulting view's columns against approved
+#'   types. Defaults to \code{NULL}.
+#' @param validate Logical. Accepts \code{TRUE}, which validates the newly
+#'   created view against the schema registry and table schema catalog.
+#'   Accepts \code{FALSE}, which does not. Defaults to \code{TRUE}.
+#' @param strict_validation Logical. Accepts \code{TRUE}, which raises an
+#'   error on a validation failure. Accepts \code{FALSE}, which only warns.
+#'   Defaults to \code{TRUE}.
+#' @param table_schema Per table schema and type catalog, used to resolve
+#'   an explicit \code{CAST} type for a hive partition column and used by
+#'   validation. Defaults to \code{NULL}.
+#' @return Invisibly, \code{TRUE} when the view was created. \code{FALSE}
+#'   when no Parquet files were found under the table directory, in which
+#'   case no view is created.
 #' @details
-#' Backslashes in the path are normalised to forward slashes before
-#' interpolation into the SQL string because DuckDB interprets backslashes as
-#' SQL escape sequences.
+#' A backslash in the path is normalized to a forward slash before
+#' interpolation into the SQL string, because DuckDB interprets a backslash
+#' as a SQL escape sequence.
 #' @examples
 #' tmp_base <- tempfile("parquet_demo_")
 #' dir.create(tmp_base)
@@ -1927,40 +1954,54 @@ register_parquet_view <- function(con, ParquetBasePath, table_name, schema_regis
   invisible(TRUE)
 }
 
-#' Register DuckDB views for multiple tables
+#' Creates DuckDB views for multiple tables
 #'
-#' Loops over \code{tables_written} and calls \code{\link{register_parquet_view}}
-#' for each, logging or printing progress after each registration.
+#' Calls \code{\link{register_parquet_view}} once for each entry of
+#' \code{tables_written}, logging or printing progress after each one. A
+#' table whose registration fails does not prevent the remaining tables
+#' from being attempted. When \code{strict_validation} is \code{TRUE} and
+#' one or more tables failed, stops with a single error naming every
+#' failing table, after every table in \code{tables_written} has been
+#' attempted. When \code{strict_validation} is \code{FALSE}, such failures
+#' are logged as a warning instead.
 #' @param con A DBI connection to an open DuckDB database.
-#' @param ParquetBasePath Character. Root directory of the Parquet store.
+#' @param ParquetBasePath Character scalar. Root directory of the Parquet
+#'   store.
 #' @param tables_written Character vector of table names to register.
-#' @param verbose Logical. If \code{TRUE} (default), logs or prints a
-#'   confirmation message for each registered view.
-#' @param logStatus Logical. If \code{TRUE} (default), messages are written via
-#'   \code{\link{log_msg}}; otherwise they are printed to the console.
-#' @param SchemaRegistryPath Character (optional). Path to the schema
-#'   registry workbook, used to load \code{schema_registry} when it isn't
-#'   supplied directly. Ignored if \code{schema_registry} is provided.
-#' @param schema_registry Data frame (optional). An already-loaded schema
-#'   registry (see \code{\link{load_schema_registry}}). If \code{NULL}, it is
-#'   loaded from \code{SchemaRegistryPath}.
-#' @param validate Logical. If \code{TRUE} (default), each registered view is
-#'   validated against the schema registry and table schema catalog via
-#'   \code{\link{validate_duckdb_table}}.
-#' @param strict_validation Logical. If \code{TRUE} (default), a validation
-#'   mismatch stops execution; if \code{FALSE}, it is logged but non-fatal.
-#'   Only consulted when \code{validate = TRUE}.
-#' @param TableSchemaPath Character (optional). Path to the approved table
-#'   schema catalog workbook, used to load \code{table_schema} when it isn't
-#'   supplied directly. Ignored if \code{table_schema} is provided.
-#' @param table_schema Data frame (optional). An already-loaded table schema
-#'   catalog (see \code{\link{load_table_schema_catalog}}). If \code{NULL}
-#'   and \code{TableSchemaPath} is supplied, it is loaded from there.
-#' @param LogPath Character (optional). Log file path for this call's
-#'   run-scoped logging context; see \code{\link{begin_repository_run}}.
-#' @param RunId Character (optional). Run identifier for this call's
-#'   run-scoped logging context; see \code{\link{begin_repository_run}}.
-#' @return \code{invisible(NULL)}.  Called for its side effects.
+#' @param verbose Logical. Accepts \code{TRUE}, which logs or prints a
+#'   confirmation message for each registered view. Accepts \code{FALSE},
+#'   which does not. Defaults to \code{TRUE}.
+#' @param logStatus Logical. Accepts \code{TRUE}, which writes messages
+#'   with \code{\link{log_msg}}. Accepts \code{FALSE}, which prints them to
+#'   the console. Defaults to \code{TRUE}.
+#' @param SchemaRegistryPath Character scalar. Path to the schema registry
+#'   workbook, used to load \code{schema_registry} when it is not supplied
+#'   directly. Ignored when \code{schema_registry} is supplied. Defaults to
+#'   \code{NULL}.
+#' @param schema_registry Data frame. An already loaded schema registry,
+#'   see \code{\link{load_schema_registry}}. Defaults to \code{NULL}, which
+#'   loads it from \code{SchemaRegistryPath}.
+#' @param validate Logical. Accepts \code{TRUE}, which validates each
+#'   registered view against the schema registry and table schema catalog,
+#'   with \code{\link{validate_duckdb_table}}. Accepts \code{FALSE}, which
+#'   does not. Defaults to \code{TRUE}.
+#' @param strict_validation Logical. Accepts \code{TRUE}, which, once every
+#'   table has been attempted, stops with an error if any table failed
+#'   validation. Accepts \code{FALSE}, which logs such a failure as a
+#'   warning instead. Consulted only when \code{validate} is \code{TRUE}.
+#'   Defaults to \code{TRUE}.
+#' @param TableSchemaPath Character scalar. Path to the approved table
+#'   schema catalog workbook, used to load \code{table_schema} when it is
+#'   not supplied directly. Ignored when \code{table_schema} is supplied.
+#'   Defaults to \code{NULL}.
+#' @param table_schema Data frame. An already loaded table schema catalog,
+#'   see \code{\link{load_table_schema_catalog}}. Defaults to \code{NULL},
+#'   which, when \code{TableSchemaPath} is supplied, loads it from there.
+#' @param LogPath Character scalar. Path to the log file for this call. See
+#'   \code{\link{begin_repository_run}}.
+#' @param RunId Character scalar. Run identifier for this call. See
+#'   \code{\link{begin_repository_run}}.
+#' @return \code{invisible(NULL)}.
 #' @seealso \code{\link{register_parquet_view}}
 #' @examples
 #' \donttest{
@@ -2023,18 +2064,32 @@ register_parquet_view_compile <- function(con, ParquetBasePath, tables_written, 
   }
 }
 
-#' Print a post-load summary of completed files and failures
+#' Prints a summary of completed files and failures after a load
 #'
 #' Reads the checkpoint and the log file to report how many files completed
 #' successfully and how many \code{[FAIL]} entries appear in the log.
-#' @param MDT Data frame. Master Database Table (used to identify completed
-#'   paths).
-#' @param CheckpointPath Character. Path to the checkpoint \code{.rds} file.
-#' @param LogPath Character. Path to the plain-text log file produced by
-#'   \code{\link{log_msg}}.
-#' @param logStatus Logical. If \code{TRUE} (default), output is written via
-#'   \code{\link{log_msg}}; otherwise it is printed to the console.
-#' @return \code{invisible(NULL)}.  Called for its side effects.
+#' @param MDT Data frame. Master Database Table, used to identify completed
+#'   paths.
+#' @param CheckpointPath Character scalar. Path to the checkpoint
+#'   \code{.rds} file.
+#' @param LogPath Character scalar. Path to the plain text log file
+#'   produced by \code{\link{log_msg}}.
+#' @param logStatus Logical. Accepts \code{TRUE}, which writes output with
+#'   \code{\link{log_msg}}. Accepts \code{FALSE}, which prints it to the
+#'   console. Defaults to \code{TRUE}.
+#' @param RunId Character scalar. Run identifier used to restrict the log
+#'   file to lines from this run only. See
+#'   \code{\link{begin_repository_run}}. Defaults to \code{NULL}, which
+#'   does not restrict by run.
+#' @param MasterDBPath Character scalar. Root directory used to resolve
+#'   each row's source file for fingerprinting. Required when
+#'   \code{SourceFingerprintMode} is not \code{"none"}. Defaults to
+#'   \code{NULL}.
+#' @param SourceFingerprintMode Character scalar. Accepts one of three
+#'   values: \code{"none"}, \code{"metadata"}, or \code{"sha256"}. Must
+#'   match the mode used when the checkpoint was written. See
+#'   \code{\link{source_fingerprint}}. Defaults to \code{"none"}.
+#' @return \code{invisible(NULL)}.
 #' @seealso \code{\link{MDTCompleteStatus}}, \code{\link{load_checkpoint}}
 #' @keywords internal
 #' @export
@@ -2073,17 +2128,19 @@ SummaryVerification <- function(MDT, CheckpointPath, LogPath, logStatus = TRUE,
   }
 }
 
-#' List all registered DuckDB views
+#' Lists every registered DuckDB view
 #'
-#' Calls \code{dbListTables()} and logs or prints the names and count of all
-#' tables / views currently registered in the DuckDB connection.
+#' Calls \code{dbListTables()} and logs or prints the names and count of
+#' every table and view currently registered in the DuckDB connection.
 #' @param con A DBI connection to an open DuckDB database.
-#' @param verbose Logical. If \code{TRUE} (default), logs or prints each view
-#'   name.
-#' @param logStatus Logical. If \code{TRUE} (default), output is written via
-#'   \code{\link{log_msg}}; otherwise it is printed to the console.
-#' @return Character vector of table/view names (invisibly from
-#'   \code{dbListTables()}).
+#' @param verbose Logical. Accepts \code{TRUE}, which logs or prints each
+#'   view name. Accepts \code{FALSE}, which does not. Defaults to
+#'   \code{TRUE}.
+#' @param logStatus Logical. Accepts \code{TRUE}, which writes output with
+#'   \code{\link{log_msg}}. Accepts \code{FALSE}, which prints it to the
+#'   console. Defaults to \code{TRUE}.
+#' @return Character vector of table and view names, returned invisibly
+#'   from \code{dbListTables()}.
 #' @seealso \code{\link{DBDimPerTable}}, \code{\link{register_parquet_view}}
 #' @examples
 #' con <- DBI::dbConnect(duckdb::duckdb(), dbdir = ":memory:")
@@ -2105,22 +2162,26 @@ DBViewSummary <- function(con, verbose = TRUE, logStatus = TRUE){
   return(tables)
 }
 
-#' Report row and column counts for every registered DuckDB view
+#' Reports row and column counts for every registered DuckDB view
 #'
-#' Queries each table in the DuckDB connection for its row count
-#' (\code{COUNT(*)}) and column count (\code{DESCRIBE}), assembles a summary
-#' \code{data.table}, and optionally sorts by memory burden
-#' (\code{Nrow * Ncol}).
+#' Queries each table in the DuckDB connection for its row count, with
+#' \code{COUNT(*)}, and column count, with \code{DESCRIBE}, and assembles a
+#' summary data.table, optionally sorted by memory burden, computed as
+#' \code{Nrow * Ncol}.
 #' @param con A DBI connection to an open DuckDB database.
-#' @param verbose Logical. If \code{TRUE} (default), logs or prints each
-#'   table's row count as it is queried.
-#' @param logStatus Logical. If \code{TRUE} (default), output is written via
-#'   \code{\link{log_msg}}; otherwise it is printed to the console.
-#' @param orderByMemBurden Logical. If \code{TRUE} (default), the returned
-#'   table is sorted descending by \code{Nrow * Ncol} so the most memory-
-#'   intensive tables appear first.
-#' @return A \code{data.table} with columns \code{Table}, \code{Nrow},
-#'   \code{Ncol}, and \code{MemBurden}.
+#' @param verbose Logical. Accepts \code{TRUE}, which logs or prints each
+#'   table's row count as it is queried. Accepts \code{FALSE}, which does
+#'   not. Defaults to \code{TRUE}.
+#' @param logStatus Logical. Accepts \code{TRUE}, which writes output with
+#'   \code{\link{log_msg}}. Accepts \code{FALSE}, which prints it to the
+#'   console. Defaults to \code{TRUE}.
+#' @param orderByMemBurden Logical. Accepts \code{TRUE}, which sorts the
+#'   returned table in descending order of \code{Nrow * Ncol}, so the
+#'   tables with the greatest memory burden appear first. Accepts
+#'   \code{FALSE}, which leaves the table in the order the views were
+#'   listed. Defaults to \code{TRUE}.
+#' @return A data.table with columns \code{Table}, \code{Nrow}, \code{Ncol},
+#'   and \code{MemBurden}.
 #' @seealso \code{\link{DBViewSummary}}
 #' @examples
 #' con <- DBI::dbConnect(duckdb::duckdb(), dbdir = ":memory:")
@@ -2159,13 +2220,19 @@ canonical_colnames <- function(x) {
   x[x == ""] <- "X"
   x
 }
-#' Canonicalize column names while retaining every physical source column
+#' Canonicalizes column names while retaining every physical source column
 #'
-#' Exact duplicate raw headers are disambiguated deterministically with
-#' \code{__2}, \code{__3}, and so on. This preserves the data without changing
-#' the source file. Distinct raw headers that only collide after canonicalization
-#' remain available to \code{canonicalize_dataframe_names()} for its existing
-#' compatibility merge/conflict check.
+#' Canonicalizes each name with \code{\link{canonical_colnames}}. An exact
+#' duplicate raw header is disambiguated deterministically by appending
+#' \code{__2}, \code{__3}, and so on, preserving the data without changing
+#' the source file. A distinct raw header that collides with another only
+#' after canonicalization keeps its own canonicalized name, unchanged, so
+#' that \code{canonicalize_dataframe_names()} can still detect and resolve
+#' that collision.
+#' @param x Character vector of raw column names.
+#' @return Character vector the same length as \code{x}, of canonicalized,
+#'   unique column names.
+#' @export
 canonical_unique_colnames <- function(x) {
   raw <- trimws(as.character(x))
   base <- canonical_colnames(raw)
@@ -2328,19 +2395,22 @@ coerce_to_class <- function(x, target_class) {
   readBin(con, what = "raw", n = as.integer(sample_bytes))
 }
 
-#' Resolve a delimited source file's character encoding without modifying it
+#' Resolves a delimited source file's character encoding without modifying it
 #'
-#' Reads a bounded raw-byte sample from a source opened read-only. An explicit
-#' encoding wins; otherwise a BOM, strict UTF-8 validation, and ICU detection
-#' are used in that order. The returned encoding is used to convert parsed text
-#' in memory, while the source file remains byte-for-byte unchanged.
-#' @param path Character. Path to the source file.
-#' @param declared_encoding Character (optional). An explicit encoding name
-#'   (e.g. from \code{ReaderOptions}); if supplied and non-blank, it is
-#'   canonicalized and returned without sampling the file.
-#' @param sample_bytes Integer. Maximum number of raw bytes to read for BOM
-#'   and encoding detection. Defaults to 4 MiB.
-#' @return A list with the detected/declared encoding name and detection
+#' Reads a bounded raw byte sample from a source opened only for reading.
+#' An explicit encoding, when supplied, is used as is. Otherwise a byte
+#' order mark, strict UTF8 validation, and ICU detection are tried in that
+#' order. The returned encoding is used to convert parsed text in memory,
+#' while the source file remains byte for byte unchanged.
+#' @param path Character scalar. Path to the source file.
+#' @param declared_encoding Character scalar. An explicit encoding name,
+#'   for example from \code{ReaderOptions}. Accepts a non blank value,
+#'   which is canonicalized and returned without sampling the file. Accepts
+#'   \code{NULL}, which detects the encoding from the file. Defaults to
+#'   \code{NULL}.
+#' @param sample_bytes Integer. Maximum number of raw bytes to read for
+#'   byte order mark and encoding detection. Defaults to 4 MiB.
+#' @return A list with the detected or declared encoding name and detection
 #'   metadata, used internally by the delimited reader family.
 #' @keywords internal
 .resolve_source_encoding <- function(path, declared_encoding = NULL,
@@ -2565,15 +2635,12 @@ canonicalize_dataframe_names <- function(df) {
 .coerce_env <- new.env(parent = emptyenv())
 .coerce_env$records <- list()
 
-#' Clear the in-session coercion-damage record
+#' Clears the coercion damage record for the session
 #'
-#' Resets the run-scoped collector that accumulates per-column
-#' type-coercion damage (NA values introduced when a column is coerced to
-#' its agreed schema class). Typically called once at the start of a
-#' repository run so \code{\link{coercion_report_write}} reports only that
-#' run's coercions.
-#' @return \code{invisible(NULL)}. Called for its side effect of clearing
-#'   the internal record.
+#' Resets the collector that accumulates, for the current run, the number
+#' of \code{NA} values introduced in each column by coercing it to its
+#' agreed schema class.
+#' @return \code{invisible(NULL)}.
 #' @examples
 #' coercion_report_reset()
 #' @export
@@ -2589,19 +2656,18 @@ coercion_report_collect <- function(column, from_class, to_class, n_destroyed, n
   invisible(NULL)
 }
 
-#' Write the aggregated coercion-damage report for the current run
+#' Writes the aggregated coercion damage report for the current run
 #'
-#' Aggregates every coercion event recorded via the internal collector
-#' (populated whenever a type coercion introduces \code{NA} values) into one
-#' row per \code{Column}/\code{FromClass}/\code{ToClass} combination, with
-#' total destroyed/present counts and percent destroyed, sorted by
-#' \code{NDestroyed} descending. Writes the result to \code{path} as CSV.
-#' Call \code{\link{coercion_report_reset}} at the start of a run to ensure
-#' the report reflects only that run.
+#' Aggregates every recorded coercion event, each one a type coercion that
+#' introduced \code{NA} values, into one row per combination of
+#' \code{Column}, \code{FromClass}, and \code{ToClass}, with the total
+#' number of values destroyed and present and the percent destroyed,
+#' sorted in descending order of \code{NDestroyed}, and writes the result
+#' to \code{path} as a CSV file.
 #' @param path Character scalar. Output CSV path for the aggregated report.
-#' @return If no coercion events were recorded, \code{invisible(NULL)} and
-#'   nothing is written. Otherwise, invisibly, \code{path} -- the CSV file
-#'   is written and a summary is logged.
+#' @return When no coercion event was recorded, \code{invisible(NULL)}, and
+#'   nothing is written. Otherwise, invisibly, \code{path}, after the CSV
+#'   file is written and a summary is logged.
 #' @examples
 #' coercion_report_reset()
 #' df <- data.frame(CODE = c("1", "2", "abc"), stringsAsFactors = FALSE)
@@ -2673,50 +2739,60 @@ enforce_col_classes <- function(df, col_classes = NULL, max_coerce_na_pct = NULL
 ################################################################################
 .reader_registry <- new.env(parent = emptyenv())
 
-#' Register a file reader for a workbook FileType
+#' Registers a file reader for a workbook FileType
 #'
-#' Adds (or replaces) an entry in \pkg{repoquet}'s internal file-reader
-#' registry under \code{tolower(trimws(type))}, so that MDT rows whose
-#' \code{FileType} matches \code{type} are dispatched to the supplied
-#' callbacks instead of one of the built-ins (e.g. \code{"sav"}, \code{"csv"},
-#' \code{"tsv"}, \code{"dta"}, \code{"sas7bdat"}, \code{"xpt"},
-#' \code{"parquet"}, \code{"rds"}). Every callback receives the file path as
-#' its first argument, plus any extra options \code{call_reader}
-#' forwards to it.
-#' @param type Character scalar. Reader name to register, matched
-#'   case-insensitively and after trimming whitespace against the MDT's
-#'   \code{FileType} column. Must be non-empty.
-#' @param read_full Function. \code{function(path, ...)} returning the whole
-#'   file as a data.frame/data.table. Must throw an error on failure --
-#'   dispatch logic in \code{\link{read_fn}} relies on the error signal to
-#'   decide whether to retry or fall back to chunked reading.
-#' @param read_header Function. \code{function(path, ...)} returning a
-#'   character vector of the file's raw (un-canonicalized) column names.
-#' @param read_sample Function. \code{function(path, ...)} returning a
-#'   data.frame of the file's first rows, used for column-type inference by
-#'   \code{\link{build_col_classes}}. Declared-type formats (SAV, Stata, SAS)
-#'   only need a handful of rows; delimited formats should sample deeper to
-#'   catch late type disagreements.
-#' @param count_rows Function (optional). \code{function(path, ...)} returning
-#'   an integer row count; may error, which callers treat as \code{NA}.
-#'   Required when \code{chunkable = TRUE}, unless \code{type} is
-#'   \code{"sav"} (which has its own row-counting path).
-#' @param has_labels Logical. \code{TRUE} when \code{read_labels_header}
-#'   returns a 0-row frame carrying variable/value label attributes (as SAV
-#'   and Stata files do). Default \code{FALSE}.
-#' @param read_labels_header Function (optional). \code{function(path, ...)}
-#'   returning a 0-row data.frame whose column attributes carry
-#'   variable/value labels. Only meaningful when \code{has_labels = TRUE}.
-#' @param chunkable Logical. \code{TRUE} when the loader may stream this file
-#'   type in memory-bounded chunks via \code{read_chunk} (consumed by
-#'   \code{\link{read_delimited_chunked}}). Default \code{FALSE}.
-#' @param read_chunk Function (optional). \code{function(path, offset, n_max,
-#'   ...)} returning one chunk of rows starting at row \code{offset}.
-#'   Required when \code{chunkable = TRUE}, unless \code{type} is
-#'   \code{"sav"} (which is chunked by \code{\link{safe_read_sav_chunked}}
-#'   instead).
-#' @return Invisibly, the normalized (lowercased, trimmed) \code{type} string
-#'   that was registered.
+#' Adds, or replaces, an entry in the package's internal file reader
+#' registry under \code{tolower(trimws(type))}, so that an MDT row whose
+#' \code{FileType} matches \code{type} is dispatched to the supplied
+#' callbacks instead of one of the package's own readers, for example
+#' \code{"sav"}, \code{"csv"}, \code{"tsv"}, \code{"dta"},
+#' \code{"sas7bdat"}, \code{"xpt"}, \code{"parquet"}, or \code{"rds"}. Every
+#' callback receives the file path as its first argument, together with
+#' any extra options \code{call_reader} forwards to it.
+#' @param type Character scalar. Reader name to register. Matched against
+#'   the MDT's \code{FileType} column without regard to letter case and
+#'   after trimming whitespace. Must be a non empty string.
+#' @param read_full Function with signature \code{function(path, ...)},
+#'   returning the whole file as a data frame or data.table. Must signal
+#'   an error on failure, since the dispatch logic in \code{\link{read_fn}}
+#'   relies on that error to decide whether to retry or fall back to
+#'   reading in chunks.
+#' @param read_header Function with signature \code{function(path, ...)},
+#'   returning a character vector of the file's raw, uncanonicalized
+#'   column names.
+#' @param read_sample Function with signature \code{function(path, ...)},
+#'   returning a data frame of the file's first rows, used for column type
+#'   inference by \code{\link{build_col_classes}}. A format with a
+#'   declared type for each column, such as SAV, Stata, or SAS, needs only
+#'   a handful of rows. A delimited format should sample more deeply, to
+#'   catch a type disagreement that appears later in the file.
+#' @param count_rows Function with signature \code{function(path, ...)},
+#'   returning an integer row count. May signal an error, which a caller
+#'   treats as \code{NA}. Required when \code{chunkable} is \code{TRUE},
+#'   unless \code{type} is \code{"sav"}, which has its own way of counting
+#'   rows. Defaults to \code{NULL}.
+#' @param has_labels Logical. Accepts \code{TRUE}, which declares that
+#'   \code{read_labels_header} returns a data frame with zero rows whose
+#'   column attributes carry variable and value labels, as SAV and Stata
+#'   files do. Accepts \code{FALSE}, which declares that it does not.
+#'   Defaults to \code{FALSE}.
+#' @param read_labels_header Function with signature
+#'   \code{function(path, ...)}, returning a data frame with zero rows
+#'   whose column attributes carry variable and value labels. Meaningful
+#'   only when \code{has_labels} is \code{TRUE}. Defaults to \code{NULL}.
+#' @param chunkable Logical. Accepts \code{TRUE}, which declares that the
+#'   loader may stream this file type in chunks bounded by memory, through
+#'   \code{read_chunk}, consumed by \code{\link{read_delimited_chunked}}.
+#'   Accepts \code{FALSE}, which declares that it may not. Defaults to
+#'   \code{FALSE}.
+#' @param read_chunk Function with signature
+#'   \code{function(path, offset, n_max, ...)}, returning one chunk of
+#'   rows starting at row \code{offset}. Required when \code{chunkable} is
+#'   \code{TRUE}, unless \code{type} is \code{"sav"}, which is instead
+#'   chunked by \code{\link{safe_read_sav_chunked}}. Defaults to
+#'   \code{NULL}.
+#' @return Invisibly, the normalized, lowercased and trimmed, \code{type}
+#'   string that was registered.
 #' @seealso \code{\link{get_file_reader}}, \code{\link{supported_file_types}}
 #' @examples
 #' #### Register a minimal reader for a fictitious pipe-delimited format ####
@@ -2760,29 +2836,30 @@ register_file_reader <- function(type, read_full, read_header, read_sample,
   invisible(type)
 }
 
-#' List the currently registered file-reader types
+#' Lists the currently registered file reader types
 #'
-#' @return A sorted character vector of reader type names registered via
-#'   \code{\link{register_file_reader}}, including the built-ins installed at
-#'   package load by \code{register_builtin_file_readers()} (e.g.
-#'   \code{"sav"}, \code{"csv"}, \code{"dta"}, \code{"parquet"}, \code{"rds"}).
+#' @return A sorted character vector of reader type names registered with
+#'   \code{\link{register_file_reader}}, including the package's own
+#'   readers, installed when the package loads by
+#'   \code{register_builtin_file_readers()}, for example \code{"sav"},
+#'   \code{"csv"}, \code{"dta"}, \code{"parquet"}, and \code{"rds"}.
 #' @seealso \code{\link{get_file_reader}}, \code{\link{register_file_reader}}
 #' @examples
 #' supported_file_types()
 #' @export
 supported_file_types <- function() sort(ls(.reader_registry))
 
-#' Look up a registered file reader by type
+#' Looks up a registered file reader by type
 #'
-#' @param type Character scalar. Reader name, matched case-insensitively
-#'   after trimming whitespace, as registered by
+#' @param type Character scalar. Reader name, matched without regard to
+#'   letter case and after trimming whitespace, as registered with
 #'   \code{\link{register_file_reader}}.
-#' @return The reader's list of callbacks (\code{type}, \code{read_full},
+#' @return The reader's list of callbacks, \code{type}, \code{read_full},
 #'   \code{read_header}, \code{read_sample}, \code{count_rows},
-#'   \code{has_labels}, \code{read_labels_header}, \code{chunkable},
-#'   \code{read_chunk}) exactly as passed to \code{\link{register_file_reader}}.
-#'   Stops with an error listing the registered types if \code{type} is not
-#'   found.
+#'   \code{has_labels}, \code{read_labels_header}, \code{chunkable}, and
+#'   \code{read_chunk}, exactly as passed to
+#'   \code{\link{register_file_reader}}. Stops with an error listing the
+#'   registered types when \code{type} is not found.
 #' @seealso \code{\link{register_file_reader}}, \code{\link{supported_file_types}}
 #' @examples
 #' reader <- get_file_reader("csv")
@@ -3571,30 +3648,30 @@ strip_haven <- function(df) {
 #########################################
 #### align all columns across tables ####
 #########################################
-#' Pad a data frame with typed \code{NA} columns to match a target column set
+#' Pads a data frame with typed \code{NA} columns to match a target column set
 #'
 #' Ensures that \code{df} contains every column listed in \code{all_cols}.
-#' Columns present in \code{all_cols} but absent from \code{df} are added with
-#' the appropriate typed \code{NA} value (e.g. \code{NA_integer_} for integer
-#' columns).  This is required before row-binding data frames from different
-#' years, which may not share exactly the same column set.
-#' @param df A data frame or data.table.
-#' @param all_cols Character vector of column names that must be
-#'   present in the output.
-#' @param comprehensive_sample Named list (optional). Maps column names to their
-#'   R class strings, used both to determine the type of added \code{NA}
-#'   columns and (via \code{enforce_col_classes}) to coerce existing
-#'   columns to the agreed class.
-#' @param max_coerce_na_pct Numeric (optional). Passed to
-#'   \code{enforce_col_classes}. When coercing an existing column to
-#'   its agreed class (per \code{comprehensive_sample}) turns more than this
-#'   percentage of its present values into \code{NA}, the coercion is treated
-#'   as a data-quality failure and an error is raised instead of silently
-#'   destroying data. \code{NULL} (the default) disables this check.
-#' @return The input \code{df} (as a \code{data.table}) with all missing
-#'   columns added as typed \code{NA} vectors, existing columns coerced to
-#'   their agreed classes, and columns reordered so \code{all_cols} come
-#'   first (in that order), followed by any extra columns in \code{df}.
+#' A column listed in \code{all_cols} but absent from \code{df} is added
+#' with the appropriate typed \code{NA} value, for example
+#' \code{NA_integer_} for an integer column.
+#' @param df Data frame or data.table.
+#' @param all_cols Character vector of column names that must be present
+#'   in the output.
+#' @param comprehensive_sample Named list. Maps column names to their R
+#'   class strings, used both to determine the type of an added \code{NA}
+#'   column and, through \code{enforce_col_classes}, to coerce an existing
+#'   column to its agreed class. Defaults to \code{NULL}.
+#' @param max_coerce_na_pct Numeric scalar. Passed to
+#'   \code{enforce_col_classes}. Accepts a percentage, such that when
+#'   coercing an existing column to its agreed class, from
+#'   \code{comprehensive_sample}, turns more than that percentage of its
+#'   present values into \code{NA}, an error is raised instead of
+#'   completing the coercion. Accepts \code{NULL}, which disables this
+#'   check. Defaults to \code{NULL}.
+#' @return The input \code{df}, as a data.table, with every missing column
+#'   added as a typed \code{NA} vector, every existing column coerced to
+#'   its agreed class, and columns reordered so that \code{all_cols} come
+#'   first, in that order, followed by any extra column of \code{df}.
 #' @seealso \code{\link{build_col_classes}}, \code{strip_haven},
 #'   \code{enforce_col_classes}
 #' @examples
@@ -3772,39 +3849,40 @@ align_columns <- function(df, all_cols, comprehensive_sample = NULL, max_coerce_
   results
 }
 
-#' Infer the agreed R class for every column across a set of files
+#' Infers the agreed R class for every column across a set of files
 #'
-#' Reads a sample of rows from each file (in parallel when \code{n_workers >
-#' 1}), strips \pkg{haven} attributes from SAV samples, and for each column
-#' records the set of R classes seen across all files. If all files agree on
-#' a single non-character class, that class is returned; otherwise
-#' \code{"character"} is returned as the safe common denominator (see
-#' \code{promote_types}). Parallelism is scoped within this function: a
-#' \code{multisession} plan is activated only for the duration of the scan and
-#' restored to the prior plan immediately after (see
-#' \code{.parallel_scan_with_serial_retry}), which prevents workers
-#' from remaining alive during the sequential Parquet write phase (a cause of
-#' file-lock conflicts on Windows). Per-file scan failures are retried
-#' serially in the main process before being treated as fatal.
-#' @param files Character vector of file paths (full paths when
-#'   \code{base_path = ""}, relative otherwise).
-#' @param base_path Character scalar. Prepended to each element of \code{files}
-#'   when non-empty. Pass \code{""} when \code{files} already contains full
-#'   paths.
+#' Reads a sample of rows from each file, in parallel when \code{n_workers}
+#' is greater than \code{1}, strips \pkg{haven} attributes from a SAV
+#' sample, and for each column records the set of R classes seen across
+#' every file. When every file agrees on a single class other than
+#' character, that class is returned for the column. Otherwise
+#' \code{"character"} is returned for it, see \code{promote_types}. A
+#' parallel scan activates a \code{multisession} plan only for the
+#' duration of the scan, and restores the previous plan immediately
+#' afterward. A per file scan failure is retried once, serially, in the
+#' main process, before being treated as an error.
+#' @param files Character vector of file paths. Full paths when
+#'   \code{base_path} is \code{""}, and relative to \code{base_path}
+#'   otherwise.
+#' @param base_path Character scalar. Prepended to each element of
+#'   \code{files} when not empty. Pass \code{""} when \code{files} already
+#'   contains full paths.
 #' @param n_workers Integer. Number of parallel \code{future::multisession}
-#'   workers to use for the scan. \code{1} (the default) scans serially in the
-#'   current process; values above 1 are capped at \code{length(files)}.
-#' @param reader Character scalar or vector. Registered reader name(s) (see
-#'   \code{\link{get_file_reader}}), e.g. \code{"sav"} (default) or
-#'   \code{"csv"}. A single value is recycled across all \code{files};
-#'   otherwise it must have one entry per file.
-#' @param reader_options List (optional). One reader-options list per file
-#'   (recycled as an empty list per file when \code{NULL}), passed through to
-#'   the reader's \code{read_sample} callback -- see
-#'   \code{reader_options_for_row}.
-#' @return A named list where each element is a character scalar giving the
-#'   agreed R class for that column (e.g. \code{list(AGE = "integer",
-#'   DXCCS1 = "character")}).
+#'   workers to use for the scan. Accepts \code{1}, which scans serially
+#'   in the current process. Accepts a value greater than \code{1}, which
+#'   scans in parallel across that many workers, capped at
+#'   \code{length(files)}. Defaults to \code{1}.
+#' @param reader Character scalar or vector. Registered reader name, or
+#'   one name per file, as registered with \code{\link{get_file_reader}},
+#'   for example \code{"sav"} or \code{"csv"}. A single value is recycled
+#'   across every file. Defaults to \code{"sav"}.
+#' @param reader_options List. One reader options list per file, passed to
+#'   the reader's \code{read_sample} callback, see
+#'   \code{reader_options_for_row}. Defaults to \code{NULL}, which uses an
+#'   empty list for every file.
+#' @return A named list where each element is a character scalar giving
+#'   the agreed R class for that column, for example
+#'   \code{list(AGE = "integer", DXCCS1 = "character")}.
 #' @seealso \code{\link{build_comprehensive}}, \code{\link{align_columns}},
 #'   \code{\link{get_file_reader}}
 #' @examples
@@ -3874,15 +3952,15 @@ build_col_classes <- function(files, base_path, n_workers = 1, reader = "sav",
 ################################################################################
 #### File readers ##############################################################
 ################################################################################
-#' Safely read a SAV file with UTF-8 sanitisation
+#' Reads a SAV file safely, with character encoding sanitization
 #'
-#' Wraps \code{haven::read_sav()} with \code{tryCatch}.  After loading,
-#' \pkg{haven} S3 attributes are stripped via \code{strip_haven} and all
-#' character columns are re-encoded to UTF-8 (replacing unmappable bytes with
-#' their hex escape).
-#' @param path Character. Full path to the \code{.sav} file.
-#' @return A \code{data.table} with all columns in their declared base types, or
-#'   an empty \code{data.frame()} if reading fails.
+#' Wraps \code{haven::read_sav()} with \code{tryCatch}. After loading, the
+#' \pkg{haven} S3 attributes are stripped with \code{strip_haven}, and
+#' every character column is reencoded to UTF8, replacing an unmappable
+#' byte with its hexadecimal escape.
+#' @param path Character scalar. Full path to the \code{.sav} file.
+#' @return A data.table with every column in its declared base type, or an
+#'   empty data frame when reading fails.
 #' @seealso \code{\link{safe_read_sav_chunked}}, \code{strip_haven}
 #' @examples
 #' \dontrun{
@@ -3907,110 +3985,128 @@ safe_read_sav <- function(path){
 ################################################################################################
 #### Read a large SAV file in memory-bounded chunks and write to one Parquet file per chunk ####
 ################################################################################################
-#' Read a large SAV file in memory-bounded chunks and write directly to Parquet
+#' Reads a large SAV file in chunks bounded by memory, writing each directly to Parquet
 #'
-#' For SAV files that exceed \code{SAV_ROW_THRESHOLD} rows, loading the entire
-#' file into R at once would exhaust available RAM.  This function reads the
-#' file in batches of \code{chunk_size} rows using \code{haven::read_sav(skip,
-#' n_max)}, processes each chunk in-place (strip haven, UTF-8 sanitise, column
-#' align, type enforce, non-finite replacement), converts it to an Arrow table,
-#' and writes it as an individual numbered Parquet file directly into
-#' \code{year_dir}.  Peak RAM is bounded to one chunk regardless of total file
-#' size.
+#' Reads the file in batches of \code{chunk_size} rows, using
+#' \code{haven::read_sav(skip, n_max)}, processes each chunk in place, by
+#' stripping haven attributes, sanitizing its character encoding, aligning
+#' its columns, enforcing its column types, and replacing a non finite
+#' value, converts it to an Arrow table, and writes it as an individually
+#' numbered Parquet file directly into \code{year_dir}. Peak memory use is
+#' bounded to one chunk, regardless of the total file size.
 #'
-#' Chunk files are named \code{<stem>_<NNNNN>.parquet} and stored directly in
-#' the hive-partitioned \code{year=<year_val>/} directory.  DuckDB reads all
-#' \code{*.parquet} files in that directory as a single virtual table via the
-#' glob pattern in \code{\link{register_parquet_view}}.
+#' Each chunk file is named \code{<stem>_<NNNNN>.parquet} and stored
+#' directly in the hive partitioned \code{year=<year_val>/} directory.
+#' DuckDB reads every \code{*.parquet} file in that directory as a single
+#' virtual table, through the glob pattern used by
+#' \code{\link{register_parquet_view}}.
 #'
-#' Total row count is read from the SPSS file header (\code{ncases} attribute
-#' from \code{haven::read_sav(n_max = 0)}) before the chunk loop so that
-#' \code{skip} never exceeds the declared row count (which would cause
-#' \emph{"file did not contain the expected number of rows"}).
+#' The total row count is read from the SPSS file header, the
+#' \code{ncases} attribute from \code{haven::read_sav(n_max = 0)}, before
+#' the chunk loop begins, so that \code{skip} never exceeds the declared
+#' row count.
 #'
-#' Schema conflicts across chunks (e.g. a column inferred as \code{int32} in
-#' one chunk and \code{string} in another due to mixed ICD-10 / ICD-9 codes)
-#' are resolved by promoting the conflicting field to \code{utf8} and
-#' re-casting all prior chunks.
+#' A schema conflict across chunks, for example a column read as
+#' \code{int32} in one chunk and as \code{string} in another because it
+#' mixes ICD10 and ICD9 codes, is resolved by promoting the conflicting
+#' field to \code{utf8} and recasting every prior chunk.
 #'
-#' \strong{Adaptive chunk-size reduction:} if a chunk fails (most commonly
-#' \emph{"cannot allocate vector of size ... Mb"} because \code{chunk_size} is
-#' still too large for this table's column count/width), the chunk size is
-#' reduced by \code{chunk_size_decrement} and the same offset is retried. Once
-#' a working size is found it is reused for all remaining chunks of this file,
-#' but \code{chunk_size} as passed to the next file by
-#' \code{\link{generic_db_loader}} is unaffected. If \code{min_chunk_size} is
-#' reached without success, the function falls back to \code{\link{safe_read_sav}}.
-#' @param path Character. Full path to the \code{.sav} file.
-#' @param chunk_size Integer. Number of rows per chunk.  Defaults to
+#' When a chunk fails, most commonly because \code{chunk_size} is still
+#' too large for this table's column count and width, the chunk size is
+#' reduced by \code{chunk_size_decrement} and the same offset is retried.
+#' Once a working size is found, it is reused for every remaining chunk of
+#' this file, while \code{chunk_size} as passed to the next file by
+#' \code{\link{generic_db_loader}} is unaffected. When \code{min_chunk_size}
+#' is reached without success, the function falls back to
+#' \code{\link{safe_read_sav}}.
+#' @param path Character scalar. Full path to the \code{.sav} file.
+#' @param chunk_size Integer. Number of rows per chunk. Defaults to
 #'   \code{SAV_CHUNK_SIZE} from the calling environment.
-#' @param TerminalHivePartition Logical. If \code{TRUE}, chunk files are
-#'   written to source-specific \code{batch_id=<stem>_<NNNNN>/data.parquet}
-#'   subdirectories under \code{year_dir} instead of flat
-#'   \code{<stem>_<NNNNN>.parquet} files, and \code{direct_write} (schema
-#'   alignment via \code{all_cols}/\code{col_classes} rather than the
-#'   partition-preserving path) is forced on. Default \code{FALSE}.
-#' @param year_dir Character. Full path to the hive-partitioned year
-#'   directory where chunk Parquet files will be written
-#'   (e.g. \code{"/data/parquet/NIS_Core/year=2019"}).
-#' @param out_path Character (optional). Any non-\code{NULL} value forces
-#'   \code{direct_write = TRUE} (schema alignment via \code{all_cols}); the
-#'   path string itself is not used to name output files, which are always
-#'   written under \code{year_dir}.
-#' @param all_cols Character vector (optional). Union of all columns across
-#'   years for this table, passed to \code{\link{align_columns}} when writing
-#'   directly (\code{out_path} supplied or \code{TerminalHivePartition = TRUE}).
-#' @param col_classes Named list (optional). Column class map from
-#'   \code{\link{build_col_classes}}, used for type enforcement and to derive
-#'   the reference Arrow schema for all chunks of this file.
-#' @param year_val Integer or character (optional). Derived value recorded in
-#'   legacy manifest fields when \code{YEAR} is an explicit partition key.
-#' @param chunk_size_decrement Integer (optional). Rows to subtract from the
-#'   chunk size after a chunk fails (e.g. with a memory-allocation error).
-#'   Defaults to 10\% of \code{chunk_size}. The reduction is local to this
-#'   call because \code{chunk_size} itself is unmodified, so the next file loaded
-#'   by \code{\link{generic_db_loader}} receives the original value.
-#' @param min_chunk_size Integer (optional). Smallest chunk size that will be
-#'   attempted before giving up on the chunked reader and falling back to
-#'   \code{foreign::read.spss()} for the remaining ("tail") rows. Defaults to
-#'   \code{chunk_size_decrement} (i.e. up to ~9 reductions from the original
-#'   \code{chunk_size}).
+#' @param TerminalHivePartition Logical. Accepts \code{TRUE}, which writes
+#'   chunk files to source specific
+#'   \code{batch_id=<stem>_<NNNNN>/data.parquet} subdirectories under
+#'   \code{year_dir}, instead of flat \code{<stem>_<NNNNN>.parquet} files,
+#'   and forces \code{direct_write} on, using schema alignment through
+#'   \code{all_cols} and \code{col_classes} rather than the partition
+#'   preserving path. Accepts \code{FALSE}, which does not. Defaults to
+#'   \code{FALSE}.
+#' @param year_dir Character scalar. Full path to the hive partitioned
+#'   year directory where chunk Parquet files are written, for example
+#'   \code{"/data/parquet/NIS_Core/year=2019"}.
+#' @param out_path Character scalar. Accepts a value other than
+#'   \code{NULL}, which forces \code{direct_write = TRUE}, using schema
+#'   alignment through \code{all_cols}. The path string itself is not
+#'   used to name an output file, since every output file is written
+#'   under \code{year_dir}. Defaults to \code{NULL}.
+#' @param all_cols Character vector. Union of every column across every
+#'   year of this table, passed to \code{\link{align_columns}} when
+#'   writing directly, that is, when \code{out_path} is supplied or
+#'   \code{TerminalHivePartition} is \code{TRUE}. Defaults to \code{NULL}.
+#' @param col_classes Named list. Column class map from
+#'   \code{\link{build_col_classes}}, used to enforce types and to derive
+#'   the reference Arrow schema for every chunk of this file. Defaults to
+#'   \code{NULL}.
+#' @param year_val Integer or character scalar. Value recorded in legacy
+#'   manifest fields when \code{YEAR} is an explicit partition key.
+#'   Defaults to \code{NULL}.
+#' @param chunk_size_decrement Integer. Number of rows subtracted from the
+#'   chunk size after a chunk fails, for example with a memory allocation
+#'   error. Defaults to 10 percent of \code{chunk_size}. This reduction
+#'   applies only to this call, since \code{chunk_size} itself is not
+#'   modified, so the next file loaded by \code{\link{generic_db_loader}}
+#'   receives the original value.
+#' @param min_chunk_size Integer. Smallest chunk size that is attempted
+#'   before the chunked reader gives up and falls back to
+#'   \code{foreign::read.spss()} for the remaining rows. Defaults to
+#'   \code{chunk_size_decrement}, allowing up to about nine reductions
+#'   from the original \code{chunk_size}.
 #' @param ManifestPath,Database,TableName,DuckDBTable,SourcePath,SchemaHash
-#'   Manifest bookkeeping: each written (or tail-read) chunk is recorded via
-#'   \code{\link{update_parquet_manifest}} with these identifiers, and stale
-#'   chunk files from a prior failed attempt are removed via
-#'   \code{\link{remove_parquet_manifest_rows}} using \code{SourcePath}
-#'   (defaulting to \code{path}) before the chunk loop starts.
-#' @param partition_keys Character vector. Canonical Hive partition column
-#'   name(s), e.g. \code{"YEAR"}. Used to validate and then strip the
-#'   partition column(s) out of each chunk before writing (the value lives in
-#'   the directory name, not the Parquet file). Default \code{"YEAR"}.
-#' @param partition_values Named list or data frame row (optional). Declared
-#'   partition value(s) for this file, checked against each chunk's own
-#'   partition-column values via \code{\link{validate_partition_column_values}}.
-#' @param MaxFileStemTruncate Logical. If \code{TRUE}, chunk file stems are
-#'   shortened to reduce Windows path-length failures.
-#' @param accept_partial Logical. If \code{TRUE}, a file whose total written
-#'   row count falls short of the SPSS header's declared \code{ncases} is
-#'   recorded as \code{partial_accepted} instead of stopping with a
-#'   row-count-mismatch error. Default \code{FALSE}.
-#' @param max_coerce_na_pct Numeric (optional). Passed to
-#'   \code{\link{align_columns}}/\code{enforce_col_classes} for each
-#'   chunk; fails the file when type coercion turns more than this percentage
-#'   of a column's present values into \code{NA}.
+#'   Used for manifest bookkeeping. Each written, or tail read, chunk is
+#'   recorded with \code{\link{update_parquet_manifest}} under these
+#'   identifiers, and a stale chunk file from an earlier failed attempt
+#'   is removed with \code{\link{remove_parquet_manifest_rows}}, using
+#'   \code{SourcePath}, which defaults to \code{path}, before the chunk
+#'   loop starts.
+#' @param partition_keys Character vector. Canonical hive partition
+#'   column names, for example \code{"YEAR"}. Used to validate, and then
+#'   remove, the partition columns from each chunk before writing, since
+#'   their value lives in the directory name rather than in the Parquet
+#'   file. Defaults to \code{"YEAR"}.
+#' @param partition_values Named list, or one row of a data frame.
+#'   Declared partition value for this file, checked against each
+#'   chunk's own partition column values with
+#'   \code{\link{validate_partition_column_values}}. Defaults to
+#'   \code{NULL}.
+#' @param MaxFileStemTruncate Logical. Accepts \code{TRUE}, which
+#'   shortens a chunk file's stem to reduce a Windows path length
+#'   failure. Accepts \code{FALSE}, which does not. Defaults to
+#'   \code{FALSE}.
+#' @param accept_partial Logical. Accepts \code{TRUE}, which records a
+#'   file whose total written row count falls short of the SPSS header's
+#'   declared \code{ncases} as \code{partial_accepted}, instead of
+#'   stopping with an error naming the row count mismatch. Accepts
+#'   \code{FALSE}, which stops with that error. Defaults to \code{FALSE}.
+#' @param max_coerce_na_pct Numeric scalar. Passed to
+#'   \code{\link{align_columns}} and \code{enforce_col_classes} for each
+#'   chunk. Stops the file when type coercion turns more than this
+#'   percentage of a column's present values into \code{NA}. Defaults to
+#'   \code{NULL}.
 #' @param reader_options List. Reader options forwarded to
-#'   \code{read_sav_with_options} for both the header/row-count probe
-#'   and every chunk read (e.g. \code{Encoding}). Default \code{list()}.
-#' @param RepositoryLock Repository lock handle (optional), from
-#'   \code{\link{acquire_repository_lock}}, touched via
-#'   \code{\link{touch_repository_lock}} at the start of every chunk so the
-#'   lock does not expire mid-file.
-#' @return A list with \code{written = TRUE}, \code{n_rows} (total rows
-#'   written), and \code{status} (\code{"completed"}, \code{"empty"} for a
-#'   verified zero-row source, or \code{"partial_accepted"} when
-#'   \code{accept_partial = TRUE} absorbed a row-count shortfall) on success.
-#'   A fatal chunking, schema, or row-count error stops the load (after
-#'   removing any partial chunk output already written) so the source is not
+#'   \code{read_sav_with_options} for both the header and row count probe
+#'   and every chunk read, for example \code{Encoding}. Defaults to
+#'   \code{list()}.
+#' @param RepositoryLock Repository lock handle, from
+#'   \code{\link{acquire_repository_lock}}. Touched with
+#'   \code{\link{touch_repository_lock}} at the start of every chunk, so
+#'   the lock does not expire partway through the file. Defaults to
+#'   \code{NULL}.
+#' @return A list with \code{written = TRUE}, \code{n_rows}, the total
+#'   rows written, and \code{status}, one of \code{"completed"},
+#'   \code{"empty"} for a verified zero row source, or
+#'   \code{"partial_accepted"} when \code{accept_partial = TRUE} absorbed
+#'   a row count shortfall, on success. A chunking, schema, or row count
+#'   error that is not recovered stops the load, after removing any
+#'   partial chunk output already written, so that the source is not
 #'   checkpointed.
 #' @seealso \code{\link{safe_read_sav}}, \code{strip_haven},
 #'   \code{\link{align_columns}}, \code{\link{read_delimited_chunked}}
@@ -4377,13 +4473,14 @@ safe_read_sav_chunked <- function(path, chunk_size = 1000000L, TerminalHiveParti
   })
 }
 
-#' Average on-disk bytes per row for a delimited source
+#' Computes the average number of bytes on disk per row for a delimited source
 #'
-#' Shared estimator used to translate a memory budget (MB) into a row count.
-#' Returns \code{NA_real_} when the size can't be trusted -- compressed files
-#' don't reveal their decompressed size, and a missing/zero row or byte count
-#' means there's nothing to divide -- callers should treat \code{NA} as "fall
-#' back to a conservative fixed size" rather than guessing further.
+#' Shared estimator used to translate a memory budget, in megabytes, into a
+#' row count. Returns \code{NA_real_} when the size cannot be trusted: a
+#' compressed file does not reveal its decompressed size, and a missing or
+#' zero row or byte count leaves nothing to divide. A caller treats
+#' \code{NA} as a signal to fall back to a conservative fixed size, rather
+#' than guessing further.
 #' @keywords internal
 .avg_delimited_bytes_per_row <- function(path, total_rows) {
   if (grepl("\\.gz$", path, ignore.case = TRUE)) return(NA_real_)
@@ -4416,14 +4513,14 @@ safe_read_sav_chunked <- function(path, chunk_size = 1000000L, TerminalHiveParti
   as.integer(min(requested_rows, cap_rows))
 }
 
-#' Estimated in-memory footprint (MB) for reading n_rows at a given row size
+#' Estimates the memory footprint, in megabytes, of reading n_rows at a given row size
 #' @keywords internal
 .estimate_delimited_memory_mb <- function(n_rows, avg_bytes_per_row) {
   if (!is.finite(avg_bytes_per_row)) return(Inf)
   (n_rows * avg_bytes_per_row * .DELIMITED_MEMORY_SAFETY_MULTIPLIER) / 1024^2
 }
 
-#' Normalize a raw partition column vector to sanitized directory-name strings
+#' Normalizes a raw partition column vector to sanitized directory name strings
 #' @keywords internal
 .normalize_partition_value_vector <- function(x) {
   if (is.numeric(x)) {
@@ -4439,12 +4536,13 @@ safe_read_sav_chunked <- function(path, chunk_size = 1000000L, TerminalHiveParti
   value
 }
 
-#' Read only the declared partition key column(s) of a delimited file
+#' Reads only the declared partition key columns of a delimited file
 #'
-#' Cheap narrow scan (fread's \code{select=}) used to size up each partition's
-#' row count before deciding whether it can be read as a single piece --
-#' reading a few narrow columns for every row is far cheaper than reading the
-#' full (often wide) table just to find out how it's laid out.
+#' Performs an inexpensive scan, using fread's \code{select=} argument, of
+#' each partition's row count, to decide whether it can be read as a
+#' single piece, since reading a few narrow columns for every row is far
+#' cheaper than reading the full, often wide, table just to determine how
+#' it is laid out.
 #' @keywords internal
 .read_delimited_partition_columns <- function(path, reader_options, header, partition_keys) {
   header_canonical <- canonical_colnames(header)
@@ -4460,24 +4558,24 @@ safe_read_sav_chunked <- function(path, chunk_size = 1000000L, TerminalHiveParti
   canonicalize_dataframe_names(df)
 }
 
-#' Decide how to read a source-partitioned delimited file: whole file, one
-#' partition run at a time, or memory-capped chunks
+#' Decides how to read a source partitioned delimited file, as a whole file, one partition run at a time, or in chunks capped by memory
 #'
-#' Three-tier decision, cheapest first: (1) if the whole file's estimated
-#' in-memory footprint fits \code{MaxWholeFileMemoryMB}, read it in one shot
-#' and let the caller group-and-write by partition value. (2) Otherwise, scan
-#' just the partition key column(s) (cheap even for huge files) and run-length
-#' encode them in file order; if every contiguous partition run's estimated
-#' footprint fits \code{MaxPartitionMemoryMB}, read the file one run at a time
-#' so each partition becomes as close to one piece as the file's actual
-#' layout allows. (3) Otherwise, defer to the existing fixed-size,
-#' memory-capped chunked reader -- correct regardless of how the partition
-#' values are interleaved, just potentially many small pieces.
-#' @return A list with \code{strategy} (\code{"whole_file"}, \code{"partition_aligned"},
-#'   or \code{"chunked"}), \code{chunk_row_plan} (an integer vector of row
-#'   counts to read in sequence, or \code{NULL} when the caller should fall
-#'   back to its own fixed-size stepping), and \code{message} (a log line
-#'   describing the decision).
+#' Chooses among three approaches, cheapest first. First, when the whole
+#' file's estimated memory footprint fits \code{MaxWholeFileMemoryMB}, it
+#' reads the file in one pass and leaves grouping by partition value to
+#' the caller. Otherwise, it scans only the partition key columns,
+#' inexpensive even for a huge file, and run length encodes them in file
+#' order. When every contiguous partition run's estimated footprint fits
+#' \code{MaxPartitionMemoryMB}, it reads the file one run at a time, so
+#' that each partition becomes as close to one piece as the file's actual
+#' layout allows. Otherwise, it defers to the fixed size reader capped by
+#' memory, which is correct regardless of how the partition values are
+#' interleaved, at the cost of potentially many small pieces.
+#' @return A list with \code{strategy}, one of \code{"whole_file"},
+#'   \code{"partition_aligned"}, or \code{"chunked"}, \code{chunk_row_plan},
+#'   an integer vector of row counts to read in sequence, or \code{NULL}
+#'   when the caller should fall back to its own fixed size stepping, and
+#'   \code{message}, a log line describing the decision.
 #' @keywords internal
 .plan_partition_aligned_read <- function(path, reader_options, header, partition_keys,
                                          total_rows, MaxWholeFileMemoryMB, MaxPartitionMemoryMB) {
@@ -4514,131 +4612,156 @@ safe_read_sav_chunked <- function(path, chunk_size = 1000000L, TerminalHiveParti
     base_name, whole_mb, max(run_mb)))
 }
 
-#' Stream a large delimited file to hive-partitioned Parquet in chunks
+#' Streams a large delimited file to hive partitioned Parquet in chunks
 #'
-#' Memory-bounded counterpart of \code{\link{safe_read_sav_chunked}} for the
-#' delimited family (csv/tsv/txt/gz). Reuses the same machinery: stale-chunk
-#' cleanup, per-chunk alignment against the agreed schema, partition-column
-#' validation, a reference Arrow schema so every chunk writes identical
-#' physical types, atomic writes, and per-chunk manifest rows. In ordinary
-#' memory-capped mode, the input size is used to derive a conservative row
-#' chunk. In \code{PartitionBy = "FAIL"} mode, the caller instead requests a
-#' direct-read probe followed by SAV-style adaptive chunk retries: the initial
-#' requested row chunk is attempted and is reduced only after a recoverable
-#' memory-allocation error.
+#' The counterpart of \code{\link{safe_read_sav_chunked}}, bounded by
+#' memory, for the delimited family of formats, csv, tsv, txt, and gz.
+#' Uses the same mechanisms: removing a stale chunk, aligning each chunk
+#' against the agreed schema, validating the partition columns, using one
+#' reference Arrow schema so that every chunk writes identical physical
+#' types, writing atomically, and recording one manifest row per chunk.
+#' In the ordinary mode capped by memory, the input size is used to
+#' derive a conservative row chunk. In \code{PartitionBy = "FAIL"} mode,
+#' the caller instead requests a direct read probe followed by adaptive
+#' chunk retries in the manner of \code{\link{safe_read_sav_chunked}}:
+#' the initially requested row chunk is attempted, and is reduced only
+#' after a recoverable memory allocation error.
 #'
-#' Sources configured with \code{MalformedRowPolicy="append_previous"} use the
-#' same logical-record stream as schema discovery. When a large source-defined
-#' partition cannot be read as a whole or by partition run, that one-pass stream
-#' is also used for the fixed-size fallback. This avoids repeatedly rescanning a
-#' growing prefix of the source with \code{fread(skip=...)}.
-#' @section Read strategy tiers (when \code{route_source_partitions = TRUE}):
-#' Decided by \code{\link{.plan_partition_aligned_read}}, cheapest first: (1)
-#' \code{"whole_file"} if the estimated in-memory footprint fits
-#' \code{MaxWholeFileMemoryMB}; (2) \code{"partition_aligned"} if every
-#' contiguous partition run (in file order) fits \code{MaxPartitionMemoryMB};
-#' (3) \code{"chunked"}, the fixed-size memory-capped fallback. When
-#' \code{preloaded_data} is supplied, the \code{"whole_file"} tier is used
-#' directly without re-reading the file.
-#' @param path Character. Full path to the delimited (csv/tsv/txt/gz) file.
-#' @param chunk_size Integer. Requested rows per chunk. In ordinary
-#'   memory-capped mode this is capped by \code{.effective_delimited_chunk_size}
-#'   using \code{MaxChunkMemoryMB} and the source's average bytes/row; under
-#'   \code{adaptive_chunking = TRUE} it is instead used as-is and only reduced
-#'   after a chunk actually fails.
-#' @param year_dir Character. Hive-partitioned output directory used when
-#'   \code{route_source_partitions = FALSE} (e.g.
-#'   \code{".../NIS_Core/year=2019"}).
-#' @param all_cols Character vector (optional). Union of all columns for this
-#'   table, passed to \code{\link{align_columns}} for every written piece.
-#' @param col_classes Named list (optional). Column class map from
-#'   \code{\link{build_col_classes}}; used for per-piece type enforcement,
-#'   for the typed \code{colClasses} passed to the delimited reader's
-#'   \code{read_chunk}/\code{read_full}, and to derive the reference Arrow
-#'   schema.
-#' @param year_val Integer or character (optional). Fallback \code{Year} value
-#'   recorded in the manifest when \code{"YEAR"} is not among
-#'   \code{partition_keys} (or is not present in the actual partition values).
-#' @param TerminalHivePartition Logical. If \code{TRUE}, each written piece
-#'   goes to a \code{batch_id=<stem>_<NNNNN>/data.parquet} subdirectory
-#'   instead of a flat \code{<stem>_<NNNNN>.parquet} file. Default
-#'   \code{FALSE}.
-#' @param partition_keys Character vector. Canonical Hive partition column
-#'   name(s), e.g. \code{"YEAR"}. Default \code{"YEAR"}.
-#' @param partition_values Named list or data frame row (optional). Declared
-#'   partition value(s) for this file, used (and validated against the data)
-#'   when \code{route_source_partitions = FALSE}.
-#' @param route_source_partitions Logical. If \code{TRUE} and the file's
-#'   header already contains every column named in \code{partition_keys},
-#'   rows are grouped by their own partition-key values and written straight
-#'   to their respective Hive partition directories under \code{table_dir}
-#'   (e.g. a single combined multi-year file writes to \code{year=2020/},
-#'   \code{year=2021/}, ... in one pass) instead of all being written under
-#'   one \code{year_dir}. Default \code{FALSE}.
-#' @param table_dir Character (optional). Table-level directory above the
-#'   partition directories, used when \code{route_source_partitions = TRUE}.
-#'   Derived from \code{year_dir} by stripping one directory level per entry
-#'   in \code{partition_keys} when not supplied.
-#' @param max_coerce_na_pct Numeric (optional). Passed to
-#'   \code{\link{align_columns}}; fails the file when type coercion turns
+#' A source configured with \code{MalformedRowPolicy = "append_previous"}
+#' uses the same logical record stream used for schema discovery. When a
+#' large source defined partition cannot be read as a whole or by
+#' partition run, that same single pass stream is also used for the
+#' fixed size fallback, rather than repeatedly rescanning a growing
+#' prefix of the source with \code{fread(skip = ...)}.
+#' @section Read strategy tiers (used when \code{route_source_partitions} is \code{TRUE}):
+#' Decided by \code{\link{.plan_partition_aligned_read}}, cheapest first.
+#' \code{"whole_file"} is used when the estimated memory footprint fits
+#' \code{MaxWholeFileMemoryMB}. \code{"partition_aligned"} is used when
+#' every contiguous partition run, in file order, fits
+#' \code{MaxPartitionMemoryMB}. \code{"chunked"}, the fixed size fallback
+#' capped by memory, is used otherwise. When \code{preloaded_data} is
+#' supplied, the \code{"whole_file"} tier is used directly, without
+#' reading the file again.
+#' @param path Character scalar. Full path to the delimited file, in csv,
+#'   tsv, txt, or gz format.
+#' @param chunk_size Integer. Requested rows per chunk. In the ordinary
+#'   mode capped by memory, this is capped by
+#'   \code{.effective_delimited_chunk_size}, using \code{MaxChunkMemoryMB}
+#'   and the source's average bytes per row. When \code{adaptive_chunking}
+#'   is \code{TRUE}, it is instead used as given, and reduced only after a
+#'   chunk actually fails.
+#' @param year_dir Character scalar. Hive partitioned output directory,
+#'   used when \code{route_source_partitions} is \code{FALSE}, for
+#'   example \code{".../NIS_Core/year=2019"}.
+#' @param all_cols Character vector. Union of every column for this
+#'   table, passed to \code{\link{align_columns}} for every piece
+#'   written. Defaults to \code{NULL}.
+#' @param col_classes Named list. Column class map from
+#'   \code{\link{build_col_classes}}, used to enforce the type of each
+#'   piece, for the typed \code{colClasses} passed to the delimited
+#'   reader's \code{read_chunk} and \code{read_full}, and to derive the
+#'   reference Arrow schema. Defaults to \code{NULL}.
+#' @param year_val Integer or character scalar. Fallback \code{Year}
+#'   value recorded in the manifest when \code{"YEAR"} is not among
+#'   \code{partition_keys}, or is not present in the actual partition
+#'   values. Defaults to \code{NULL}.
+#' @param TerminalHivePartition Logical. Accepts \code{TRUE}, which
+#'   writes each piece to a \code{batch_id=<stem>_<NNNNN>/data.parquet}
+#'   subdirectory instead of a flat \code{<stem>_<NNNNN>.parquet} file.
+#'   Accepts \code{FALSE}, which does not. Defaults to \code{FALSE}.
+#' @param partition_keys Character vector. Canonical hive partition
+#'   column names, for example \code{"YEAR"}. Defaults to \code{"YEAR"}.
+#' @param partition_values Named list, or one row of a data frame.
+#'   Declared partition value for this file, used, and validated against
+#'   the data, when \code{route_source_partitions} is \code{FALSE}.
+#'   Defaults to \code{NULL}.
+#' @param route_source_partitions Logical. Accepts \code{TRUE}, which,
+#'   when the file's header already contains every column named in
+#'   \code{partition_keys}, groups rows by their own partition key values
+#'   and writes them directly to their respective hive partition
+#'   directories under \code{table_dir}, for example a single file
+#'   spanning several years writes to \code{year=2020/},
+#'   \code{year=2021/}, and so on, in one pass, instead of writing
+#'   everything under one \code{year_dir}. Accepts \code{FALSE}, which
+#'   does not. Defaults to \code{FALSE}.
+#' @param table_dir Character scalar. Table level directory above the
+#'   partition directories, used when \code{route_source_partitions} is
+#'   \code{TRUE}. Defaults to \code{NULL}, which derives it from
+#'   \code{year_dir} by removing one directory level for each entry of
+#'   \code{partition_keys}.
+#' @param max_coerce_na_pct Numeric scalar. Passed to
+#'   \code{\link{align_columns}}. Stops the file when type coercion turns
 #'   more than this percentage of a column's values into \code{NA}.
+#'   Defaults to \code{NULL}.
 #' @param ManifestPath,Database,TableName,DuckDBTable,SourcePath,SchemaHash
-#'   Manifest bookkeeping passed through to \code{\link{update_parquet_manifest}}
-#'   for each written piece, and used to remove stale chunk rows (via
-#'   \code{\link{remove_parquet_manifest_rows}}, keyed on \code{SourcePath}
-#'   defaulting to \code{path}) before the read loop starts.
-#' @param MaxFileStemTruncate Logical. If \code{TRUE}, chunk file stems are
-#'   shortened to reduce Windows path-length failures.
-#' @param MaxChunkMemoryMB Numeric. Per-chunk memory cap (MB) used to derive
-#'   the effective chunk row count via
-#'   \code{.effective_delimited_chunk_size} in ordinary (non-adaptive)
-#'   mode, and as the fallback per-partition budget
-#'   (\code{MaxPartitionMemoryMB}) when neither it nor
-#'   \code{MaxWholeFileMemoryMB} is supplied. Default \code{256L}.
-#' @param MaxWholeFileMemoryMB Numeric (optional). Whole-file memory budget
-#'   (MB) for the \code{"whole_file"} read-strategy tier under
-#'   \code{route_source_partitions = TRUE}. \code{NULL} disables that tier
-#'   (and the \code{"partition_aligned"} tier, which is only attempted when a
-#'   whole-file budget is configured).
-#' @param MaxPartitionMemoryMB Numeric (optional). Per-partition memory
-#'   budget (MB) for the \code{"partition_aligned"} tier. Defaults to half of
-#'   \code{MaxWholeFileMemoryMB} when that is supplied, else
-#'   \code{MaxChunkMemoryMB}.
-#' @param chunk_size_decrement Integer (optional). Rows to subtract from the
-#'   chunk size after a chunk fails with a recoverable memory error (relevant
-#'   to \code{adaptive_chunking = TRUE} or the fixed-size fallback tier).
-#'   Defaults to 10\% of the (possibly memory-capped) chunk size.
-#' @param min_chunk_size Integer (optional). Smallest chunk size that will be
-#'   attempted before giving up and propagating the error. Defaults to
+#'   Used for manifest bookkeeping, passed through to
+#'   \code{\link{update_parquet_manifest}} for each piece written, and
+#'   used to remove a stale chunk row, with
+#'   \code{\link{remove_parquet_manifest_rows}}, keyed on
+#'   \code{SourcePath}, which defaults to \code{path}, before the read
+#'   loop starts.
+#' @param MaxFileStemTruncate Logical. Accepts \code{TRUE}, which
+#'   shortens a chunk file's stem to reduce a Windows path length
+#'   failure. Accepts \code{FALSE}, which does not. Defaults to
+#'   \code{FALSE}.
+#' @param MaxChunkMemoryMB Numeric. Memory cap, in megabytes, per chunk,
+#'   used to derive the effective chunk row count with
+#'   \code{.effective_delimited_chunk_size} in the ordinary mode, that
+#'   is, when \code{adaptive_chunking} is \code{FALSE}, and used as the
+#'   fallback budget per partition, \code{MaxPartitionMemoryMB}, when
+#'   neither it nor \code{MaxWholeFileMemoryMB} is supplied. Defaults to
+#'   \code{256}.
+#' @param MaxWholeFileMemoryMB Numeric scalar. Memory budget, in
+#'   megabytes, for the whole file, for the \code{"whole_file"} read
+#'   strategy tier, used when \code{route_source_partitions} is
+#'   \code{TRUE}. Defaults to \code{NULL}, which disables that tier, and
+#'   also disables the \code{"partition_aligned"} tier, which is
+#'   attempted only when a whole file budget is configured.
+#' @param MaxPartitionMemoryMB Numeric scalar. Memory budget, in
+#'   megabytes, per partition, for the \code{"partition_aligned"} tier.
+#'   Defaults to half of \code{MaxWholeFileMemoryMB} when that is
+#'   supplied, and otherwise to \code{MaxChunkMemoryMB}.
+#' @param chunk_size_decrement Integer. Number of rows subtracted from
+#'   the chunk size after a chunk fails with a recoverable memory error,
+#'   relevant when \code{adaptive_chunking} is \code{TRUE} or in the
+#'   fixed size fallback tier. Defaults to 10 percent of the, possibly
+#'   memory capped, chunk size.
+#' @param min_chunk_size Integer. Smallest chunk size that is attempted
+#'   before the function gives up and signals the error. Defaults to
 #'   \code{chunk_size_decrement}.
-#' @param adaptive_chunking Logical. If \code{TRUE}, skip the
-#'   \code{MaxChunkMemoryMB}-based sizing and instead start at the requested
-#'   \code{chunk_size}, reducing it only after a chunk read actually fails
-#'   with a recoverable memory-allocation error (the \code{PartitionBy =
-#'   "FAIL"} fallback behavior). Default \code{FALSE}.
-#' @param preloaded_data Data frame (optional). A whole-file read already
-#'   performed by the caller (e.g. the isolated-subprocess direct-read probe
-#'   under \code{FailProbeMode = "subprocess"}); when supplied, the file is
-#'   not read again -- \code{preloaded_data} is processed directly via the
-#'   \code{"whole_file"} strategy (partition routing/validation and Parquet
-#'   writing still happen normally).
-#' @param reader Character. Registered delimited reader name (see
-#'   \code{\link{get_file_reader}}), e.g. \code{"csv"} (default). Must have a
-#'   \code{read_chunk} callback.
+#' @param adaptive_chunking Logical. Accepts \code{TRUE}, which skips the
+#'   sizing based on \code{MaxChunkMemoryMB} and instead starts at the
+#'   requested \code{chunk_size}, reducing it only after a chunk read
+#'   actually fails with a recoverable memory allocation error, the
+#'   fallback behavior for \code{PartitionBy = "FAIL"}. Accepts
+#'   \code{FALSE}, which does not. Defaults to \code{FALSE}.
+#' @param preloaded_data Data frame. A whole file read already performed
+#'   by the caller, for example the isolated subprocess direct read
+#'   probe under \code{FailProbeMode = "subprocess"}. Accepts such a
+#'   data frame, which is processed directly with the \code{"whole_file"}
+#'   strategy, so that the file is not read again, while partition
+#'   routing, validation, and writing to Parquet still happen normally.
+#'   Accepts \code{NULL}, which reads the file. Defaults to \code{NULL}.
+#' @param reader Character scalar. Registered delimited reader name, as
+#'   registered with \code{\link{get_file_reader}}, for example
+#'   \code{"csv"}. Must have a \code{read_chunk} callback. Defaults to
+#'   \code{"csv"}.
 #' @param reader_options List. Reader options forwarded to the reader's
-#'   \code{read_header}/\code{count_rows}/\code{read_full}/\code{read_chunk}
-#'   callbacks (e.g. \code{Encoding}, \code{Delimiter}). Default
-#'   \code{list()}.
-#' @param RepositoryLock Repository lock handle (optional), from
-#'   \code{\link{acquire_repository_lock}}, touched via
-#'   \code{\link{touch_repository_lock}} periodically during long reads so
-#'   the lock does not expire mid-file.
-#' @return A list with \code{written = TRUE}, \code{n_rows} (total rows
-#'   written), \code{status = "completed"}, and \code{partitions} (a
-#'   data.table of the distinct partition key/value/directory combinations
-#'   written to, one row per partition when \code{route_source_partitions =
-#'   TRUE}). A fatal read, schema, or row-count error stops the load (after
-#'   removing any partial chunk output already written) so the source is not
+#'   \code{read_header}, \code{count_rows}, \code{read_full}, and
+#'   \code{read_chunk} callbacks, for example \code{Encoding} and
+#'   \code{Delimiter}. Defaults to \code{list()}.
+#' @param RepositoryLock Repository lock handle, from
+#'   \code{\link{acquire_repository_lock}}. Touched with
+#'   \code{\link{touch_repository_lock}} periodically during a long
+#'   read, so the lock does not expire partway through the file.
+#'   Defaults to \code{NULL}.
+#' @return A list with \code{written = TRUE}, \code{n_rows}, the total
+#'   rows written, \code{status = "completed"}, and \code{partitions}, a
+#'   data.table of the distinct combinations of partition key, value,
+#'   and directory written to, one row per partition, when
+#'   \code{route_source_partitions = TRUE}. A read, schema, or row count
+#'   error that is not recovered stops the load, after removing any
+#'   partial chunk output already written, so that the source is not
 #'   checkpointed.
 #' @seealso \code{\link{safe_read_sav_chunked}}, \code{\link{align_columns}},
 #'   \code{\link{get_file_reader}}
@@ -5072,42 +5195,46 @@ safe_read_csv <- function(path) {
 ################################################################################
 #### Column inventory ##########################################################
 ################################################################################
-#' Build the union of column names for each table across all source files
+#' Builds the union of column names for each table across all source files
 #'
-#' Reads only the column headers (zero rows) from every file in parallel and
-#' groups the results by table suffix.  The output is a named list where each
-#' element is the union of all column names seen across every year-file for
-#' that table.  This union is used by \code{\link{align_columns}} to ensure
-#' that all year-files for a table share the same column set when row-bound
-#' together.
+#' Reads only the column headers, with zero rows, from every file, in
+#' parallel, and groups the results by table suffix. The output is a
+#' named list where each element is the union of every column name seen
+#' across every year file for that table, used by
+#' \code{\link{align_columns}} to give every year file of a table the
+#' same column set before they are row bound together.
 #'
-#' Parallelism is scoped within this function (see
-#' \code{\link{build_col_classes}} for details).
-#' @param files        Character vector of file paths (full paths when
-#'   \code{base_path = ""}, relative otherwise).
-#' @param base_path    Character scalar. Prepended to each element of
-#'   \code{files} when non-empty.  Pass \code{""} when \code{files} already
-#'   contains full paths.
-#' @param suffixes     Character vector (parallel to \code{files}). Table-name
-#'   suffix for each file (e.g. \code{"Core"}, \code{"Severity"}).
-#' @param uni_suffixes Character vector. Unique values of \code{suffixes};
+#' A parallel scan activates a \code{multisession} plan only for the
+#' duration of the scan, and restores the previous plan immediately
+#' afterward, in the manner of \code{\link{build_col_classes}}.
+#' @param files Character vector of file paths. Full paths when
+#'   \code{base_path} is \code{""}, and relative to \code{base_path}
+#'   otherwise.
+#' @param base_path Character scalar. Prepended to each element of
+#'   \code{files} when not empty. Pass \code{""} when \code{files}
+#'   already contains full paths.
+#' @param suffixes Character vector, parallel to \code{files}. Table
+#'   name suffix for each file, for example \code{"Core"} or
+#'   \code{"Severity"}.
+#' @param uni_suffixes Character vector. Unique values of \code{suffixes},
 #'   used as the names of the returned list.
-#' @param reader       Character scalar or vector. Registered reader name(s)
-#'   (see \code{\link{get_file_reader}}), e.g. \code{"sav"} or \code{"csv"}. A
-#'   single value is recycled across all \code{files}; otherwise it must have
-#'   one entry per file.
-#' @param n_workers    Integer. Number of parallel \code{future::multisession}
-#'   workers to use for the header scan. \code{1} (the default) scans
-#'   serially in the current process.
-#' @param reader_options List (optional). One reader-options list per file
-#'   (recycled as an empty list per file when \code{NULL}), forwarded to
-#'   each reader's \code{read_header} callback.
-#' @param strict_read  Logical. If \code{TRUE} (default), a header-scan
-#'   failure for any file stops with an error. If \code{FALSE}, failed files
-#'   are logged and skipped (contributing no columns) so the union can still
-#'   be built from the readable files.
-#' @return A named list where each element is a character vector of column
-#'   names (the union across all files for that table suffix).
+#' @param reader Character scalar or vector. Registered reader name, or
+#'   one name per file, as registered with \code{\link{get_file_reader}},
+#'   for example \code{"sav"} or \code{"csv"}. A single value is
+#'   recycled across every file.
+#' @param n_workers Integer. Number of parallel \code{future::multisession}
+#'   workers to use for the header scan. Accepts \code{1}, which scans
+#'   serially in the current process. Defaults to \code{1}.
+#' @param reader_options List. One reader options list per file, forwarded
+#'   to each reader's \code{read_header} callback. Defaults to \code{NULL},
+#'   which uses an empty list for every file.
+#' @param strict_read Logical. Accepts \code{TRUE}, which stops with an
+#'   error when the header scan fails for any file. Accepts \code{FALSE},
+#'   which logs and skips a failed file, contributing no columns from it,
+#'   so the union can still be built from the readable files. Defaults to
+#'   \code{TRUE}.
+#' @return A named list where each element is a character vector of
+#'   column names, the union across every file for that table suffix.
 #' @seealso \code{\link{build_col_classes}}, \code{\link{align_columns}},
 #'   \code{\link{get_file_reader}}
 #' @examples
@@ -5180,15 +5307,15 @@ build_comprehensive <- function(files, base_path, suffixes, uni_suffixes, reader
 ################################################################################
 #### Checkpoint system #########################################################
 ################################################################################
-#' Load the completed-files checkpoint from disk
+#' Loads the completed files checkpoint from disk
 #'
-#' Reads the RDS file at \code{path} and returns its contents.  If the file
-#' does not exist, prints a warning and returns \code{character(0)} so the
-#' loader starts fresh.
-#' @param path Character. Path to the checkpoint \code{.rds} file.  Defaults
-#'   to \code{CheckpointPath} from the calling environment.
-#' @return A character vector of relative file paths that have already been
-#'   successfully loaded, or \code{character(0)} if no checkpoint exists.
+#' Reads the RDS file at \code{path} and returns its contents. When the
+#' file does not exist, prints a warning and returns \code{character(0)},
+#' so that the loader starts fresh.
+#' @param path Character scalar. Path to the checkpoint \code{.rds} file.
+#'   Defaults to \code{CheckpointPath} from the calling environment.
+#' @return A character vector of the relative file paths already loaded
+#'   successfully, or \code{character(0)} when no checkpoint exists.
 #' @seealso \code{\link{save_checkpoint}}
 #' @examples
 #' \dontrun{
@@ -5217,19 +5344,21 @@ load_checkpoint <- function(path){
   character(0)
 }
 
-#' Atomically save the completed-file checkpoint
+#' Saves the completed file checkpoint atomically
 #'
-#' Writes the checkpoint to a temporary file in the same directory and then
-#' renames it into place. This greatly reduces the chance of a corrupted
-#' checkpoint if R stops during saveRDS() or a network drive briefly disconnects.
-#' @param checkpoint Character vector of completed source-file keys/paths.
-#'   Duplicates are dropped (via \code{unique()}) before writing.
-#' @param path Destination .rds checkpoint path. Its directory is created if
-#'   needed; a previous generation at this path is preserved as
-#'   \code{<path>.previous} before being overwritten (see
-#'   \code{\link{load_checkpoint}}).
-#' @return \code{invisible(TRUE)} on success. Stops if the checkpoint cannot
-#'   be verified by reading it back before or after the atomic replace.
+#' Writes the checkpoint to a temporary file in the same directory, and
+#' then renames it into place, which greatly reduces the chance of a
+#' corrupted checkpoint when R stops during \code{saveRDS()} or a network
+#' drive briefly disconnects.
+#' @param checkpoint Character vector of completed source file keys or
+#'   paths. A duplicate is dropped, with \code{unique()}, before writing.
+#' @param path Destination \code{.rds} checkpoint path. Its directory is
+#'   created when needed. A previous generation already at this path is
+#'   kept as \code{<path>.previous} before being overwritten, see
+#'   \code{\link{load_checkpoint}}.
+#' @return \code{invisible(TRUE)} on success. Stops when the checkpoint
+#'   cannot be verified by reading it back, either before or after the
+#'   atomic replacement.
 #' @seealso \code{\link{load_checkpoint}}
 #' @examples
 #' tmp_checkpoint <- tempfile(fileext = ".rds")
@@ -5266,22 +5395,31 @@ repository_lock_path_default <- function(ParquetBasePath) {
   file.path(dirname(ParquetBasePath), ".repository.lock")
 }
 
-#' Acquire the single-writer repository lock
+#' Acquires the single writer repository lock
 #'
-#' @param LockPath Directory path used as the lock (created atomically).
-#' @param stale_minutes Numeric. A lock whose heartbeat is older than this is
-#'   considered abandoned (crashed run) and is taken over with a log message.
-#'   The loader heartbeats after every completed file, so set this comfortably
-#'   above the longest single-file load you expect. Default 720 (12 h).
-#' @param owner_note Optional free text recorded in the owner file.
-#' @param LogPath Character (optional). Log file to write to. Without it,
-#'   \code{log_msg()} falls back to whatever \code{LogPath} (if any) happens
-#'   to be in scope in the caller, which is unset when this is called
-#'   standalone (e.g. interactively, outside a \code{ParquetBackEndCreate()}
-#'   run) -- pass it explicitly to log deterministically.
+#' Creates the lock directory at \code{LockPath} atomically, so that at
+#' most one loader run holds it at a time. Stops with an error naming the
+#' current holder when another live run already holds the lock, unless
+#' that lock's heartbeat is older than \code{stale_minutes}, in which case
+#' it is taken over.
+#' @param LockPath Character scalar. Directory path used as the lock,
+#'   created atomically.
+#' @param stale_minutes Numeric scalar. Age, in minutes, beyond which a
+#'   lock's heartbeat is treated as abandoned, from a crashed run, and is
+#'   taken over, with a log message. The loader sends a heartbeat after
+#'   every completed file, so set this comfortably above the longest
+#'   single file load expected. Defaults to \code{720}, twelve hours.
+#' @param owner_note Character scalar. Free text recorded in the lock's
+#'   owner file. Defaults to \code{""}.
+#' @param LogPath Character scalar. Log file to write to. Accepts a file
+#'   path, which is used for this call. Accepts \code{NULL}, which uses
+#'   whatever \code{LogPath} happens to be in scope in the caller, unset
+#'   when this is called on its own, for example interactively, outside
+#'   a \code{ParquetBackEndCreate()} run. Pass it explicitly to log
+#'   deterministically in that case. Defaults to \code{NULL}.
 #' @return A \code{repository_lock} object to pass to
-#'   \code{\link{release_repository_lock}}. Stops if another live run holds
-#'   the lock.
+#'   \code{\link{release_repository_lock}}. Stops when another live run
+#'   holds the lock.
 #' @seealso \code{\link{release_repository_lock}}, \code{\link{touch_repository_lock}}
 #' @examples
 #' lock_path <- tempfile("repo_lock_")
@@ -5325,18 +5463,19 @@ acquire_repository_lock <- function(LockPath, stale_minutes = 720, owner_note = 
                LockPath, LockPath))
 }
 
-#' Heartbeat the repository lock so it does not go stale mid-run
+#' Sends a heartbeat for the repository lock so it does not go stale during a run
 #'
 #' Updates the modification time of the lock's owner file to the current
-#' time. Call this periodically during a long-running operation (e.g. once
-#' per chunk or per file) so \code{\link{acquire_repository_lock}}'s
-#' \code{stale_minutes} check does not mistake a slow-but-alive run for a
-#' crashed one.
+#' time. Called periodically during a long running operation, for example
+#' once per chunk or per file, so that
+#' \code{\link{acquire_repository_lock}}'s \code{stale_minutes} check does
+#' not mistake a slow but active run for a crashed one.
 #' @param lock A \code{repository_lock} object from
-#'   \code{\link{acquire_repository_lock}}, or \code{NULL}/any other value
-#'   (silently a no-op, so callers can pass an optional lock through without
-#'   checking for \code{NULL} first).
-#' @return \code{invisible(NULL)}. Called for its side effect.
+#'   \code{\link{acquire_repository_lock}}. Accepts such an object, whose
+#'   owner file's modification time is updated. Accepts \code{NULL} or
+#'   any other value, which does nothing, so that a caller can pass an
+#'   optional lock through without checking for \code{NULL} first.
+#' @return \code{invisible(NULL)}.
 #' @seealso \code{\link{acquire_repository_lock}}, \code{\link{release_repository_lock}}
 #' @examples
 #' lock_path <- tempfile("repo_lock_")
@@ -5352,25 +5491,28 @@ touch_repository_lock <- function(lock) {
   invisible(NULL)
 }
 
-#' Release the single-writer repository lock
+#' Releases the single writer repository lock
 #'
-#' Pass the object returned by \code{\link{acquire_repository_lock}} (only the
-#' owning run's token releases), or a path with \code{force = TRUE} to remove
-#' an abandoned lock by hand.
+#' Removes the lock directory created with
+#' \code{\link{acquire_repository_lock}}.
 #' @param lock A \code{repository_lock} object from
-#'   \code{\link{acquire_repository_lock}}, or (with \code{force = TRUE}) a
-#'   character path to the lock directory.
-#' @param force Logical. If \code{FALSE} (default), \code{lock} must be a
-#'   \code{repository_lock} object and is only released when its token
-#'   matches the current owner file (i.e. this run still holds it). If
-#'   \code{TRUE}, the lock directory is removed unconditionally -- use this
-#'   to clear an abandoned lock from another crashed run.
-#' @param LogPath Character (optional). Log file to write to. See
-#'   \code{\link{acquire_repository_lock}} for why this matters when calling
-#'   standalone.
-#' @return Invisibly, \code{TRUE} if the lock was released (or already
-#'   absent), or \code{FALSE} if it is currently held by a different run and
-#'   \code{force = FALSE}.
+#'   \code{\link{acquire_repository_lock}}. Accepts such an object, which
+#'   is released only when its token matches the current owner file,
+#'   that is, when this run still holds the lock, unless \code{force} is
+#'   \code{TRUE}. Also accepts, when \code{force} is \code{TRUE}, a
+#'   character path to the lock directory, to remove an abandoned lock
+#'   by hand.
+#' @param force Logical. Accepts \code{FALSE}, which requires \code{lock}
+#'   to be a \code{repository_lock} object and releases it only when its
+#'   token matches the current owner file. Accepts \code{TRUE}, which
+#'   removes the lock directory unconditionally, to clear an abandoned
+#'   lock left by another, crashed run. Defaults to \code{FALSE}.
+#' @param LogPath Character scalar. Log file to write to. See
+#'   \code{\link{acquire_repository_lock}} for why this matters when
+#'   this is called on its own. Defaults to \code{NULL}.
+#' @return Invisibly, \code{TRUE} when the lock was released, or was
+#'   already absent. \code{FALSE} when it is currently held by a
+#'   different run and \code{force} is \code{FALSE}.
 #' @seealso \code{\link{acquire_repository_lock}}, \code{\link{touch_repository_lock}}
 #' @examples
 #' lock_path <- tempfile("repo_lock_")
@@ -5403,21 +5545,22 @@ release_repository_lock <- function(lock, force = FALSE, LogPath = NULL) {
 #### Repository state snapshots ################################################
 ################################################################################
 
-#' Snapshot the repository's bookkeeping files before a run
+#' Copies the repository's bookkeeping files into a timestamped snapshot before a run
 #'
-#' Copies the small state files that encode everything the loader knows --
-#' checkpoint (.rds), manifest (.csv), schema catalog (plus its Labels sibling
-#' when the catalog is CSV), and schema registry -- into a timestamped
-#' subfolder of \code{BackupDir}. Together these are a few hundred KB, but
-#' they are the difference between \code{\link{audit_repository}} findings
-#' being merely detectable and being recoverable. Retention keeps the newest
-#' \code{keep_last} snapshots and removes older ones.
-#' @param CheckpointPath,ManifestPath,TableSchemaPath,SchemaRegistryPath State
-#'   file paths; NULL or missing files are skipped silently.
-#' @param BackupDir Character. Snapshot root, e.g.
+#' Copies the small state files that record everything the loader knows,
+#' the checkpoint, as \code{.rds}, the manifest, as \code{.csv}, the
+#' schema catalog, together with its Labels sibling when the catalog is
+#' a CSV file, and the schema registry, into a timestamped subfolder of
+#' \code{BackupDir}. Retention keeps the newest \code{keep_last}
+#' snapshots and removes an older one.
+#' @param CheckpointPath,ManifestPath,TableSchemaPath,SchemaRegistryPath
+#'   State file paths. A \code{NULL} or missing file is skipped silently.
+#' @param BackupDir Character scalar. Snapshot root, for example
 #'   \code{<FormattedDBPath>/StateBackups}.
-#' @param keep_last Integer. Snapshots to retain (default 20).
-#' @return Invisibly, the snapshot directory path (or NULL if nothing to copy).
+#' @param keep_last Integer. Number of snapshots to retain. Defaults to
+#'   \code{20}.
+#' @return Invisibly, the snapshot directory path, or \code{NULL} when
+#'   there was nothing to copy.
 #' @seealso \code{\link{audit_repository}}
 #' @examples
 #' tmp_checkpoint <- tempfile(fileext = ".rds")
@@ -5456,38 +5599,46 @@ snapshot_repository_state <- function(CheckpointPath = NULL, ManifestPath = NULL
   invisible(snap_dir)
 }
 
-#' Migrate checkpoint and manifest entries after renaming a table in the MDT
+#' Migrates checkpoint and manifest entries after renaming a table in the MDT
 #'
-#' Changing a row's \code{TableName} in the workbook (e.g. normalizing
-#' \code{NRD_CORE} to \code{NRD_Core} after a case-collision preflight error)
-#' changes that row's checkpoint identity, so already-loaded files would be
-#' re-ingested. This helper rewrites the affected checkpoint entries (both the
-#' generalized and legacy key formats) and the manifest's TableName/DuckDBTable
-#' fields in place, so completed files stay completed under the new name.
-#' Run it once on the loading machine after editing the workbook; the MDT you
-#' pass must already carry the NEW TableName.
-#' @param CheckpointPath Character. Checkpoint .rds path.
+#' Changing a row's \code{TableName} in the workbook, for example
+#' normalizing \code{NRD_CORE} to \code{NRD_Core} after a preflight error
+#' about a case collision, changes that row's checkpoint identity, so an
+#' already loaded file would be loaded again. This function rewrites the
+#' affected checkpoint entries, in both the generalized and legacy key
+#' formats, and the manifest's \code{TableName} and \code{DuckDBTable}
+#' fields, in place, so that a completed file stays completed under the
+#' new name. Run it once on the loading machine after editing the
+#' workbook. The \code{MDT} passed to it must already carry the new
+#' \code{TableName}.
+#' @param CheckpointPath Character scalar. Path to the checkpoint
+#'   \code{.rds} file.
 #' @param MDT Data frame. Workbook rows already using \code{NewTableName}.
-#' @param Database,OldTableName,NewTableName Character. The rename to migrate.
-#' @param ManifestPath Character (optional). Manifest CSV to rewrite too.
-#' @param DryRun Logical. TRUE (default) reports what would change.
-#' @param ParquetBasePath Character (optional). Root of the Parquet store.
-#'   When supplied and the physical table directory name actually changes,
-#'   the on-disk directory is renamed from \code{OldPhysicalTableName} to
-#'   \code{NewPhysicalTableName} (via a same-filesystem intermediate rename)
-#'   and the manifest's \code{ParquetPath} entries for this table are
-#'   rewritten to match. Without it, only the checkpoint/manifest bookkeeping
-#'   is migrated -- no files move.
-#' @param OldPhysicalTableName Character (optional). Physical Parquet
+#' @param Database,OldTableName,NewTableName Character scalars. The
+#'   rename to migrate.
+#' @param ManifestPath Character scalar. Manifest CSV to rewrite too.
+#'   Defaults to \code{NULL}, which does not rewrite a manifest.
+#' @param DryRun Logical. Accepts \code{TRUE}, which reports what would
+#'   change without writing anything. Accepts \code{FALSE}, which writes
+#'   the change. Defaults to \code{TRUE}.
+#' @param ParquetBasePath Character scalar. Root of the Parquet store.
+#'   Accepts a path, such that when the physical table directory name
+#'   actually changes, the directory on disk is renamed from
+#'   \code{OldPhysicalTableName} to \code{NewPhysicalTableName}, through
+#'   an intermediate rename on the same file system, and the manifest's
+#'   \code{ParquetPath} entries for this table are rewritten to match.
+#'   Accepts \code{NULL}, in which case only the checkpoint and manifest
+#'   bookkeeping is migrated, and no file moves. Defaults to \code{NULL}.
+#' @param OldPhysicalTableName Character scalar. Physical Parquet
 #'   directory name before the rename. Defaults to
 #'   \code{paste(Database, OldTableName, sep = "_")}.
-#' @param NewPhysicalTableName Character (optional). Physical Parquet
-#'   directory name after the rename. Defaults to the physical table name
-#'   derived from \code{MDT}'s (already-renamed) rows via
+#' @param NewPhysicalTableName Character scalar. Physical Parquet
+#'   directory name after the rename. Defaults to the physical table
+#'   name derived from the already renamed rows of \code{MDT}, with
 #'   \code{repository_table_name_for_row}.
 #' @return Invisibly, a list with \code{n_checkpoint_migrated} and
-#'   \code{n_manifest_migrated} (counts of entries updated, or that would be
-#'   updated under \code{DryRun = TRUE}).
+#'   \code{n_manifest_migrated}, the number of entries updated, or that
+#'   would be updated when \code{DryRun} is \code{TRUE}.
 #' @seealso \code{\link{reset_table_for_reload}}, \code{\link{load_checkpoint}}
 #' @examples
 #' #### MDT already carries the NEW TableName ("Core") ####
@@ -5576,35 +5727,43 @@ rename_checkpoint_table <- function(CheckpointPath, MDT, Database, OldTableName,
   invisible(list(n_checkpoint_migrated = n_ckpt, n_manifest_migrated = n_manifest))
 }
 
-#' Reset one table so the loader rewrites it under the current schema registry
+#' Resets one table so the loader rewrites it under the current schema registry
 #'
-#' Parquet files written before the schema registry existed (or under an older
-#' registry) keep their original column types forever, because the checkpoint
-#' marks their source files complete and the loader never revisits them. This
-#' is how type mismatches such as \code{KEY_NIS} being \code{DOUBLE} in one
-#' table and \code{VARCHAR} in another survive a registry fix. This function
-#' clears everything the loader uses to consider the table done -- its Parquet
-#' directory, its checkpoint entries (both key-based and legacy path-based),
-#' and its manifest rows -- so the next \code{\link{ParquetBackEndCreate}} run
+#' A Parquet file written before the schema registry existed, or under an
+#' older registry, keeps its original column types indefinitely, because
+#' the checkpoint marks its source file complete and the loader never
+#' revisits it. This is how a type mismatch, such as \code{KEY_NIS} being
+#' \code{DOUBLE} in one table and \code{VARCHAR} in another, survives a
+#' fix to the registry. This function clears everything the loader uses
+#' to consider the table done, its Parquet directory, its checkpoint
+#' entries, in both the key based and legacy path based formats, and its
+#' manifest rows, so that the next \code{\link{ParquetBackEndCreate}} run
 #' rebuilds it from source with the current registry types.
-#' @param MDT Data frame. Master Database Table containing the rows for the
-#'   table being reset (used to derive checkpoint keys).
-#' @param Database Character. Database prefix (e.g. \code{"NIS"}).
-#' @param TableName Character. Table suffix (e.g. \code{"Core"}); together
-#'   these identify the DuckDB table \code{<Database>_<TableName>}.
-#' @param ParquetBasePath Character. Root directory of the Parquet store.
-#' @param CheckpointPath Character. Path to the checkpoint \code{.rds} file.
-#' @param ManifestPath Character (optional). Parquet manifest CSV; its rows for
-#'   this table are removed when provided.
-#' @param DryRun Logical. If \code{TRUE} (default), only reports what would be
-#'   deleted. Pass \code{FALSE} to actually delete.
-#' @param LogPath Character (optional). Log file to write to. Without it,
-#'   \code{log_msg()} falls back to whatever \code{LogPath} (if any) happens
-#'   to be in scope in the caller, which is unset when this is called
-#'   standalone (e.g. interactively, outside a \code{ParquetBackEndCreate()}
-#'   run) -- pass it explicitly to log deterministically.
-#' @return Invisibly, a list with \code{parquet_dir}, \code{n_checkpoint_removed},
-#'   and \code{n_manifest_removed}.
+#' @param MDT Data frame. Master Database Table containing the rows for
+#'   the table being reset, used to derive checkpoint keys.
+#' @param Database Character scalar. Database prefix, for example
+#'   \code{"NIS"}.
+#' @param TableName Character scalar. Table suffix, for example
+#'   \code{"Core"}. Together with \code{Database}, this identifies the
+#'   DuckDB table \code{<Database>_<TableName>}.
+#' @param ParquetBasePath Character scalar. Root directory of the
+#'   Parquet store.
+#' @param CheckpointPath Character scalar. Path to the checkpoint
+#'   \code{.rds} file.
+#' @param ManifestPath Character scalar. Parquet manifest CSV. Accepts a
+#'   path, whose rows for this table are removed. Accepts \code{NULL},
+#'   which does not remove any manifest row. Defaults to \code{NULL}.
+#' @param DryRun Logical. Accepts \code{TRUE}, which only reports what
+#'   would be deleted. Accepts \code{FALSE}, which deletes it. Defaults
+#'   to \code{TRUE}.
+#' @param LogPath Character scalar. Log file to write to. Accepts a file
+#'   path, which is used for this call. Accepts \code{NULL}, which uses
+#'   whatever \code{LogPath} happens to be in scope in the caller, unset
+#'   when this is called on its own, for example interactively, outside
+#'   a \code{ParquetBackEndCreate()} run. Pass it explicitly to log
+#'   deterministically in that case. Defaults to \code{NULL}.
+#' @return Invisibly, a list with \code{parquet_dir},
+#'   \code{n_checkpoint_removed}, and \code{n_manifest_removed}.
 #' @seealso \code{\link{load_schema_registry}}, \code{\link{ParquetBackEndCreate}},
 #'   \code{\link{rename_checkpoint_table}}
 #' @examples
@@ -5668,46 +5827,57 @@ normalize_repo_path <- function(x) {
   if (.Platform$OS.type == "windows") tolower(out) else out
 }
 
-#' Reconcile the four sources of truth: checkpoint, manifest, disk, DuckDB
+#' Reconciles the four sources of truth: the checkpoint, the manifest, disk, and DuckDB
 #'
-#' Non-destructive fsck for the Parquet repository. Cross-checks:
+#' Checks the Parquet repository without changing anything. Cross checks:
 #' \itemize{
-#'   \item \code{stale_checkpoint}: checkpoint entries matching no current MDT
-#'     row (workbook rows renamed/removed after loading).
-#'   \item \code{checkpointed_no_output}: MDT rows the checkpoint marks
-#'     complete whose partition directory holds no Parquet -- unless the
-#'     manifest records the file as verified \code{empty}.
-#'   \item \code{manifest_missing_file}: manifest \code{written} rows whose
-#'     Parquet file has vanished from disk (crash, manual deletion, sync loss).
-#'   \item \code{orphan_parquet}: Parquet files on disk no manifest row claims
-#'     (aborted runs from before manifest tracking, stray copies).
-#'   \item \code{duckdb_count_mismatch}: per table, \code{COUNT(*)} over the
-#'     hive directory vs the sum of manifest \code{written} row counts.
-#'     Requires \code{con}; reads the Parquet directly so it does not depend
-#'     on views being registered.
+#'   \item \code{stale_checkpoint}: a checkpoint entry matching no current
+#'     MDT row, from a workbook row renamed or removed after loading.
+#'   \item \code{checkpointed_no_output}: an MDT row the checkpoint marks
+#'     complete whose partition directory holds no Parquet file, unless
+#'     the manifest records the file as verified \code{empty}.
+#'   \item \code{manifest_missing_file}: a manifest \code{written} row
+#'     whose Parquet file has vanished from disk, from a crash, a manual
+#'     deletion, or a lost synchronization.
+#'   \item \code{orphan_parquet}: a Parquet file on disk that no manifest
+#'     row claims, from a run aborted before manifest tracking existed,
+#'     or a stray copy.
+#'   \item \code{duckdb_count_mismatch}: for each table, a comparison of
+#'     \code{COUNT(*)} over the hive directory against the sum of the
+#'     manifest's \code{written} row counts. Requires \code{con}, and
+#'     reads the Parquet directly, so it does not depend on the views
+#'     being registered.
 #' }
-#' Also reports verified-\code{empty} and \code{partial_accepted} files as
-#' informational context.
-#' @param MDT Data frame. Master Database Table (current workbook).
-#' @param ParquetBasePath Character. Root of the Parquet store.
-#' @param CheckpointPath Character. Checkpoint .rds path.
-#' @param ManifestPath Character (optional). Manifest CSV; several checks are
-#'   skipped without it.
-#' @param con Optional live DuckDB connection for count reconciliation.
-#' @param verbose Logical. Log a per-check summary via \code{log_msg}.
-#' @param LogPath Character (optional). Log file for this run. When supplied
-#'   (together with, or in place of, \code{RunId}), a run-scoped logging
-#'   context is started via \code{\link{begin_repository_run}} for the
-#'   duration of the audit and restored afterwards.
-#' @param RunId Character (optional). Run identifier tagged onto log lines
-#'   (see \code{\link{begin_repository_run}}); auto-generated when
-#'   \code{LogPath} is supplied but \code{RunId} is not.
-#' @return Invisibly, a list: \code{issues} (summary data.table with Check,
-#'   Severity, N), one detail data.table per check (\code{stale_checkpoint},
+#' Also reports a verified \code{empty} or \code{partial_accepted} file
+#' as informational context.
+#' @param MDT Data frame. Master Database Table, the current workbook.
+#' @param ParquetBasePath Character scalar. Root of the Parquet store.
+#' @param CheckpointPath Character scalar. Path to the checkpoint
+#'   \code{.rds} file.
+#' @param ManifestPath Character scalar. Manifest CSV. Accepts a path,
+#'   which enables every check. Accepts \code{NULL}, which skips several
+#'   checks. Defaults to \code{NULL}.
+#' @param con A live DuckDB connection, used for the row count check.
+#'   Defaults to \code{NULL}, which skips that check.
+#' @param verbose Logical. Accepts \code{TRUE}, which logs a summary of
+#'   each check with \code{log_msg}. Accepts \code{FALSE}, which does
+#'   not. Defaults to \code{TRUE}.
+#' @param LogPath Character scalar. Log file for this run. Accepts a
+#'   file path, which, together with, or in place of, \code{RunId},
+#'   starts a logging context for this run with
+#'   \code{\link{begin_repository_run}}, for the duration of the audit,
+#'   restored afterward. Defaults to \code{NULL}.
+#' @param RunId Character scalar. Run identifier tagged onto log lines,
+#'   see \code{\link{begin_repository_run}}. Generated automatically
+#'   when \code{LogPath} is supplied but \code{RunId} is not. Defaults
+#'   to \code{NULL}.
+#' @return Invisibly, a list with \code{issues}, a summary data.table
+#'   with columns \code{Check}, \code{Severity}, and \code{N}, one
+#'   detail data.table per check, \code{stale_checkpoint},
 #'   \code{checkpointed_no_output}, \code{manifest_missing_file},
-#'   \code{orphan_parquet}, \code{duckdb_count_mismatch}), plus
-#'   \code{empty_files} and \code{partial_accepted_files} for informational
-#'   context.
+#'   \code{orphan_parquet}, and \code{duckdb_count_mismatch}, and
+#'   \code{empty_files} and \code{partial_accepted_files} for
+#'   informational context.
 #' @examples
 #' MDT <- data.frame(Database = "NRD", TableName = "Core", MDBDir = "NRD",
 #'                   Path = "NRD_2019_Core.sav", PartitionKey = "YEAR",
@@ -5843,21 +6013,23 @@ audit_repository <- function(MDT, ParquetBasePath, CheckpointPath, ManifestPath 
 ################################################################################
 #### Schema registry ############################################################
 ################################################################################
-#' Build the default repository schema registry
+#' Builds the default repository schema registry
 #'
-#' The registry is intentionally pattern-based and focused on merge keys,
-#' diagnosis/procedure/code columns, survey weights, and common analytic fields.
-#' It should remain small; ordinary table-specific columns are still inferred
-#' from the source files. The generic profile is an empty template with no
-#' naming assumptions. Domain conventions are available only through explicit
-#' profiles such as \code{"hcup"} or user-authored rows.
-#' @param profile Character. One of \code{"generic"} (default; returns an
-#'   empty zero-row template with no naming assumptions) or \code{"hcup"}
-#'   (returns built-in HCUP conventions for merge keys, diagnosis/procedure
-#'   codes, and survey weights).
-#' @return A \code{data.table} with columns \code{Profile}, \code{ColumnPattern},
+#' The registry is pattern based, and focused on merge keys, diagnosis,
+#' procedure, and code columns, survey weights, and common analytic
+#' fields. It is deliberately kept small. An ordinary, table specific
+#' column is still inferred from the source files. The generic profile is
+#' an empty template with no naming assumption. A domain convention is
+#' available only through an explicit profile, such as \code{"hcup"}, or
+#' through a row a person authors.
+#' @param profile Character scalar. Accepts one of two values.
+#'   \code{"generic"} returns an empty, zero row template with no naming
+#'   assumption. \code{"hcup"} returns the built in HCUP conventions for
+#'   merge keys, diagnosis and procedure codes, and survey weights.
+#'   Defaults to \code{"generic"}.
+#' @return A data.table with columns \code{Profile}, \code{ColumnPattern},
 #'   \code{CanonicalType}, \code{Role}, \code{AppliesTo}, and \code{Notes}.
-#'   Zero rows when \code{profile = "generic"}.
+#'   Has zero rows when \code{profile} is \code{"generic"}.
 #' @seealso \code{\link{load_schema_registry}}, \code{\link{apply_schema_registry}}
 #' @examples
 #' generic_reg <- build_default_schema_registry("generic")
@@ -5927,7 +6099,7 @@ build_default_schema_registry <- function(profile = c("generic", "hcup")) {
   )
 }
 
-#' Apply non-negotiable built-in schema policies
+#' Applies schema policies that cannot be overridden
 #' @keywords internal
 apply_builtin_schema_registry_policies <- function(reg, profile = c("generic", "hcup")) {
   profile <- match.arg(profile)
@@ -5961,13 +6133,13 @@ apply_builtin_schema_registry_policies <- function(reg, profile = c("generic", "
   reg
 }
 
-#' Detect Excel workbook paths used by schema outputs
+#' Determines whether a path is an Excel workbook used by schema outputs
 #' @keywords internal
 is_excel_workbook_path <- function(path) {
   tolower(tools::file_ext(path)) %in% c("xlsx", "xlsm", "xls")
 }
 
-#' Write schema registry as an Excel workbook or CSV fallback
+#' Writes a schema registry as an Excel workbook, or as a CSV file when the path is not one
 #' @keywords internal
 write_schema_registry <- function(reg, SchemaRegistryPath) {
   if (is.null(SchemaRegistryPath) || !nzchar(SchemaRegistryPath)) return(invisible(NULL))
@@ -5981,32 +6153,38 @@ write_schema_registry <- function(reg, SchemaRegistryPath) {
   invisible(SchemaRegistryPath)
 }
 
-#' Read or create a schema registry workbook or CSV
+#' Reads or creates a schema registry workbook or CSV file
 #'
-#' Loads a repository schema registry -- a small table of column-name
-#' patterns, canonical types, and roles used to override or supplement type
-#' inference (see \code{\link{apply_schema_registry}}). If
-#' \code{SchemaRegistryPath} is \code{NULL} or empty, the built-in
-#' \code{\link{build_default_schema_registry}} template for \code{profile} is
-#' returned directly without touching disk. If the path does not yet exist,
-#' the default registry is built and (when \code{create_if_missing = TRUE})
-#' written to \code{SchemaRegistryPath} as a starting point for user edits.
-#' In every case the loaded registry is validated -- \code{ColumnPattern} and
-#' \code{CanonicalType} are required columns, every \code{CanonicalType} must
-#' be an allowed canonical type, every \code{ColumnPattern} must be a valid
-#' Perl-compatible regular expression -- and non-negotiable built-in policies
-#' for \code{profile} are (re-)applied on top of whatever was loaded.
-#' @param SchemaRegistryPath Character (optional). Path to an \code{.xlsx},
-#'   \code{.xlsm}, \code{.xls}, or CSV registry file. \code{NULL} or an empty
-#'   string returns the built-in default registry without reading or writing
-#'   any file.
-#' @param create_if_missing Logical. If \code{TRUE} (default) and
-#'   \code{SchemaRegistryPath} does not already exist, the default registry
-#'   for \code{profile} is written to that path before being returned.
-#' @param profile Character. One of \code{"generic"} (default) or
-#'   \code{"hcup"}; selects the fallback/default registry and which built-in
-#'   policies are enforced.
-#' @return A \code{data.table} schema registry with (at least) the columns
+#' Loads a repository schema registry, a small table of column name
+#' patterns, canonical types, and roles, used to override or supplement
+#' type inference, see \code{\link{apply_schema_registry}}. When
+#' \code{SchemaRegistryPath} is \code{NULL} or empty, the built in
+#' \code{\link{build_default_schema_registry}} template for
+#' \code{profile} is returned directly, without touching disk. When the
+#' path does not yet exist, the default registry is built and, when
+#' \code{create_if_missing} is \code{TRUE}, written to
+#' \code{SchemaRegistryPath} as a starting point for a person's edits. In
+#' every case, the loaded registry is validated, \code{ColumnPattern} and
+#' \code{CanonicalType} are required columns, every \code{CanonicalType}
+#' must be an allowed canonical type, every \code{ColumnPattern} must be
+#' a valid, Perl compatible regular expression, and the schema policies
+#' that cannot be overridden for \code{profile} are reapplied on top of
+#' whatever was loaded.
+#' @param SchemaRegistryPath Character scalar. Path to an \code{.xlsx},
+#'   \code{.xlsm}, \code{.xls}, or CSV registry file. Accepts such a
+#'   path. Accepts \code{NULL} or an empty string, which returns the
+#'   built in default registry without reading or writing any file.
+#'   Defaults to \code{NULL}.
+#' @param create_if_missing Logical. Accepts \code{TRUE}, which, when
+#'   \code{SchemaRegistryPath} does not already exist, writes the
+#'   default registry for \code{profile} to that path before returning
+#'   it. Accepts \code{FALSE}, which does not write it. Defaults to
+#'   \code{TRUE}.
+#' @param profile Character scalar. Accepts one of two values,
+#'   \code{"generic"} or \code{"hcup"}, selecting the fallback and
+#'   default registry and which built in policies are enforced. Defaults
+#'   to \code{"generic"}.
+#' @return A data.table schema registry with at least the columns
 #'   \code{ColumnPattern}, \code{CanonicalType}, \code{AppliesTo}, and
 #'   \code{Profile}.
 #' @seealso \code{\link{build_default_schema_registry}},
@@ -6079,34 +6257,41 @@ schema_registry_applies <- function(applies_to, database = NULL, table_name = NU
   any(tolower(tokens) %in% tolower(c(db, tbl, paste(db, tbl, sep = "_"), paste(db, tbl, sep = "/"))))
 }
 
-#' Apply repository-level schema registry overrides to an inferred type map
+#' Applies repository level schema registry overrides to an inferred type map
 #'
-#' Column names are first canonicalized (see \code{canonical_colnames})
-#' and every inferred type is normalized. Then, for each column, every
+#' Canonicalizes each column name, see \code{canonical_colnames}, and
+#' normalizes every inferred type. Then, for each column, considers every
 #' \code{schema_registry} row whose \code{AppliesTo} scope matches
-#' \code{database}/\code{table_name} (see \code{\link{build_default_schema_registry}})
-#' and whose \code{ColumnPattern} matches the column name is considered; the
-#' first matching row's \code{CanonicalType} is the candidate override. The
+#' \code{database} and \code{table_name}, see
+#' \code{\link{build_default_schema_registry}}, and whose
+#' \code{ColumnPattern} matches the column name, and takes the first
+#' matching row's \code{CanonicalType} as the candidate override. The
 #' override is applied only when it is compatible with the type already
-#' inferred for that column -- i.e. when
+#' inferred for that column, that is, when
 #' \code{promote_types(c(current_type, policy_type))} equals
-#' \code{policy_type} -- so the registry can widen or normalize a type (e.g.
-#' \code{integer} to \code{numeric}) but cannot silently force a column that
-#' was inferred as \code{character} (because real data already failed to
-#' parse as the policy type) into a narrower type.
-#' @param col_classes Named list or vector mapping column name to inferred
-#'   canonical type (as produced by \code{\link{build_col_classes}}).
-#'   \code{NULL} is returned unchanged.
-#' @param schema_registry Schema registry \code{data.frame}/\code{data.table}
-#'   (as returned by \code{\link{load_schema_registry}}), or \code{NULL}
-#'   (default) to skip overrides -- in that case \code{col_classes} is still
-#'   returned with canonicalized names and normalized types.
-#' @param database Character (optional). Logical database name used to
-#'   evaluate each registry row's \code{AppliesTo} scope.
-#' @param table_name Character (optional). Logical table name used to
-#'   evaluate each registry row's \code{AppliesTo} scope.
-#' @return \code{col_classes} with canonicalized names, normalized types, and
-#'   any applicable registry overrides applied.
+#' \code{policy_type}, so that the registry can widen or normalize a
+#' type, for example from \code{integer} to \code{numeric}, but cannot
+#' force a column already inferred as \code{character}, because real
+#' data already failed to parse as the policy type, into a narrower
+#' type.
+#' @param col_classes Named list or vector mapping a column name to its
+#'   inferred canonical type, as produced by
+#'   \code{\link{build_col_classes}}. Accepts \code{NULL}, which is
+#'   returned unchanged.
+#' @param schema_registry Schema registry, as a data frame or
+#'   data.table, as returned by \code{\link{load_schema_registry}}.
+#'   Accepts such a registry, whose applicable rows override the
+#'   inferred type. Accepts \code{NULL}, which skips overrides, so that
+#'   \code{col_classes} is still returned with canonicalized names and
+#'   normalized types. Defaults to \code{NULL}.
+#' @param database Character scalar. Logical database name used to
+#'   evaluate each registry row's \code{AppliesTo} scope. Defaults to
+#'   \code{NULL}.
+#' @param table_name Character scalar. Logical table name used to
+#'   evaluate each registry row's \code{AppliesTo} scope. Defaults to
+#'   \code{NULL}.
+#' @return \code{col_classes}, with canonicalized names, normalized
+#'   types, and any applicable registry override applied.
 #' @seealso \code{\link{load_schema_registry}}, \code{\link{build_col_classes}}
 #' @examples
 #' col_classes <- list(age = "integer", dx1 = "integer")
@@ -6136,37 +6321,45 @@ apply_schema_registry <- function(col_classes, schema_registry = NULL, database 
   col_classes
 }
 
-#' Build table-specific column-class maps and apply the schema registry
+#' Builds table specific column class maps and applies the schema registry
 #'
-#' Groups \code{files} by \code{suffixes} (typically the logical table each
-#' file belongs to), calls \code{\link{build_col_classes}} separately for
-#' each group to sample column types from the source files, canonicalizes
-#' the resulting column names, and applies \code{\link{apply_schema_registry}}
-#' with \code{table_name} set to the suffix.
-#' @param files Character vector. Relative file paths for all files across
-#'   all tables, in the form expected by \code{\link{build_col_classes}}.
-#' @param base_path Character. Root directory \code{files} are resolved
-#'   against; passed through to \code{\link{build_col_classes}}.
-#' @param suffixes Character (or coercible) vector the same length as
-#'   \code{files}, giving the logical table name each file belongs to. Files
-#'   are grouped by \code{unique(suffixes)} and one column-class map is built
-#'   per group.
-#' @param n_workers Integer. Number of parallel workers passed through to
-#'   \code{\link{build_col_classes}} for each group. Default \code{1}.
-#' @param reader Character. Registered reader name(s) forwarded as-is to
-#'   \code{\link{build_col_classes}} for every suffix group -- it is not
-#'   subset per group, so it must either be a single reader name (recycled
-#'   across every file) or a vector whose length matches the full,
-#'   ungrouped \code{files} argument. Callers should generally pass a single
-#'   explicit reader name (e.g. \code{"sav"} or \code{"csv"}) rather than
-#'   rely on the two-element default.
-#' @param schema_registry Schema registry \code{data.frame}/\code{data.table}
-#'   (see \code{\link{load_schema_registry}}), or \code{NULL} (default) to
-#'   skip registry overrides.
-#' @param database Character (optional). Logical database name passed to
+#' Groups \code{files} by \code{suffixes}, typically the logical table
+#' each file belongs to, calls \code{\link{build_col_classes}}
+#' separately for each group to sample column types from the source
+#' files, canonicalizes the resulting column names, and applies
+#' \code{\link{apply_schema_registry}} with \code{table_name} set to the
+#' suffix.
+#' @param files Character vector. Relative file paths for every file
+#'   across every table, in the form expected by
+#'   \code{\link{build_col_classes}}.
+#' @param base_path Character scalar. Root directory that \code{files}
+#'   is resolved against, passed through to
+#'   \code{\link{build_col_classes}}.
+#' @param suffixes Character vector, or a vector coercible to character,
+#'   the same length as \code{files}, giving the logical table name each
+#'   file belongs to. A file is grouped by \code{unique(suffixes)}, and
+#'   one column class map is built per group.
+#' @param n_workers Integer. Number of parallel workers passed through
+#'   to \code{\link{build_col_classes}} for each group. Defaults to
+#'   \code{1}.
+#' @param reader Character scalar or vector. Registered reader name,
+#'   forwarded exactly as given to \code{\link{build_col_classes}} for
+#'   every suffix group, since it is not subset per group. Must be
+#'   either a single reader name, recycled across every file, or a
+#'   vector whose length matches the full, ungrouped \code{files}
+#'   argument. Pass a single explicit reader name, for example
+#'   \code{"sav"} or \code{"csv"}, rather than relying on the two
+#'   element default. Defaults to \code{c("sav", "csv")}.
+#' @param schema_registry Schema registry, as a data frame or
+#'   data.table, see \code{\link{load_schema_registry}}. Accepts such a
+#'   registry, applied for every group. Accepts \code{NULL}, which
+#'   skips registry overrides. Defaults to \code{NULL}.
+#' @param database Character scalar. Logical database name passed to
 #'   \code{\link{apply_schema_registry}} for \code{AppliesTo} scoping.
+#'   Defaults to \code{NULL}.
 #' @return A named list, one element per unique value of \code{suffixes},
-#'   each a column-class map as returned by \code{\link{apply_schema_registry}}.
+#'   each a column class map as returned by
+#'   \code{\link{apply_schema_registry}}.
 #' @seealso \code{\link{build_col_classes}}, \code{\link{apply_schema_registry}}
 #' @examples
 #' tmp_dir <- tempfile("colclasses_")
@@ -6212,16 +6405,18 @@ manifest_is_duckdb <- function(path) {
 
 manifest_table_name <- function() "parquet_manifest"
 
-#' Default path for the accessible Excel metadata snapshot
+#' Computes the default path for the accessible Excel metadata snapshot
 #'
 #' Derives the default \code{.xlsx} output path used by
-#' \code{\link{ExportRepositoryMetadata}} when its \code{OutputPath} argument
-#' is not supplied: the same directory as \code{ManifestPath}, with the
-#' manifest's file name (extension stripped) and an \code{.xlsx} extension.
-#' @param ManifestPath Character scalar. Path to the authoritative DuckDB or
-#'   CSV manifest file. Must be a single non-empty, non-\code{NA} path.
-#' @return Character scalar. The derived \code{.xlsx} path (the file itself
-#'   is not created or checked for existence).
+#' \code{\link{ExportRepositoryMetadata}} when its \code{OutputPath}
+#' argument is not supplied: the same directory as \code{ManifestPath},
+#' with the manifest's file name, extension removed, and an
+#' \code{.xlsx} extension.
+#' @param ManifestPath Character scalar. Path to the authoritative
+#'   DuckDB or CSV manifest file. Must be a single path that is not
+#'   empty and not \code{NA}.
+#' @return Character scalar. The derived \code{.xlsx} path. The file
+#'   itself is not created, and its existence is not checked.
 #' @seealso \code{\link{ExportRepositoryMetadata}}
 #' @examples
 #' metadata_workbook_path_default("C:/repo/Manifest/RepositoryMetadata.duckdb")
@@ -6235,16 +6430,18 @@ metadata_workbook_path_default <- function(ManifestPath) {
   file.path(dirname(ManifestPath), paste0(tools::file_path_sans_ext(basename(ManifestPath)), ".xlsx"))
 }
 
-#' Read the Parquet manifest from CSV or its transactional DuckDB store
+#' Reads the Parquet manifest from CSV or its transactional DuckDB store
 #'
-#' Reads the full contents of the repository's manifest, transparently
-#' handling both storage formats: a transactional DuckDB database (opened
-#' read-only and disconnected before returning) or a legacy flat CSV file.
-#' @param ManifestPath Character. Path to the manifest file. \code{NULL}, an
-#'   empty string, or a path that does not exist returns an empty
-#'   \code{data.table} rather than raising an error.
-#' @return A \code{data.table} with one row per manifest record (empty, with
-#'   no columns, if the manifest is missing or has no records yet).
+#' Reads the full contents of the repository's manifest, handling both
+#' storage formats transparently: a transactional DuckDB database,
+#' opened restricted to reading and disconnected before returning, or a
+#' legacy flat CSV file.
+#' @param ManifestPath Character scalar. Path to the manifest file.
+#'   Accepts such a path. Accepts \code{NULL}, an empty string, or a
+#'   path that does not exist, each of which returns an empty
+#'   data.table rather than raising an error.
+#' @return A data.table with one row per manifest record. Empty, with
+#'   no columns, when the manifest is missing or has no record yet.
 #' @seealso \code{\link{update_parquet_manifest}}, \code{\link{ExportRepositoryMetadata}}
 #' @examples
 #' tmp <- tempfile(fileext = ".csv")
@@ -6343,33 +6540,38 @@ read_parquet_manifest <- function(ManifestPath) {
   invisible(NULL)
 }
 
-#' Export the transactional repository manifest to an accessible Excel catalog
+#' Exports the transactional repository manifest to an accessible Excel catalog
 #'
-#' Reads one consistent snapshot from \code{RepositoryMetadata.duckdb} (or a
-#' legacy CSV manifest) and creates a presentation-only workbook. The DuckDB
-#' manifest remains authoritative; editing this workbook never changes the
-#' repository. Every manifest row is included in numbered \code{Manifest_*}
-#' sheets, with summary and navigation sheets placed first.
-#'
-#' @param ManifestPath Character. Path to the authoritative DuckDB or CSV
-#'   manifest, as read by \code{\link{read_parquet_manifest}}.
-#' @param OutputPath Character. Destination \code{.xlsx} path; must end in
-#'   \code{.xlsx}. Defaults to \code{\link{metadata_workbook_path_default}(ManifestPath)},
-#'   i.e. beside the manifest with the same base file name.
+#' Reads one consistent snapshot from \code{RepositoryMetadata.duckdb},
+#' or a legacy CSV manifest, and creates a workbook for presentation
+#' only. The DuckDB manifest remains authoritative; editing this
+#' workbook never changes the repository. Every manifest row is
+#' included in numbered \code{Manifest_*} sheets, with the summary and
+#' navigation sheets placed first.
+#' @param ManifestPath Character scalar. Path to the authoritative
+#'   DuckDB or CSV manifest, as read by
+#'   \code{\link{read_parquet_manifest}}.
+#' @param OutputPath Character scalar. Destination \code{.xlsx} path,
+#'   which must end in \code{.xlsx}. Defaults to
+#'   \code{\link{metadata_workbook_path_default}(ManifestPath)}, that
+#'   is, beside the manifest, with the same base file name.
 #' @param MaxRowsPerSheet Integer. Maximum detail rows per numbered
-#'   \code{Manifest_*} sheet (Excel's per-sheet row limit is 1,048,576).
-#'   Default \code{200000L}.
-#' @param IncludeDetails Logical. If \code{TRUE} (default), the complete raw
-#'   manifest snapshot is written to one or more \code{Manifest_*} sheets; if
-#'   \code{FALSE}, only the summary/navigation sheets are written.
-#' @param LogPath Character (optional). Log file path passed to
-#'   \code{\link{log_msg}} for the completion message.
-#' @param RunId Character (optional). Run identifier passed to
-#'   \code{\link{log_msg}} for the completion message.
-#' @return Invisibly, a list with elements \code{path} (normalized output
-#'   path), \code{manifest_rows} (row count of the source manifest),
-#'   \code{detail_sheets} (number of \code{Manifest_*} sheets written), and
-#'   \code{generated_at} (UTC timestamp string).
+#'   \code{Manifest_*} sheet. Excel's row limit per sheet is
+#'   1,048,576. Defaults to \code{200000}.
+#' @param IncludeDetails Logical. Accepts \code{TRUE}, which writes the
+#'   complete raw manifest snapshot to one or more \code{Manifest_*}
+#'   sheets. Accepts \code{FALSE}, which writes only the summary and
+#'   navigation sheets. Defaults to \code{TRUE}.
+#' @param LogPath Character scalar. Log file path passed to
+#'   \code{\link{log_msg}} for the completion message. Defaults to
+#'   \code{NULL}.
+#' @param RunId Character scalar. Run identifier passed to
+#'   \code{\link{log_msg}} for the completion message. Defaults to
+#'   \code{NULL}.
+#' @return Invisibly, a list with elements \code{path}, the normalized
+#'   output path, \code{manifest_rows}, the row count of the source
+#'   manifest, \code{detail_sheets}, the number of \code{Manifest_*}
+#'   sheets written, and \code{generated_at}, a UTC timestamp string.
 #' @examples
 #' manifest <- tempfile(fileext = ".csv")
 #' update_parquet_manifest(manifest, Database = "DEMO", TableName = "Core",
@@ -6611,7 +6813,7 @@ schema_hash_from_classes <- function(col_classes) {
   }
 }
 
-#' Write a manifest table through a temporary file replacement
+#' Writes a manifest table through a temporary file replacement
 #' @keywords internal
 write_parquet_manifest_atomic <- function(manifest, ManifestPath) {
   if (is.null(ManifestPath) || !nzchar(ManifestPath)) return(invisible(NULL))
@@ -6630,7 +6832,7 @@ write_parquet_manifest_atomic <- function(manifest, ManifestPath) {
   invisible(ManifestPath)
 }
 
-#' Remove manifest rows matching one or more fields
+#' Removes manifest rows matching one or more fields
 #' @keywords internal
 remove_parquet_manifest_rows <- function(ManifestPath, Database = NULL, TableName = NULL,
                                          SourcePath = NULL, ParquetPath = NULL) {
@@ -6657,65 +6859,76 @@ remove_parquet_manifest_rows <- function(ManifestPath, Database = NULL, TableNam
   invisible(n_removed)
 }
 
-#' Append or replace one row in the Parquet manifest
+#' Appends or replaces one row in the Parquet manifest
 #'
 #' Builds one manifest record from the supplied fields and writes it to
-#' \code{ManifestPath}. For a transactional DuckDB manifest, any existing row
-#' with the same Database/TableName/partition-or-year/SourcePath/ParquetPath
-#' key is deleted and the new row appended within one transaction (missing
-#' columns are added on the fly). For a legacy CSV manifest, the same
-#' replace-by-key logic runs in memory and the whole table is rewritten
-#' atomically.
-#' @param ManifestPath Character. Path to the manifest (a \code{.duckdb}/
-#'   \code{.ddb} extension is treated as a transactional DuckDB store,
-#'   anything else as CSV). \code{NULL} or an empty string is a no-op.
-#' @param Database Character. Logical source database name.
-#' @param TableName Character. Logical table name.
-#' @param DuckDBTable Character. Physical Parquet directory / DuckDB view
-#'   name for this table.
-#' @param Year Integer or character. Legacy compatibility field, coerced to
-#'   integer (\code{NA} when it cannot be parsed). Used as the partition slot
-#'   for the replace-by-key match when \code{PartitionValue} is missing.
-#' @param SourcePath Character. Original source file path recorded in the MDT.
-#' @param ParquetPath Character. Parquet file or partition directory written
-#'   for this record.
-#' @param NRows Numeric. Row count represented by this record. Default \code{NA}.
-#' @param SchemaHash Character. Hash of the resolved table schema for this
-#'   write (see \code{schema_hash_from_classes}). Default \code{NA}.
-#' @param Status Character. Load/output status, e.g. \code{"written"}
-#'   (default), \code{"partial_accepted"}, \code{"failed"}, or \code{"empty"}.
-#' @param Notes Character. Additional loader context. Default \code{NA}.
-#' @param PartitionKey Character. Canonical Hive partition key, or a
-#'   semicolon-separated list of keys (e.g. \code{"YEAR"}). Default \code{NA}.
-#' @param PartitionValue Character. Hive partition value, or a semicolon-
-#'   separated value list matching \code{PartitionKey}; used instead of
-#'   \code{Year} to key the record when non-missing. Default \code{NA}.
-#' @param RunId Character (optional). Run identifier; resolved via
-#'   \code{resolve_run_id} when \code{NULL}.
-#' @param RepositoryKey Character. Checkpoint identity for the source and
-#'   partition. Default \code{NA}.
-#' @param SourceSize Numeric. Source file size in bytes at load time.
-#'   Default \code{NA}.
-#' @param SourceMTimeUTC Character. Source file modification timestamp in
-#'   UTC. Default \code{NA}.
-#' @param SourceSHA256 Character. Optional SHA-256 hash of the source file.
-#'   Default \code{NA}.
-#' @param SourceFingerprint Character. Fingerprint used for source-change
-#'   detection (see \code{\link{source_fingerprint}}). Default \code{NA}.
-#' @param SourceURI Character. Optional direct HTTP/HTTPS location declared
-#'   in the MDT for a remote source. Default \code{NA}.
-#' @param ResolvedSourcePath Character. Managed local cache file path used
-#'   for a remote source. Default \code{NA}.
-#' @param DownloadPolicy Character. Remote refresh policy used for the
-#'   source. Default \code{NA}.
-#' @param DownloadSHA256 Character. SHA-256 of the cached remote object.
-#'   Default \code{NA}.
-#' @param DownloadTimeUTC Character. Modification time of the cached remote
-#'   object in UTC. Default \code{NA}.
-#' @param DownloadStatus Character. Remote cache result, e.g.
-#'   \code{"downloaded"}, \code{"updated"}, \code{"unchanged"}, or
-#'   \code{"cached"}. Default \code{NA}.
-#' @return Invisibly, the one-row \code{data.table} that was written.
+#' \code{ManifestPath}. For a transactional DuckDB manifest, an existing
+#' row with the same \code{Database}, \code{TableName}, partition or
+#' year, \code{SourcePath}, and \code{ParquetPath} key is deleted and
+#' the new row appended within one transaction, and a missing column is
+#' added as needed. For a legacy CSV manifest, the same replacement by
+#' key runs in memory, and the whole table is rewritten atomically.
+#' @param ManifestPath Character scalar. Path to the manifest. A
+#'   \code{.duckdb} or \code{.ddb} extension is treated as a
+#'   transactional DuckDB store, and any other extension as CSV. Accepts
+#'   \code{NULL} or an empty string, which does nothing.
+#' @param Database Character scalar. Logical source database name.
+#' @param TableName Character scalar. Logical table name.
+#' @param DuckDBTable Character scalar. Physical Parquet directory and
+#'   DuckDB view name for this table.
+#' @param Year Integer or character scalar. Legacy field kept for
+#'   compatibility, coerced to integer, becoming \code{NA} when it
+#'   cannot be parsed. Used as the partition slot for the replacement by
+#'   key when \code{PartitionValue} is missing.
+#' @param SourcePath Character scalar. Original source file path
+#'   recorded in the MDT.
+#' @param ParquetPath Character scalar. Parquet file or partition
+#'   directory written for this record.
+#' @param NRows Numeric scalar. Row count represented by this record.
+#'   Defaults to \code{NA}.
+#' @param SchemaHash Character scalar. Hash of the resolved table
+#'   schema for this write, see \code{schema_hash_from_classes}.
+#'   Defaults to \code{NA}.
+#' @param Status Character scalar. Load or output status. Accepts one
+#'   of four values: \code{"written"}, \code{"partial_accepted"},
+#'   \code{"failed"}, or \code{"empty"}. Defaults to \code{"written"}.
+#' @param Notes Character scalar. Additional loader context. Defaults
+#'   to \code{NA}.
+#' @param PartitionKey Character scalar. Canonical hive partition key,
+#'   or a list of keys separated by a semicolon, for example
+#'   \code{"YEAR"}. Defaults to \code{NA}.
+#' @param PartitionValue Character scalar. Hive partition value, or a
+#'   list of values separated by a semicolon matching
+#'   \code{PartitionKey}. Used instead of \code{Year} to key the record
+#'   when it is not missing. Defaults to \code{NA}.
+#' @param RunId Character scalar. Run identifier. Accepts a value,
+#'   which is used for this call. Accepts \code{NULL}, which resolves it
+#'   with \code{resolve_run_id}. Defaults to \code{NULL}.
+#' @param RepositoryKey Character scalar. Checkpoint identity for the
+#'   source and partition. Defaults to \code{NA}.
+#' @param SourceSize Numeric scalar. Source file size in bytes at load
+#'   time. Defaults to \code{NA}.
+#' @param SourceMTimeUTC Character scalar. Source file modification
+#'   timestamp in UTC. Defaults to \code{NA}.
+#' @param SourceSHA256 Character scalar. SHA256 hash of the source
+#'   file. Defaults to \code{NA}.
+#' @param SourceFingerprint Character scalar. Fingerprint used to
+#'   detect a change to the source, see
+#'   \code{\link{source_fingerprint}}. Defaults to \code{NA}.
+#' @param SourceURI Character scalar. Direct HTTP or HTTPS location
+#'   declared in the MDT for a remote source. Defaults to \code{NA}.
+#' @param ResolvedSourcePath Character scalar. Managed local cache file
+#'   path used for a remote source. Defaults to \code{NA}.
+#' @param DownloadPolicy Character scalar. Remote refresh policy used
+#'   for the source. Defaults to \code{NA}.
+#' @param DownloadSHA256 Character scalar. SHA256 hash of the cached
+#'   remote object. Defaults to \code{NA}.
+#' @param DownloadTimeUTC Character scalar. Modification time of the
+#'   cached remote object, in UTC. Defaults to \code{NA}.
+#' @param DownloadStatus Character scalar. Remote cache result. Accepts
+#'   one of four values: \code{"downloaded"}, \code{"updated"},
+#'   \code{"unchanged"}, or \code{"cached"}. Defaults to \code{NA}.
+#' @return Invisibly, the one row data.table that was written.
 #' @seealso \code{\link{read_parquet_manifest}}, \code{\link{ExportRepositoryMetadata}}
 #' @examples
 #' manifest <- tempfile(fileext = ".csv")
@@ -6820,7 +7033,7 @@ update_parquet_manifest <- function(ManifestPath, Database, TableName, DuckDBTab
   invisible(row)
 }
 
-#' Record remote-source download provenance on an existing manifest row
+#' Records remote source download provenance on an existing manifest row
 #' @keywords internal
 update_manifest_source_provenance <- function(ManifestPath, Database, TableName,
                                               SourcePath, row_meta) {
@@ -6934,38 +7147,45 @@ duckdb_type_matches <- function(expected, actual, compatible_numeric = FALSE) {
   actual_base %in% toupper(allowed)
 }
 
-#' Validate a registered DuckDB view and compare important columns to registry
+#' Validates a registered DuckDB view and compares important columns to registry
 #'
-#' Confirms \code{table_name} can be described and counted in \code{con},
-#' then optionally cross-checks its column types against two independent
-#' sources of truth: a pattern-based \code{schema_registry} (tolerant of
-#' numeric-family substitutions, e.g. \code{INTEGER} satisfies an expected
-#' \code{"numeric"}) and/or an exact \code{table_schema} column catalog
-#' (which also flags catalog columns missing from the table, and logs -- but
-#' does not fail on -- table columns absent from the catalog).
-#' @param con Live DBI connection to the DuckDB database containing
+#' Confirms that \code{table_name} can be described and counted in
+#' \code{con}, then optionally cross checks its column types against two
+#' independent sources of truth: a pattern based \code{schema_registry},
+#' tolerant of a numeric family substitution, for example \code{INTEGER}
+#' satisfies an expected \code{"numeric"}, except for a column the
+#' \code{table_schema} catalog already records as reviewed and
+#' deliberately not forced to a matching pattern, and an exact
+#' \code{table_schema} column catalog, which also flags a catalog column
+#' missing from the table, and logs, without failing on, a table column
+#' absent from the catalog.
+#' @param con A live DBI connection to the DuckDB database containing
 #'   \code{table_name}.
-#' @param table_name Character. Name of the registered table/view to
-#'   validate.
-#' @param schema_registry Schema registry \code{data.frame}/\code{data.table}
-#'   (see \code{\link{load_schema_registry}}), or \code{NULL} (default) to
-#'   skip pattern-based validation. The logical database/table used for
-#'   \code{AppliesTo} scoping is taken from \code{table_schema} when
-#'   possible, otherwise inferred by splitting \code{table_name} on the
-#'   first \code{"_"}.
-#' @param strict Logical. If \code{TRUE}, any failure (a failed
-#'   \code{DESCRIBE}/\code{COUNT}, or any type mismatch) raises an error via
-#'   \code{stop()}. If \code{FALSE} (default), failures are logged and the
-#'   function returns \code{invisible(FALSE)}.
-#' @param table_schema Data frame/\code{data.table} (optional) with columns
-#'   \code{Column} and \code{CanonicalType} (and either \code{DuckDBTable},
-#'   or \code{Database} plus \code{TableName} used to derive it), giving the
-#'   authoritative column catalog for \code{table_name}. \code{NULL}
-#'   (default) skips this exact-match check.
-#' @return Invisibly, \code{TRUE} if \code{table_name} described, counted,
-#'   and passed every supplied check; \code{FALSE} if any check failed and
-#'   \code{strict = FALSE} (with \code{strict = TRUE} a failure raises an
-#'   error instead of returning).
+#' @param table_name Character scalar. Name of the registered table or
+#'   view to validate.
+#' @param schema_registry Schema registry, as a data frame or
+#'   data.table, see \code{\link{load_schema_registry}}. Accepts such a
+#'   registry, which enables the pattern based check. Accepts
+#'   \code{NULL}, which skips it. Defaults to \code{NULL}. The logical
+#'   database and table used for \code{AppliesTo} scoping is taken from
+#'   \code{table_schema} when possible, and otherwise inferred by
+#'   splitting \code{table_name} on the first \code{"_"}.
+#' @param strict Logical. Accepts \code{TRUE}, which raises an error,
+#'   with \code{stop()}, on any failure, whether a failed
+#'   \code{DESCRIBE} or \code{COUNT}, or a type mismatch. Accepts
+#'   \code{FALSE}, which logs a failure and returns
+#'   \code{invisible(FALSE)}. Defaults to \code{FALSE}.
+#' @param table_schema Data frame or data.table, with columns
+#'   \code{Column} and \code{CanonicalType}, and either
+#'   \code{DuckDBTable}, or \code{Database} together with
+#'   \code{TableName} used to derive it. Accepts such a table, giving
+#'   the authoritative column catalog for \code{table_name}, which
+#'   enables the exact match check. Accepts \code{NULL}, which skips
+#'   it. Defaults to \code{NULL}.
+#' @return Invisibly, \code{TRUE} when \code{table_name} was described,
+#'   counted, and passed every supplied check. \code{FALSE} when a
+#'   check failed and \code{strict} is \code{FALSE}. When \code{strict}
+#'   is \code{TRUE}, a failure raises an error instead of returning.
 #' @seealso \code{\link{load_schema_registry}}, \code{\link{open_duckdb}}
 #' @examples
 #' con <- DBI::dbConnect(duckdb::duckdb(), dbdir = ":memory:")
@@ -7226,153 +7446,173 @@ validate_duckdb_table <- function(con, table_name, schema_registry = NULL, stric
                   basename(path), worker_elapsed))
   list(ok = TRUE, result = response$result)
 }
-#' Dispatch a single source file to the appropriate reader and writer
+#' Dispatches a single source file to the appropriate reader and writer
 #'
-#' For each source file, \code{read_fn} determines the row count, applies the
-#' \code{PartitionBy} strategy to decide whether the file can be loaded
-#' directly into memory or must be processed in memory-bounded chunks, and
-#' then delegates to \code{\link{safe_read_csv}}, \code{\link{safe_read_sav}},
-#' \code{\link{safe_read_sav_chunked}}, or \code{\link{read_delimited_chunked}}
-#' accordingly.
+#' For each source file, \code{read_fn} determines the row count, applies
+#' the \code{PartitionBy} strategy to decide whether the file can be
+#' loaded directly into memory or must be processed in chunks bounded by
+#' memory, and then delegates to \code{\link{safe_read_csv}},
+#' \code{\link{safe_read_sav}}, \code{\link{safe_read_sav_chunked}}, or
+#' \code{\link{read_delimited_chunked}} accordingly.
 #'
-#' \code{read_fn} was originally defined as a nested closure inside
-#' \code{\link{generic_db_loader}}, relying on lexical scoping to access
-#' \code{MDTSelect}, \code{MasterDBPath}, \code{reader}, \code{PartitionBy},
-#' \code{SAV_ROW_THRESHOLD}, \code{RAMThreshold}, and \code{SAV_CHUNK_SIZE}
-#' from \code{generic_db_loader}'s frame. It is now a standalone top-level
-#' function and all of these values must be passed explicitly as arguments.
-#' @section Row-count determination:
-#' The exact row count (\code{ncases}) is obtained via
-#' \code{haven::read_sav(full_path, col_select = 1L)} -- reading a single
-#' column keeps peak RAM proportional to one column's width times the row
-#' count, regardless of how wide the file is.
+#' Every value that \code{generic_db_loader} used to supply through
+#' lexical scoping, \code{MDTSelect}, \code{MasterDBPath}, \code{reader},
+#' \code{PartitionBy}, \code{SAV_ROW_THRESHOLD}, \code{RAMThreshold}, and
+#' \code{SAV_CHUNK_SIZE}, must now be passed explicitly as arguments.
+#' @section Row count determination:
+#' The exact row count, \code{ncases}, is obtained with
+#' \code{haven::read_sav(full_path, col_select = 1L)}. Reading a single
+#' column keeps peak memory use proportional to one column's width times
+#' the row count, regardless of how wide the file is.
 #' @section PartitionBy strategies:
 #' \describe{
-#'   \item{\code{"NRows"}}{Chunked reading is used when \code{ncases} exceeds
-#'     \code{SAV_ROW_THRESHOLD} (or when \code{ncases} cannot be determined).}
-#'   \item{\code{"RAMEstimate"}}{A single-row sample (\code{n_max = 1}) is read
-#'     to estimate per-row byte width from column types (8 bytes for numeric /
-#'     \code{haven_labelled} columns, \code{nchar + 56} for character columns).
-#'     The estimated total size (with a 4x safety multiplier) is compared to
-#'     \code{RAMThreshold} (in GB) to decide whether to chunk.}
-#'   \item{\code{"FAIL"}}{For delimited files, an isolated subprocess (see
-#'     \code{FailProbeMode}) attempts a full direct read-and-write; if it
-#'     fails or times out, the adaptive chunked reader takes over in the main
-#'     process. For SAV files, a full direct read, strip, sanitise, align,
-#'     and year-assignment is attempted inside a \code{tryCatch}, falling
-#'     back to chunked reading on error (most commonly out-of-memory during
-#'     \code{haven::read_sav()}). This strategy is the most accurate but also
-#'     the most expensive when the direct attempt fails, since it is
-#'     attempted and discarded before falling back.}
+#'   \item{\code{"NRows"}}{Chunked reading is used when \code{ncases}
+#'     exceeds \code{SAV_ROW_THRESHOLD}, or when \code{ncases} cannot be
+#'     determined.}
+#'   \item{\code{"RAMEstimate"}}{A single row sample, \code{n_max = 1},
+#'     is read to estimate the byte width per row from the column types,
+#'     8 bytes for a numeric or \code{haven_labelled} column, and
+#'     \code{nchar + 56} for a character column. The estimated total
+#'     size, with a 4 times safety multiplier, is compared to
+#'     \code{RAMThreshold}, in gigabytes, to decide whether to chunk.}
+#'   \item{\code{"FAIL"}}{For a delimited file, an isolated subprocess,
+#'     see \code{FailProbeMode}, attempts a full direct read and write.
+#'     When it fails or times out, the adaptive chunked reader takes
+#'     over in the main process. For a SAV file, a full direct read,
+#'     with stripping, sanitizing, aligning, and assigning the year, is
+#'     attempted inside a \code{tryCatch}, falling back to chunked
+#'     reading on an error, most commonly running out of memory during
+#'     \code{haven::read_sav()}. This strategy is the most accurate, and
+#'     also the most expensive when the direct attempt fails, since it
+#'     is attempted and discarded before falling back.}
 #' }
-#' @section Source-defined partition routing:
+#' @section Source defined partition routing:
 #' When \code{reader} is a delimited type and the file's header already
-#' contains every column named in \code{partition_keys}, rows are routed
-#' directly to their own Hive partitions (e.g. a single combined multi-year
-#' CSV writes straight to \code{year=2020/}, \code{year=2021/}, ...) instead
-#' of all being written under one \code{year_dir}. This forces chunked
-#' writing even when \code{PartitionBy} would otherwise choose a direct read.
-#' @param path Character. Relative file path as it appears in
-#'   \code{MDTSelect$Path} (used to look up \code{MDTSelect$MDBDir}).
-#' @param out_path Character (optional). Full output path for a
-#'   single-file (non-chunked) Parquet write. Passed through to
-#'   \code{\link{safe_read_sav_chunked}}.
-#' @param all_cols Character vector (optional). Union of all
-#'   columns for this table, passed to \code{\link{align_columns}}.
-#' @param year_dir Character (optional). Hive-partitioned year
-#'   directory (e.g. \code{".../NIS_Core/year=2019"}) where chunk files are
-#'   written when chunking is used.
-#' @param table_dir Character (optional). Table-level directory above the
-#'   partition directories. Derived from \code{year_dir} by stripping one
-#'   directory level per entry in \code{partition_keys} when not supplied.
-#' @param col_classes Named list (optional). Column class map from
-#'   \code{\link{build_col_classes}}.
-#' @param year_val Integer or character (optional). Derived value recorded in
-#'   legacy manifest fields when \code{YEAR} is an explicit partition key.
-#' @param PrintStatus Logical. If \code{TRUE}, prints progress
-#'   messages to the console in addition to the log file. Default \code{FALSE}.
-#' @param TerminalHivePartition Logical. If \code{TRUE}, chunk files are
-#'   written to source-specific \code{batch_id=<stem>_<NNNNN>/data.parquet}
-#'   subdirectories instead of flat \code{<stem>_<NNNNN>.parquet} files. Passed to
-#'   \code{\link{safe_read_sav_chunked}}.
+#' contains every column named in \code{partition_keys}, a row is
+#' routed directly to its own hive partition, for example a single CSV
+#' spanning several years writes directly to \code{year=2020/},
+#' \code{year=2021/}, and so on, instead of everything being written
+#' under one \code{year_dir}. This forces chunked writing even when
+#' \code{PartitionBy} would otherwise choose a direct read.
+#' @param path Character scalar. Relative file path as it appears in
+#'   \code{MDTSelect$Path}, used to look up \code{MDTSelect$MDBDir}.
+#' @param out_path Character scalar. Full output path for a single
+#'   file, not chunked, Parquet write. Passed through to
+#'   \code{\link{safe_read_sav_chunked}}. Defaults to \code{NULL}.
+#' @param all_cols Character vector. Union of every column for this
+#'   table, passed to \code{\link{align_columns}}. Defaults to
+#'   \code{NULL}.
+#' @param year_dir Character scalar. Hive partitioned year directory,
+#'   for example \code{".../NIS_Core/year=2019"}, where chunk files are
+#'   written when chunking is used. Defaults to \code{NULL}.
+#' @param table_dir Character scalar. Table level directory above the
+#'   partition directories. Defaults to \code{NULL}, which derives it
+#'   from \code{year_dir} by removing one directory level for each
+#'   entry of \code{partition_keys}.
+#' @param col_classes Named list. Column class map from
+#'   \code{\link{build_col_classes}}. Defaults to \code{NULL}.
+#' @param year_val Integer or character scalar. Value recorded in
+#'   legacy manifest fields when \code{YEAR} is an explicit partition
+#'   key. Defaults to \code{NULL}.
+#' @param PrintStatus Logical. Accepts \code{TRUE}, which prints a
+#'   progress message to the console in addition to the log file.
+#'   Accepts \code{FALSE}, which does not. Defaults to \code{FALSE}.
+#' @param TerminalHivePartition Logical. Accepts \code{TRUE}, which
+#'   writes chunk files to source specific
+#'   \code{batch_id=<stem>_<NNNNN>/data.parquet} subdirectories instead
+#'   of flat \code{<stem>_<NNNNN>.parquet} files. Passed to
+#'   \code{\link{safe_read_sav_chunked}}. Accepts \code{FALSE}, which
+#'   does not. Defaults to \code{FALSE}.
 #' @param MDTSelect Data frame. Subset of the master database table
 #'   for the current database, used to resolve \code{path} to a full
-#'   filesystem path via \code{MDTSelect$MDBDir}.
-#' @param MasterDBPath Character. Root directory containing the
-#'   source SAV/CSV files.
-#' @param reader Character. Registered reader name (see
-#'   \code{\link{get_file_reader}}), e.g. \code{"sav"} or \code{"csv"}.
-#' @param PartitionBy Character. One of \code{"NRows"},
-#'   \code{"RAMEstimate"}, or \code{"FAIL"}. See Details.
+#'   file system path with \code{MDTSelect$MDBDir}.
+#' @param MasterDBPath Character scalar. Root directory containing the
+#'   source SAV or CSV files.
+#' @param reader Character scalar. Registered reader name, as
+#'   registered with \code{\link{get_file_reader}}, for example
+#'   \code{"sav"} or \code{"csv"}.
+#' @param PartitionBy Character scalar. Accepts one of three values:
+#'   \code{"NRows"}, \code{"RAMEstimate"}, or \code{"FAIL"}. See the
+#'   Details section.
 #' @param SAV_ROW_THRESHOLD Integer. Row count above which the
 #'   \code{"NRows"} strategy chunks a file.
-#' @param RAMThreshold Numeric. Estimated size in GB above which the
-#'   \code{"RAMEstimate"} strategy chunks a file. Also used (as
-#'   \code{RAMThreshold * 1024} MB) to derive a safe whole-file memory budget
-#'   for source-defined partition routing on delimited files.
+#' @param RAMThreshold Numeric scalar. Estimated size, in gigabytes,
+#'   above which the \code{"RAMEstimate"} strategy chunks a file. Also
+#'   used, as \code{RAMThreshold * 1024} megabytes, to derive a safe
+#'   whole file memory budget for source defined partition routing on a
+#'   delimited file.
 #' @param SAV_CHUNK_SIZE Integer. Rows per chunk, passed to
-#'   \code{\link{safe_read_sav_chunked}}, and the starting chunk size for
-#'   \code{FailProbeMode = "subprocess"}'s adaptive fallback.
-#' @param DelimitedChunkMaxMB Numeric. Per-chunk memory cap (MB) passed to
-#'   \code{\link{read_delimited_chunked}} as \code{MaxChunkMemoryMB}.
-#' @param DelimitedPartitionMaxMB Numeric (optional). Per-partition memory
-#'   cap (MB) for source-defined partition routing. \code{NULL} lets
+#'   \code{\link{safe_read_sav_chunked}}, and the starting chunk size
+#'   for the adaptive fallback under \code{FailProbeMode = "subprocess"}.
+#' @param DelimitedChunkMaxMB Numeric scalar. Memory cap per chunk, in
+#'   megabytes, passed to \code{\link{read_delimited_chunked}} as
+#'   \code{MaxChunkMemoryMB}.
+#' @param DelimitedPartitionMaxMB Numeric scalar. Memory cap per
+#'   partition, in megabytes, for source defined partition routing.
+#'   Defaults to \code{NULL}, which lets
 #'   \code{\link{read_delimited_chunked}} derive a conservative default.
-#' @param FailProbeMode Character. One of \code{"subprocess"} (default;
-#'   attempts the direct read-and-write in an isolated \code{Rscript}
-#'   subprocess so a crash or hang only kills the child), \code{"in_process"}
-#'   (attempts the direct read in the current session, as in earlier
-#'   versions), or \code{"disabled"} (always uses the adaptive chunked
-#'   reader). Only consulted when \code{PartitionBy = "FAIL"} and
-#'   \code{reader} is a delimited type.
-#' @param FailProbeTimeoutSeconds Numeric. Timeout for the isolated
-#'   subprocess under \code{FailProbeMode = "subprocess"}. Default 7200.
-#' @param FailProbeSourcePath Character (optional). Path to the repoquet
-#'   source file the subprocess worker should \code{source()}; falls back to
-#'   \code{REPOQUET_SOURCE}, \code{getOption("repoquet.source.path")}, or the
-#'   installed package.
-#' @param chunk_size_decrement Integer (optional). Passed through to
-#'   \code{\link{safe_read_sav_chunked}} and \code{\link{read_delimited_chunked}}.
-#'   \code{NULL} (the default) lets each reader compute its own default (10\%
-#'   of the starting chunk size).
-#' @param min_chunk_size Integer (optional). Passed through to
-#'   \code{\link{safe_read_sav_chunked}} and \code{\link{read_delimited_chunked}}.
-#'   \code{NULL} (the default) lets each reader compute its own default
-#'   (equal to \code{chunk_size_decrement}).
-#' @param partition_keys Character vector. Canonical Hive partition column
-#'   name(s), e.g. \code{"YEAR"}. Default \code{"YEAR"}.
-#' @param partition_values Named list or data frame row (optional). Declared
-#'   partition value(s) for this file when they are not read from the data
-#'   itself (i.e. when source-defined partition routing does not apply).
-#' @param max_coerce_na_pct Numeric (optional). Passed to
-#'   \code{\link{align_columns}}; fails the file when type coercion turns
-#'   more than this percentage of a column's values into \code{NA}.
+#' @param FailProbeMode Character scalar. Accepts one of three values.
+#'   \code{"subprocess"} attempts the direct read and write in an
+#'   isolated \code{Rscript} subprocess, so that a crash or a hang only
+#'   ends the child process. \code{"in_process"} attempts the direct
+#'   read in the current session, as in an earlier version.
+#'   \code{"disabled"} always uses the adaptive chunked reader.
+#'   Consulted only when \code{PartitionBy} is \code{"FAIL"} and
+#'   \code{reader} is a delimited type. Defaults to \code{"subprocess"}.
+#' @param FailProbeTimeoutSeconds Numeric scalar. Timeout, in seconds,
+#'   for the isolated subprocess under \code{FailProbeMode = "subprocess"}.
+#'   Defaults to \code{7200}.
+#' @param FailProbeSourcePath Character scalar. Path to the repoquet
+#'   source file the subprocess worker sources. Defaults to
+#'   \code{NULL}, which falls back to \code{REPOQUET_SOURCE}, to
+#'   \code{getOption("repoquet.source.path")}, or to the installed
+#'   package.
+#' @param chunk_size_decrement Integer. Passed through to
+#'   \code{\link{safe_read_sav_chunked}} and
+#'   \code{\link{read_delimited_chunked}}. Defaults to \code{NULL},
+#'   which lets each reader compute its own default, 10 percent of the
+#'   starting chunk size.
+#' @param min_chunk_size Integer. Passed through to
+#'   \code{\link{safe_read_sav_chunked}} and
+#'   \code{\link{read_delimited_chunked}}. Defaults to \code{NULL},
+#'   which lets each reader compute its own default, equal to
+#'   \code{chunk_size_decrement}.
+#' @param partition_keys Character vector. Canonical hive partition
+#'   column names, for example \code{"YEAR"}. Defaults to \code{"YEAR"}.
+#' @param partition_values Named list, or one row of a data frame.
+#'   Declared partition value for this file, used when it is not read
+#'   from the data itself, that is, when source defined partition
+#'   routing does not apply. Defaults to \code{NULL}.
+#' @param max_coerce_na_pct Numeric scalar. Passed to
+#'   \code{\link{align_columns}}. Stops the file when type coercion
+#'   turns more than this percentage of a column's values into
+#'   \code{NA}. Defaults to \code{NULL}.
 #' @param ManifestPath,Database,TableName,DuckDBTable,SourcePath,SchemaHash
-#'   Manifest bookkeeping passed through to the chunked writers so each chunk
-#'   is recorded via \code{\link{update_parquet_manifest}}.
-#' @param MaxFileStemTruncate Logical. Passed through to the chunked writers
-#'   to shorten generated chunk filenames on filesystems with path-length
-#'   limits.
+#'   Used for manifest bookkeeping, passed through to the chunked
+#'   writers, so that each chunk is recorded with
+#'   \code{\link{update_parquet_manifest}}.
+#' @param MaxFileStemTruncate Logical. Passed through to the chunked
+#'   writers to shorten a generated chunk file name on a file system
+#'   with a path length limit.
 #' @param accept_partial Logical. Passed through to
-#'   \code{\link{safe_read_sav_chunked}}; if \code{TRUE}, a file that fails
-#'   partway through chunked reading keeps the chunks already written instead
-#'   of failing the whole file.
-#' @param RepositoryLock Repository lock handle (optional), from
-#'   \code{\link{acquire_repository_lock}}, touched periodically during long
-#'   chunked reads so the lock does not expire mid-file.
-#' @return Either:
-#' \itemize{
-#'   \item a \code{data.table} containing the full file contents (direct read
-#'     under \code{PartitionBy = "NRows"} or \code{"RAMEstimate"}), or
-#'   \item a list with \code{data}, \code{pre_aligned}, and
-#'     \code{written = FALSE} (direct read under \code{PartitionBy = "FAIL"}
-#'     with \code{FailProbeMode != "subprocess"}), or
-#'   \item a list with \code{written = TRUE} and chunk/partition metadata
-#'     (chunked or partition-routed read succeeded and wrote Parquet files
-#'     directly), or
-#'   \item \code{data.frame()} (file not found, or a non-chunkable reader's
-#'     read failed).
-#' }
+#'   \code{\link{safe_read_sav_chunked}}. Accepts \code{TRUE}, which,
+#'   when a file fails partway through chunked reading, keeps the
+#'   chunks already written instead of failing the whole file. Accepts
+#'   \code{FALSE}, which fails the whole file.
+#' @param RepositoryLock Repository lock handle, from
+#'   \code{\link{acquire_repository_lock}}. Touched periodically during
+#'   a long chunked read, so the lock does not expire partway through
+#'   the file. Defaults to \code{NULL}.
+#' @return Either a data.table containing the full file contents, for a
+#'   direct read under \code{PartitionBy = "NRows"} or
+#'   \code{"RAMEstimate"}, or a list with \code{data}, \code{pre_aligned},
+#'   and \code{written = FALSE}, for a direct read under
+#'   \code{PartitionBy = "FAIL"} with \code{FailProbeMode} other than
+#'   \code{"subprocess"}, or a list with \code{written = TRUE} and chunk
+#'   or partition metadata, when a chunked or partition routed read
+#'   succeeded and wrote Parquet files directly, or an empty data frame,
+#'   when the file was not found, or a non chunkable reader's read
+#'   failed.
 #' @seealso \code{\link{generic_db_loader}}, \code{\link{safe_read_sav}},
 #'   \code{\link{safe_read_sav_chunked}}, \code{\link{safe_read_csv}},
 #'   \code{\link{read_delimited_chunked}}
@@ -7620,25 +7860,28 @@ read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL, tab
 ##################################
 #### Create DuckDB Connection ####
 ##################################
-#' Open a DuckDB connection with standard configuration
+#' Opens a DuckDB connection with standard configuration
 #'
 #' Connects to the DuckDB database file at
 #' \code{file.path(FormattedDBPath, DBName)}, then sets \code{threads},
 #' \code{memory_limit}, \code{enable_progress_bar}, and
 #' \code{temp_directory} for the session.
-#' @param FormattedDBPath Character. Directory containing the DuckDB file.
-#' @param DBName Character. Name of the DuckDB file.  Defaults to
+#' @param FormattedDBPath Character scalar. Directory containing the
+#'   DuckDB file.
+#' @param DBName Character scalar. Name of the DuckDB file. Defaults to
 #'   \code{"DuckDBRelationalDatabase.duckdb"}.
-#' @param TempDirPath Character. Path DuckDB will use to spill intermediate
-#'   results when \code{memory_limit} is exceeded.
-#' @param GB Character. Memory limit string passed to DuckDB's
-#'   \code{memory_limit} setting (e.g. \code{"48GB"}).  Defaults to
-#'   \code{"48GB"}.
-#' @param ReadOnly Logical. If \code{TRUE} (default), the connection is
-#'   opened read-only, which allows multiple concurrent readers and is safer
-#'   for analyst sessions.
-#' @param ProgressBar Logical. If \code{TRUE} (default), DuckDB's built-in
-#'   progress bar is enabled for long-running queries.
+#' @param TempDirPath Character scalar. Path DuckDB uses to spill
+#'   intermediate results when \code{memory_limit} is exceeded.
+#' @param GB Character scalar. Memory limit string passed to DuckDB's
+#'   \code{memory_limit} setting, for example \code{"48GB"}. Defaults
+#'   to \code{"48GB"}.
+#' @param ReadOnly Logical. Accepts \code{TRUE}, which opens the
+#'   connection restricted to reading, allowing multiple concurrent
+#'   readers, and safer for an analyst's session. Accepts \code{FALSE},
+#'   which opens it for reading and writing. Defaults to \code{TRUE}.
+#' @param ProgressBar Logical. Accepts \code{TRUE}, which enables
+#'   DuckDB's own progress bar for a long running query. Accepts
+#'   \code{FALSE}, which disables it. Defaults to \code{TRUE}.
 #' @return An open DBI connection to the DuckDB database.
 #' @seealso \code{\link{register_parquet_view}},
 #'   \code{\link{DBViewSummary}}
@@ -7668,32 +7911,40 @@ open_duckdb <- function(FormattedDBPath, DBName = "DuckDBRelationalDatabase.duck
 #### Survey-weighted estimate helpers ##########################################
 ################################################################################
 
-#' Survey-weighted counts and means over a DuckDB view
+#' Computes a survey weighted count or mean over a DuckDB view
 #'
-#' HCUP discharge records are a sample: national estimates require the survey
-#' weight (\code{DISCWT} for NIS, \code{TRENDWT} for trend files, etc.). These
-#' helpers compute weighted point estimates with the weight handling that is
-#' easy to get subtly wrong by hand. Rows with a missing weight are excluded
-#' from weighted figures (and counted separately), and for means the weight
-#' sum is restricted to rows where the value is non-missing so the denominator
-#' matches the numerator.
+#' HCUP discharge records are a sample. A national estimate requires
+#' the survey weight, \code{DISCWT} for NIS, \code{TRENDWT} for a trend
+#' file, and so on. These functions compute a weighted point estimate
+#' with the weight handling that is easy to get subtly wrong by hand. A
+#' row with a missing weight is excluded from a weighted figure, and
+#' counted separately. For a mean, the weight sum is restricted to a
+#' row whose value is not missing, so that the denominator matches the
+#' numerator.
 #'
-#' IMPORTANT: these are point estimates only. Standard errors for HCUP data
-#' require the full survey design (strata such as \code{NIS_STRATUM}, clusters
-#' such as \code{HOSP_NIS}); use the \pkg{survey} package when variance
-#' estimates are needed.
-#' @param con Live DuckDB connection.
-#' @param table Character. Registered view/table name (validated against the
-#'   database).
-#' @param value_col Character (means only). Numeric column to average.
-#' @param weight_col Character. Survey weight column, default \code{"DISCWT"}.
-#' @param by Character vector (optional). Grouping columns; validated as
-#'   identifiers against the table.
-#' @param where Character (optional). Raw SQL predicate appended as
-#'   \code{WHERE ...}. Trusted input only -- it is interpolated verbatim.
-#' @return data.table. Counts: by-groups, \code{n_unweighted},
-#'   \code{n_weighted}, \code{n_missing_weight}. Means additionally:
-#'   \code{mean_weighted}, \code{mean_unweighted}, \code{n_value_missing}.
+#' These are point estimates only. A standard error for HCUP data
+#' requires the full survey design, strata such as \code{NIS_STRATUM},
+#' and clusters such as \code{HOSP_NIS}. Use the \pkg{survey} package
+#' when a variance estimate is needed.
+#' @param con A live DuckDB connection.
+#' @param table Character scalar. Registered view or table name,
+#'   validated against the database.
+#' @param value_col Character scalar. Numeric column to average. Used
+#'   only for a mean.
+#' @param weight_col Character scalar. Survey weight column. Defaults
+#'   to \code{"DISCWT"} for \code{hcup_weighted_count},
+#'   \code{hcup_weighted_mean}, and \code{hcup_weighted_summary}, and
+#'   is required, with no default, for \code{weighted_count},
+#'   \code{weighted_mean}, and \code{weighted_summary}.
+#' @param by Character vector. Grouping columns, validated as
+#'   identifiers against the table. Defaults to \code{NULL}.
+#' @param where Character scalar. Raw SQL predicate appended as
+#'   \code{WHERE ...}. Trusted input only, since it is interpolated
+#'   verbatim. Defaults to \code{NULL}.
+#' @return A data.table. For a count: the grouping columns, plus
+#'   \code{n_unweighted}, \code{n_weighted}, and
+#'   \code{n_missing_weight}. For a mean, also \code{mean_weighted},
+#'   \code{mean_unweighted}, and \code{n_value_missing}.
 #' @examples
 #' con <- DBI::dbConnect(duckdb::duckdb(), dbdir = ":memory:")
 #' DBI::dbWriteTable(con, "NIS_Core", data.frame(
@@ -7790,44 +8041,47 @@ weighted_summary <- function(con, table, value_col = NULL, weight_col,
 ###################################
 #### Search Diagnosis function ####
 ###################################
-#' Search DuckDB tables for diagnosis / procedure codes
+#' Searches DuckDB tables for diagnosis and procedure codes
 #'
-#' Scans every qualifying \code{VARCHAR} column in each of the specified
-#' tables for a vector of codes using a single \code{UNPIVOT}-based query
-#' per table (falling back to a \code{UNION ALL} if \code{UNPIVOT} is not
-#' supported for a given table).  Returns a detailed \code{data.table} plus
-#' a rolled-up summary in a named list.
+#' Scans every qualifying \code{VARCHAR} column in each of the
+#' specified tables for a vector of codes, using a single query per
+#' table based on \code{UNPIVOT}, falling back to a query based on
+#' \code{UNION ALL} when \code{UNPIVOT} is not supported for a given
+#' table. Returns a detailed data.table, plus a summary rolled up by
+#' code, in a named list.
 #'
-#' Using \code{UNPIVOT} means DuckDB scans each table once regardless of how
-#' many codes or columns are searched, rather than issuing one query per code
-#' per column.
+#' Using \code{UNPIVOT} means DuckDB scans each table once regardless
+#' of how many codes or columns are searched, rather than issuing one
+#' query per code per column.
 #' @param con A DBI connection to an open DuckDB database.
-#' @param codes Character vector. Diagnosis or procedure codes to search for.
-#' @param tables Character vector (optional). Table names to restrict the
-#'   search to.  \code{NULL} (default) searches all tables in \code{con}.
-#'   Names not found in the database trigger a \code{warning()}, and the
-#'   search proceeds with whatever names were found.
-#' @param match_type Character scalar.  One of \code{"exact"} (default;
-#'   fastest, uses an index when available), \code{"prefix"} (matches all
-#'   sub-codes; cannot use a standard index), or \code{"any"} (broadest;
-#'   always a full scan).
-#' @param col_filter Character scalar. Regular expression applied to column
-#'   names to restrict which \code{VARCHAR} columns are searched.  Pass
-#'   \code{NULL} to search every \code{VARCHAR} column.
-#' @param min_rows Integer. Minimum matching row count for a result to be
-#'   included.  Default \code{1L}.
-#' @param verbose Logical. If \code{TRUE} (default), prints per-table
-#'   progress messages.
-#' @return A named list with two elements:
-#' \describe{
-#'   \item{\code{DiagnosisSearch}}{A \code{data.table} with columns
-#'     \code{database_table}, \code{column_name}, \code{code},
-#'     \code{n_rows}, \code{total_rows}, \code{pct_of_table},
-#'     \code{match_type}.}
-#'   \item{\code{DiagnosisSearchSummary}}{A rolled-up \code{data.table}
-#'     with one row per code showing \code{n_tables}, \code{n_columns},
-#'     \code{total_rows}, \code{tables_found}, and \code{columns_found}.}
-#' }
+#' @param codes Character vector. Diagnosis or procedure codes to
+#'   search for.
+#' @param tables Character vector. Table names to restrict the search
+#'   to. Defaults to \code{NULL}, which searches every table in
+#'   \code{con}. A name not found in the database triggers a
+#'   \code{warning()}, and the search proceeds with whatever names were
+#'   found.
+#' @param match_type Character scalar. Accepts one of three values.
+#'   \code{"exact"} matches a whole code, is fastest, and uses an index
+#'   when one is available. \code{"prefix"} matches every code that
+#'   shares this prefix, and cannot use a standard index. \code{"any"}
+#'   matches this text anywhere in the value, is the broadest, and is
+#'   always a full scan. Defaults to \code{"exact"}.
+#' @param col_filter Character scalar. Regular expression applied to
+#'   column names to restrict which \code{VARCHAR} columns are
+#'   searched. Pass \code{NULL} to search every \code{VARCHAR} column.
+#' @param min_rows Integer. Minimum matching row count for a result to
+#'   be included. Defaults to \code{1}.
+#' @param verbose Logical. Accepts \code{TRUE}, which prints a progress
+#'   message for each table. Accepts \code{FALSE}, which does not.
+#'   Defaults to \code{TRUE}.
+#' @return A named list with two elements. \code{DiagnosisSearch} is a
+#'   data.table with columns \code{database_table}, \code{column_name},
+#'   \code{code}, \code{n_rows}, \code{total_rows}, \code{pct_of_table},
+#'   and \code{match_type}. \code{DiagnosisSearchSummary} is a
+#'   data.table rolled up to one row per code, with \code{n_tables},
+#'   \code{n_columns}, \code{total_rows}, \code{tables_found}, and
+#'   \code{columns_found}.
 #' @seealso \code{\link{column_availability}}
 #' @examples
 #' con <- DBI::dbConnect(duckdb::duckdb(), dbdir = ":memory:")
@@ -7999,30 +8253,30 @@ search_diagnosis_codes <- function(con, codes, tables = NULL, match_type = c("ex
 #############################################################################################
 #### Determine the columns in a table across each partition that contain relevant information ####
 #############################################################################################
-#' Report non-NA percentage per column per partition from a Parquet table
+#' Reports the percentage of non missing values per column per partition from a Parquet table
 #'
-#' For each Hive partition directory of \code{table_name} under
+#' For each hive partition directory of \code{table_name} under
 #' \code{ParquetBasePath}, runs \code{SUMMARIZE} in DuckDB to obtain the
-#' \code{null_percentage} for every column without pulling any column data
-#' into R.  Returns the results as a wide matrix (column \eqn{\times} partition)
-#' alongside a boolean presence matrix and pre-computed lists of mostly-empty
-#' and partition-inconsistent columns.
+#' \code{null_percentage} for every column, without pulling any column
+#' data into R. Returns the results as a wide matrix, columns are
+#' partitions and rows are column names, together with a logical
+#' presence matrix and already computed lists of a mostly empty column
+#' and a column inconsistent across partitions.
 #' @param con A DBI connection to an open DuckDB database.
-#' @param table_name Character. Name of the table (must correspond to a
-#'   subdirectory of \code{ParquetBasePath}).
-#' @param ParquetBasePath Character. Root directory of the Parquet store.
-#' @return A named list with four elements:
-#' \describe{
-#'   \item{\code{PercentageNonNA}}{Wide \code{data.frame}: columns are partitions,
-#'     rows are column names, values are \code{pct_non_na} (0--100).}
-#'   \item{\code{ContainsValues}}{Wide logical \code{data.frame}: \code{TRUE}
-#'     where \code{pct_non_na > 0}.}
-#'   \item{\code{mostly_empty}}{Rows of \code{PercentageNonNA} where the
-#'     maximum across years is \eqn{\leq 1\%}.}
-#'   \item{\code{inconsistent}}{Rows where some partitions have \code{> 1\%}
-#'     non-NA and others have \eqn{\leq 1\%} -- i.e., the column is present
-#'     in some partitions but effectively absent in others.}
-#' }
+#' @param table_name Character scalar. Name of the table. Must
+#'   correspond to a subdirectory of \code{ParquetBasePath}.
+#' @param ParquetBasePath Character scalar. Root directory of the
+#'   Parquet store.
+#' @return A named list with four elements. \code{PercentageNonNA} is a
+#'   wide data frame whose columns are partitions, whose rows are
+#'   column names, and whose values are \code{pct_non_na}, from 0 to
+#'   100. \code{ContainsValues} is a wide logical data frame,
+#'   \code{TRUE} where \code{pct_non_na > 0}. \code{mostly_empty} is
+#'   the rows of \code{PercentageNonNA} where the maximum across years
+#'   is at most 1 percent. \code{inconsistent} is the rows where some
+#'   partitions have more than 1 percent of non missing values and
+#'   others have at most 1 percent, that is, where the column is
+#'   present in some partitions but effectively absent in others.
 #' @seealso \code{\link{ColumnAvailabilityCompile}},
 #'   \code{\link{ColumnAvailabilityView}}
 #' @examples
@@ -8150,25 +8404,29 @@ availability_sheet_name_for <- function(WBPath, table_name) {
   excel_sheet_name(label, existing = setdiff(sheets, availability_sheet_map_name()), prefer_existing = TRUE)
 }
 
-#' Run \code{column_availability()} for a list of tables and write to Excel
+#' Runs \code{column_availability()} for a list of tables and writes to Excel
 #'
-#' Iterates over \code{tables}, calls \code{\link{column_availability}} for
-#' each, and writes the \code{PercentageNonNA} matrix to a sheet in an Excel
-#' workbook at \code{SupportingInfoPath}.  Creates the workbook on the first
-#' table if it does not yet exist; appends a new sheet for each subsequent
-#' table via \code{\link{WorkbookUpdateopenxlsx}}.
+#' Iterates over \code{tables}, calls \code{\link{column_availability}}
+#' for each, and writes the \code{PercentageNonNA} matrix to a sheet in
+#' an Excel workbook at \code{SupportingInfoPath}. Creates the workbook
+#' on the first table when it does not yet exist, and appends a new
+#' sheet for each subsequent table with
+#' \code{\link{WorkbookUpdateopenxlsx}}.
 #' @param con A DBI connection to an open DuckDB database.
 #' @param tables Character vector of table names to process.
-#' @param ParquetBasePath Character. Root directory of the Parquet store.
-#' @param SupportingInfoPath Character. Path to the output \code{.xlsx}
-#'   workbook.
-#' @param verbose Logical. If \code{TRUE} (default), logs or prints a
-#'   per-table summary line.
-#' @param logStatus Logical. If \code{TRUE} (default), messages are written
-#'   via \code{\link{log_msg}}; otherwise they are printed to the console.
-#' @param StartAt Integer. Index into \code{tables} at which to begin (for
-#'   resuming an interrupted run).  Default \code{1}.
-#' @return \code{invisible(NULL)}.  Called for its side effects.
+#' @param ParquetBasePath Character scalar. Root directory of the
+#'   Parquet store.
+#' @param SupportingInfoPath Character scalar. Path to the output
+#'   \code{.xlsx} workbook.
+#' @param verbose Logical. Accepts \code{TRUE}, which logs or prints a
+#'   summary line for each table. Accepts \code{FALSE}, which does not.
+#'   Defaults to \code{TRUE}.
+#' @param logStatus Logical. Accepts \code{TRUE}, which writes messages
+#'   with \code{\link{log_msg}}. Accepts \code{FALSE}, which prints
+#'   them to the console. Defaults to \code{TRUE}.
+#' @param StartAt Integer. Index into \code{tables} at which to begin,
+#'   for resuming an interrupted run. Defaults to \code{1}.
+#' @return \code{invisible(NULL)}.
 #' @seealso \code{\link{column_availability}},
 #'   \code{\link{ColumnAvailabilityView}},
 #'   \code{\link{WorkbookUpdateopenxlsx}}
@@ -8214,26 +8472,25 @@ ColumnAvailabilityCompile <- function(con, tables, ParquetBasePath, SupportingIn
   }
 }
 
-#' Visualise column availability as a heatmap
+#' Visualizes column availability as a heatmap
 #'
-#' Reads the \code{PercentageNonNA} sheet for \code{table_name} from the
-#' Excel workbook written by \code{\link{ColumnAvailabilityCompile}} and
-#' renders a \pkg{ComplexHeatmap} heatmap where each cell is coloured by
-#' the percentage of non-\code{NA} values (0--100), with grey cells
-#' indicating columns that are fully absent in a given partition.
-#' @param SupportingInfoPath Character. Path to the \code{.xlsx} workbook
-#'   produced by \code{\link{ColumnAvailabilityCompile}}.
-#' @param table_name Character. Sheet name (i.e. table name) to read and
-#'   plot.
-#' @return A named list with three elements:
-#' \describe{
-#'   \item{\code{table}}{The raw \code{data.frame} read from the workbook.}
-#'   \item{\code{heatmap}}{A \code{ComplexHeatmap::Heatmap} object ready
-#'     to print or save.}
-#'   \item{\code{sheet}}{Character. The resolved worksheet name that was read
-#'     (may differ from \code{table_name} if it was sanitized/de-duplicated
-#'     for Excel by \code{\link{WorkbookUpdateopenxlsx}}).}
-#' }
+#' Reads the \code{PercentageNonNA} sheet for \code{table_name} from
+#' the Excel workbook written by \code{\link{ColumnAvailabilityCompile}}
+#' and renders a \pkg{ComplexHeatmap} heatmap where each cell is
+#' colored by the percentage of values that are not \code{NA}, from 0
+#' to 100, with a grey cell indicating a column that is fully absent
+#' in a given partition.
+#' @param SupportingInfoPath Character scalar. Path to the
+#'   \code{.xlsx} workbook produced by
+#'   \code{\link{ColumnAvailabilityCompile}}.
+#' @param table_name Character scalar. The table name, used as the
+#'   sheet name to read and plot.
+#' @return A named list with three elements. \code{table} is the raw
+#'   data frame read from the workbook. \code{heatmap} is a
+#'   \code{ComplexHeatmap::Heatmap} object, ready to print or save.
+#'   \code{sheet} is the resolved worksheet name that was read, which
+#'   may differ from \code{table_name} when it was sanitized or
+#'   deduplicated for Excel by \code{\link{WorkbookUpdateopenxlsx}}.
 #' @seealso \code{\link{ColumnAvailabilityCompile}}
 #' @examples
 #' \donttest{
@@ -8283,16 +8540,16 @@ ColumnAvailabilityView <- function(SupportingInfoPath, table_name){
 ############################################
 #### Function that updates the workbook ####
 ############################################
-#' Add a sheet to an existing \pkg{openxlsx} workbook
+#' Adds a sheet to an existing \pkg{openxlsx} workbook
 #'
 #' Loads the workbook at \code{WBPath}, adds a new sheet named
-#' \code{SheetName}, writes \code{DTAdd} to it, and saves the workbook back
-#' to the same path.
-#' @param WBPath Character. Path to an existing \code{.xlsx} workbook.
-#' @param DTAdd A \code{data.frame} or \code{data.table} to write into the
-#'   new sheet.
-#' @param SheetName Character. Name of the new worksheet.
-#' @return \code{invisible(NULL)}.  Called for its side effects.
+#' \code{SheetName}, writes \code{DTAdd} to it, and saves the workbook
+#' back to the same path.
+#' @param WBPath Character scalar. Path to an existing \code{.xlsx}
+#'   workbook.
+#' @param DTAdd A data frame or data.table to write into the new sheet.
+#' @param SheetName Character scalar. Name of the new worksheet.
+#' @return \code{invisible(NULL)}.
 #' @seealso \code{\link{ColumnAvailabilityCompile}}
 #' @keywords internal
 #' @export
@@ -8333,19 +8590,21 @@ WorkbookUpdateopenxlsx <- function(WBPath, DTAdd, SheetName){
 #############################################################################
 #### Repository architecture and schema engine overrides ####################
 #############################################################################
-#' Create an empty data-contract template data frame
+#' Creates an empty data contract template data frame
 #'
-#' Returns the zero-row column layout expected by \code{\link{load_data_contracts}}
-#' and \code{\link{validate_data_contracts}}: one row per rule to enforce
-#' against a DuckDB table/column, with the rule's parameters, severity, and
-#' an enabled/disabled flag. Used internally to seed a new data-contract
-#' file when \code{\link{load_data_contracts}} is called with
+#' Returns the zero row column layout expected by
+#' \code{\link{load_data_contracts}} and
+#' \code{\link{validate_data_contracts}}: one row per rule to enforce
+#' against a DuckDB table and column, with the rule's parameters,
+#' severity, and an enabled or disabled flag. Used to seed a new data
+#' contract file when \code{\link{load_data_contracts}} is called with
 #' \code{create_if_missing = TRUE}, and useful as a starting point when
-#' writing contracts by hand.
-#' @return An empty (0-row) data frame with columns \code{ContractName},
-#'   \code{DuckDBTable}, \code{Column}, \code{Rule}, \code{Value},
-#'   \code{ReferenceTable}, \code{ReferenceColumn}, \code{Where},
-#'   \code{Severity}, \code{Enabled}, and \code{Notes}.
+#' writing a contract by hand.
+#' @return An empty, zero row, data frame with columns
+#'   \code{ContractName}, \code{DuckDBTable}, \code{Column},
+#'   \code{Rule}, \code{Value}, \code{ReferenceTable},
+#'   \code{ReferenceColumn}, \code{Where}, \code{Severity},
+#'   \code{Enabled}, and \code{Notes}.
 #' @seealso \code{\link{load_data_contracts}}, \code{\link{validate_data_contracts}}
 #' @examples
 #' template <- build_data_contract_template()
@@ -8360,29 +8619,32 @@ build_data_contract_template <- function() {
     Enabled = logical(), Notes = character(), stringsAsFactors = FALSE)
 }
 
-#' Read a repository data-contract file, optionally creating an empty one
+#' Reads a repository data contract file, optionally creating an empty one
 #'
-#' Reads the workbook or CSV of declarative data-contract rules used by
-#' \code{\link{validate_data_contracts}}. When \code{DataContractPath} is
-#' \code{NULL} or blank, an empty contract table is returned with no error.
-#' When the file does not exist and \code{create_if_missing = TRUE}, a new
-#' file is written from \code{\link{build_data_contract_template}} (Excel via
-#' a \code{DataContracts} sheet, or CSV) and the empty template is returned.
-#' Once read, optional columns missing from the file are filled with
-#' defaults (\code{Severity = "error"}, \code{Enabled = TRUE}, etc.), and
-#' \code{Rule}/\code{Severity} are validated for enabled rows: \code{Rule}
-#' must be one of \code{not_null}, \code{unique}, \code{range}, \code{allowed},
+#' Reads the workbook or CSV of declarative data contract rules used by
+#' \code{\link{validate_data_contracts}}. When \code{DataContractPath}
+#' is \code{NULL} or blank, an empty contract table is returned with no
+#' error. When the file does not exist and \code{create_if_missing} is
+#' \code{TRUE}, a new file is written from
+#' \code{\link{build_data_contract_template}}, as an Excel workbook
+#' with a \code{DataContracts} sheet, or as CSV, and the empty template
+#' is returned. Once read, an optional column missing from the file is
+#' filled with a default, for example \code{Severity = "error"} and
+#' \code{Enabled = TRUE}, and \code{Rule} and \code{Severity} are
+#' validated for an enabled row: \code{Rule} must be one of
+#' \code{not_null}, \code{unique}, \code{range}, \code{allowed},
 #' \code{regex}, or \code{foreign_key}, and \code{Severity} must be
 #' \code{"error"} or \code{"warning"}.
-#' @param DataContractPath Character. Path to the data-contract file
-#'   (\code{.xlsx} or \code{.csv}). \code{NULL} or an empty string returns an
-#'   empty table.
-#' @param create_if_missing Logical. If \code{TRUE} and the file does not
-#'   exist, write an empty template to \code{DataContractPath} before
-#'   returning it. Default \code{FALSE}.
-#' @return A \code{data.table} of contract rules (possibly 0 rows), or an
-#'   empty \code{data.table} when \code{DataContractPath} is \code{NULL}/blank
-#'   or absent with \code{create_if_missing = FALSE}.
+#' @param DataContractPath Character scalar. Path to the data contract
+#'   file, \code{.xlsx} or \code{.csv}. Accepts \code{NULL} or an empty
+#'   string, which returns an empty table.
+#' @param create_if_missing Logical. Accepts \code{TRUE}, which, when
+#'   the file does not exist, writes an empty template to
+#'   \code{DataContractPath} before returning it. Accepts \code{FALSE},
+#'   which does not write it. Defaults to \code{FALSE}.
+#' @return A data.table of contract rules, possibly with zero rows, or
+#'   an empty data.table when \code{DataContractPath} is \code{NULL},
+#'   blank, or absent with \code{create_if_missing} \code{FALSE}.
 #' @seealso \code{\link{build_data_contract_template}}, \code{\link{validate_data_contracts}}
 #' @examples
 #' tmp <- tempfile(fileext = ".csv")
@@ -8439,36 +8701,44 @@ contract_literal <- function(x) {
   if (grepl("^-?[0-9]+(?:\\.[0-9]+)?$", x)) x else quote_duckdb_string(x)
 }
 
-#' Validate repository tables against declarative data contracts
+#' Validates repository tables against declarative data contracts
 #'
-#' Loads the enabled rules from \code{DataContractPath} via
-#' \code{\link{load_data_contracts}} and, for each rule, runs the matching
-#' DuckDB query against \code{con}: \code{not_null} counts NULLs,
-#' \code{unique} counts duplicate non-null values, \code{range} counts values
-#' outside a \code{"minimum;maximum"} \code{Value}, \code{allowed} counts
-#' values outside a semicolon-separated allow-list, \code{regex} counts
-#' values that fail \code{regexp_matches()}, and \code{foreign_key} counts
-#' child values with no matching row in \code{ReferenceTable}/
-#' \code{ReferenceColumn}. A missing table or column, or a malformed rule, is
-#' recorded as \code{Status = "error"} rather than stopping the whole run.
-#' @param con An open DBI/DuckDB connection to the repository database.
-#' @param DataContractPath Character. Path to the data-contract file read by
-#'   \code{\link{load_data_contracts}}.
-#' @param strict Logical. If \code{TRUE} (default), stop with an error
-#'   listing the failure count when any \code{Severity = "error"} rule has
-#'   \code{Status} \code{"fail"} or \code{"error"}. If \code{FALSE}, return
-#'   the results table instead of stopping.
-#' @param logStatus Logical. If \code{TRUE} (default), log one line per rule
-#'   via \code{\link{log_msg}} recording its pass/fail/error status.
-#' @param LogPath Character (optional). Log file path for this call; also
-#'   opens a scoped run via \code{begin_repository_run()} when supplied
-#'   together with, or instead of, \code{RunId}.
-#' @param RunId Character (optional). Run identifier tagged onto log lines.
-#' @return Invisibly, a \code{data.table} with one row per enabled contract
-#'   rule: \code{ContractName}, \code{DuckDBTable}, \code{Column}, \code{Rule},
-#'   \code{Severity}, \code{Violations}, \code{Status} (\code{"pass"},
-#'   \code{"fail"}, or \code{"error"}), and \code{Message} (the error text
-#'   when \code{Status = "error"}).
+#' Loads the enabled rules from \code{DataContractPath} with
+#' \code{\link{load_data_contracts}} and, for each rule, runs the
+#' matching DuckDB query against \code{con}. \code{not_null} counts a
+#' \code{NULL} value. \code{unique} counts a duplicate, not null,
+#' value. \code{range} counts a value outside a \code{"minimum;maximum"}
+#' \code{Value}. \code{allowed} counts a value outside a list of
+#' values separated by a semicolon. \code{regex} counts a value that
+#' fails \code{regexp_matches()}. \code{foreign_key} counts a child
+#' value with no matching row in \code{ReferenceTable} and
+#' \code{ReferenceColumn}. A missing table or column, or a malformed
+#' rule, is recorded with \code{Status = "error"} rather than stopping
+#' the whole run.
+#' @param con An open DBI or DuckDB connection to the repository
+#'   database.
+#' @param DataContractPath Character scalar. Path to the data contract
+#'   file read by \code{\link{load_data_contracts}}.
+#' @param strict Logical. Accepts \code{TRUE}, which stops with an
+#'   error listing the failure count when any \code{Severity = "error"}
+#'   rule has \code{Status} \code{"fail"} or \code{"error"}. Accepts
+#'   \code{FALSE}, which returns the results table instead of
+#'   stopping. Defaults to \code{TRUE}.
+#' @param logStatus Logical. Accepts \code{TRUE}, which logs one line
+#'   per rule with \code{\link{log_msg}}, recording whether it passed,
+#'   failed, or errored. Accepts \code{FALSE}, which does not. Defaults
+#'   to \code{TRUE}.
+#' @param LogPath Character scalar. Log file path for this call. Also
+#'   starts a logging context with \code{begin_repository_run()} when
+#'   supplied together with, or instead of, \code{RunId}. Defaults to
+#'   \code{NULL}.
+#' @param RunId Character scalar. Run identifier tagged onto log
+#'   lines. Defaults to \code{NULL}.
+#' @return Invisibly, a data.table with one row per enabled contract
+#'   rule: \code{ContractName}, \code{DuckDBTable}, \code{Column},
+#'   \code{Rule}, \code{Severity}, \code{Violations}, \code{Status},
+#'   one of \code{"pass"}, \code{"fail"}, or \code{"error"}, and
+#'   \code{Message}, the error text when \code{Status = "error"}.
 #' @seealso \code{\link{load_data_contracts}}, \code{\link{build_data_contract_template}}
 #' @examples
 #' con <- DBI::dbConnect(duckdb::duckdb())
@@ -8556,28 +8826,29 @@ validate_data_contracts <- function(con, DataContractPath, strict = TRUE, logSta
   invisible(out)
 }
 
-#' Discover candidate table relationships from compatible schema columns
+#' Discovers candidate table relationships from compatible schema columns
 #'
-#' Scans a finalized \code{table_schema} catalog (as returned in
-#' \code{FinalizeRepositorySchema()$table_schema}) for columns that are
-#' likely join keys across tables: columns already assigned to the same
-#' \code{MergeGroup}, columns with \code{Role} \code{"join_key"} or
-#' \code{"partition"}, and (when \code{include_candidates = TRUE}) columns
-#' whose name looks like a merge key even if no decision was ever recorded.
-#' Only columns sharing the same canonical type are paired. Returns an empty
-#' table if \code{table_schema} lacks the required columns or has no rows.
+#' Scans a finalized \code{table_schema} catalog, as returned in
+#' \code{FinalizeRepositorySchema()$table_schema}, for a column that is
+#' likely a join key across tables: a column already assigned to the
+#' same \code{MergeGroup}, a column with \code{Role} \code{"join_key"}
+#' or \code{"partition"}, and, when \code{include_candidates} is
+#' \code{TRUE}, a column whose name looks like a merge key even when no
+#' decision was ever recorded. Only a column sharing the same canonical
+#' type is paired. Returns an empty table when \code{table_schema}
+#' lacks the required columns or has no row.
 #' @param table_schema A data frame or data.table with at least
 #'   \code{DuckDBTable}, \code{Column}, and \code{CanonicalType}, and
 #'   optionally \code{Role}, \code{MergeGroup}, and \code{MergeReviewed}.
-#' @param include_candidates Logical. If \code{TRUE} (default), also surface
-#'   pairs whose shared column name merely looks like a merge-key candidate
-#'   even without an explicit \code{MergeGroup} or \code{join_key} role. If
-#'   \code{FALSE}, only explicitly grouped or declared join keys are
-#'   reported.
+#' @param include_candidates Logical. Accepts \code{TRUE}, which also
+#'   surfaces a pair whose shared column name merely looks like a merge
+#'   key candidate, even without an explicit \code{MergeGroup} or
+#'   \code{join_key} role. Accepts \code{FALSE}, which reports only an
+#'   explicitly grouped or declared join key. Defaults to \code{TRUE}.
 #' @return A data.table with one row per candidate relationship:
-#'   \code{LeftTable}, \code{RightTable}, \code{Column}, \code{CanonicalType},
-#'   and \code{Detection} (\code{"approved_group"}, \code{"declared"}, or
-#'   \code{"candidate"}).
+#'   \code{LeftTable}, \code{RightTable}, \code{Column},
+#'   \code{CanonicalType}, and \code{Detection}, one of
+#'   \code{"approved_group"}, \code{"declared"}, or \code{"candidate"}.
 #' @examples
 #' schema <- data.frame(
 #'   DuckDBTable = c("SALES_Orders", "SALES_Orders", "SENSORS_Readings"),
@@ -8620,76 +8891,115 @@ discover_schema_relationships <- function(table_schema, include_candidates = TRU
 #### Project scaffolding #######################################################
 ################################################################################
 
-#' Load a repository configuration file
+#' Loads a repository configuration file
 #'
-#' Loads the machine-specific repository configuration from a file and merges
-#' it with optional runtime overrides. Configuration precedence, from lowest to
-#' highest, is package defaults, values in the configuration file, the named
-#' \code{overrides} list, and explicit function arguments. This lets users
-#' change settings for one run without modifying the configuration file.
+#' Loads the machine specific repository configuration from a file and
+#' merges it with optional runtime overrides. Configuration precedence,
+#' from lowest to highest, is the package defaults, the values in the
+#' configuration file, the named \code{overrides} list, and an explicit
+#' function argument. This lets a person change a setting for one run
+#' without modifying the configuration file.
 #'
-#' The configuration file must define a list named \code{repository_config}
-#' with required paths and optional performance thresholds. See
-#' \code{\link{create_repository_project}}: an R file that defines a list
-#' named \code{repository_config} with the paths and thresholds the loader
-#' needs. Keeping configuration in one reviewable file removes every
-#' hard-coded machine path from the run script.
+#' The configuration file must define a list named
+#' \code{repository_config} with the required paths and optional
+#' performance thresholds. See \code{\link{create_repository_project}}:
+#' an R file that defines a list named \code{repository_config} with
+#' the paths and thresholds the loader needs. Keeping the configuration
+#' in one reviewable file removes every machine path that would
+#' otherwise be hard coded into the run script.
 #'
-#' @param path Character. Path to the repository configuration file (R script
-#'   that defines \code{repository_config} list).
-#' @param SAV_CHUNK_SIZE Integer or NULL. Rows per chunk for SAV file streaming.
-#'   NULL retains the configuration-file value or the default of 1000000L.
-#' @param DelimitedChunkMaxMB Numeric or NULL. Conservative cap on the estimated
-#'   peak memory of each CSV/TSV/TXT chunk for \code{NRows} and
-#'   \code{RAMEstimate}. \code{FAIL} instead starts at \code{SAV_CHUNK_SIZE}
-#'   after its direct-read probe and reduces that row chunk after recoverable
-#'   memory-allocation errors. NULL retains the file value or 256.
-#' @param DelimitedPartitionMaxMB Numeric or NULL. Cap on a single source-defined
-#'   partition's estimated in-memory footprint before reading it one partition
-#'   at a time instead of in fixed-size chunks. NULL retains the file value, or
-#'   uses half of the conservative source-route cap derived from
+#' @param path Character scalar. Path to the repository configuration
+#'   file, an R script that defines a \code{repository_config} list.
+#' @param SAV_CHUNK_SIZE Integer. Rows per chunk for streaming a SAV
+#'   file. Accepts \code{NULL}, which keeps the configuration file's
+#'   value, or the default of \code{1000000}.
+#' @param DelimitedChunkMaxMB Numeric scalar. Conservative cap on the
+#'   estimated peak memory of each CSV, TSV, or TXT chunk, for
+#'   \code{NRows} and \code{RAMEstimate}. Under \code{FAIL}, the row
+#'   chunk instead starts at \code{SAV_CHUNK_SIZE} after its direct
+#'   read probe, and is reduced after a recoverable memory allocation
+#'   error. Accepts \code{NULL}, which keeps the file's value, or the
+#'   default of \code{256}.
+#' @param DelimitedPartitionMaxMB Numeric scalar. Cap on the estimated
+#'   memory footprint of a single source defined partition before it
+#'   is read one partition at a time instead of in fixed size chunks.
+#'   Accepts \code{NULL}, which keeps the file's value, or uses half
+#'   of the conservative source route cap derived from
 #'   \code{DelimitedChunkMaxMB} and \code{RAMThreshold}.
-#' @param FailProbeMode Character. For \code{PartitionBy = "FAIL"} delimited
-#'   sources, use \code{"subprocess"} (default) to isolate direct read-and-write,
-#'   \code{"in_process"} for legacy behavior, or \code{"disabled"} to chunk directly.
-#' @param FailProbeTimeoutSeconds Positive number of seconds allowed for an isolated
-#'   direct worker before the parent falls back to adaptive chunking.
-#' @param FailProbeSourcePath Optional source-tree \code{R/repoquet.R} path for
-#'   sourced-development workers. Defaults to \code{REPOQUET_SOURCE}, then the
-#'   current working directory; installed packages load their namespace instead.
-#' @param SAV_ROW_THRESHOLD Integer. Rows above which SAV files stream in chunks.
-#'   NULL retains the configuration-file value or the default of 1000000L.
-#' @param RAMThreshold Numeric. RAM limit in GB for PartitionBy = "RAMEstimate".
-#'   NULL retains the configuration-file value or the default of 30.
-#' @param PartitionBy Character. Partitioning strategy: "NRows" (default),
-#'   "RAMEstimate", or "FAIL". NULL retains the configuration-file value.
-#' @param n_workers Integer or NULL. Number of parallel workers. The default is
-#'   max(1L, detectCores() - 1L) when the file does not define it.
-#' @param MaxCoerceNAPct Numeric. Fail file when coercion destroys more than
-#'   this percent of a column. NULL retains the file value or the default of 25.
-#' @param SourceFingerprintMode Character. Source file fingerprinting mode:
-#'   "metadata" (default), "sha256", or "none". NULL retains the file value.
-#' @param SchemaSurveyMode Character. "adaptive" (default), "full", or "sample".
-#' @param SchemaFastReadMaxBytes Numeric maximum source bytes for the bounded
-#'   in-memory fread schema fast path.
-#' @param SchemaChunkSize Integer rows per exhaustive schema-stream chunk.
-#' @param SchemaAdaptiveSampleRows Integer rows retained for adaptive/sample mode.
-#' @param SchemaFutureGlobalsMaxSizeMB Numeric future worker-export allowance.
-#' @param SchemaReuseCache Logical. Reuse unchanged per-source observations.
-#' @param SchemaWorkers Integer worker count used by schema discovery.
-#' @param RemoteOffline Logical. If TRUE, remote rows must use cached copies.
-#' @param DownloadPolicy Character default remote refresh policy.
-#' @param DownloadTimeout Numeric remote download timeout in seconds.
-#' @param DBName Character or NULL. DuckDB database file name.
-#' @param DuckDB_GB Character or NULL. DuckDB memory limit (for example, "8GB").
-#' @param MasterDBPath,FormattedDBPath,MDTPath Character or NULL. Optional
-#'   runtime overrides for the three required paths.
-#' @param overrides Named list of configuration values to apply at runtime.
-#'   Explicit function arguments take precedence over this list. Names must
-#'   already exist in the package defaults or the configuration file.
+#' @param FailProbeMode Character scalar. For a delimited source under
+#'   \code{PartitionBy = "FAIL"}. Accepts \code{"subprocess"}, which
+#'   isolates the direct read and write. Accepts \code{"in_process"},
+#'   for legacy behavior. Accepts \code{"disabled"}, which chunks
+#'   directly. Defaults to \code{"subprocess"}.
+#' @param FailProbeTimeoutSeconds Numeric scalar. Positive number of
+#'   seconds allowed for an isolated direct worker before the parent
+#'   falls back to adaptive chunking.
+#' @param FailProbeSourcePath Character scalar. Path to the source
+#'   tree's \code{R/repoquet.R}, for a worker running from source
+#'   rather than an installed package. Defaults to
+#'   \code{REPOQUET_SOURCE}, then the current working directory. An
+#'   installed package loads its namespace instead.
+#' @param SAV_ROW_THRESHOLD Integer. Row count above which a SAV file
+#'   streams in chunks. Accepts \code{NULL}, which keeps the
+#'   configuration file's value, or the default of \code{1000000}.
+#' @param RAMThreshold Numeric scalar. Memory limit, in gigabytes, for
+#'   \code{PartitionBy = "RAMEstimate"}. Accepts \code{NULL}, which
+#'   keeps the configuration file's value, or the default of \code{30}.
+#' @param PartitionBy Character scalar. Partitioning strategy. Accepts
+#'   one of three values: \code{"NRows"}, \code{"RAMEstimate"}, or
+#'   \code{"FAIL"}. Defaults to \code{"NRows"}. Accepts \code{NULL},
+#'   which keeps the configuration file's value.
+#' @param n_workers Integer. Number of parallel workers. Accepts
+#'   \code{NULL}, which uses \code{max(1L, detectCores() - 1L)} when
+#'   the file does not define it.
+#' @param MaxCoerceNAPct Numeric scalar. Stops the file when type
+#'   coercion destroys more than this percentage of a column. Accepts
+#'   \code{NULL}, which keeps the file's value, or the default of
+#'   \code{25}.
+#' @param SourceFingerprintMode Character scalar. Source file
+#'   fingerprinting mode. Accepts one of three values:
+#'   \code{"metadata"}, \code{"sha256"}, or \code{"none"}. Defaults to
+#'   \code{"metadata"}. Accepts \code{NULL}, which keeps the file's
+#'   value.
+#' @param SchemaSurveyMode Character scalar. Accepts one of three
+#'   values: \code{"adaptive"}, \code{"full"}, or \code{"sample"}.
+#'   Defaults to \code{"adaptive"}.
+#' @param SchemaFastReadMaxBytes Numeric scalar. Maximum source size,
+#'   in bytes, for the schema fast path bounded in memory with
+#'   \code{fread}.
+#' @param SchemaChunkSize Integer. Rows per chunk for an exhaustive
+#'   schema stream.
+#' @param SchemaAdaptiveSampleRows Integer. Rows retained for adaptive
+#'   or sample mode.
+#' @param SchemaFutureGlobalsMaxSizeMB Numeric scalar. Allowance, in
+#'   megabytes, for what a future worker exports.
+#' @param SchemaReuseCache Logical. Accepts \code{TRUE}, which reuses
+#'   an unchanged source's earlier observation. Accepts \code{FALSE},
+#'   which does not.
+#' @param SchemaWorkers Integer. Worker count used by schema discovery.
+#' @param RemoteOffline Logical. Accepts \code{TRUE}, which requires a
+#'   remote row to use its cached copy. Accepts \code{FALSE}, which
+#'   allows network access.
+#' @param DownloadPolicy Character scalar. Default remote refresh
+#'   policy.
+#' @param DownloadTimeout Numeric scalar. Remote download timeout, in
+#'   seconds.
+#' @param DBName Character scalar. DuckDB database file name. Accepts
+#'   \code{NULL}, which keeps the configuration file's value.
+#' @param DuckDB_GB Character scalar. DuckDB memory limit, for example
+#'   \code{"8GB"}. Accepts \code{NULL}, which keeps the configuration
+#'   file's value.
+#' @param MasterDBPath,FormattedDBPath,MDTPath Character scalars.
+#'   Runtime overrides for the three required paths. Accepts
+#'   \code{NULL}, which keeps the configuration file's value.
+#' @param overrides Named list of configuration values to apply at
+#'   runtime. An explicit function argument takes precedence over this
+#'   list. A name must already exist in the package defaults or the
+#'   configuration file.
 #'
-#' @return List containing all configuration keys (required + optional with defaults).
-#'   Runtime overrides do not modify the configuration file.
+#' @return A list containing every configuration key, both required
+#'   and optional with a default. A runtime override does not modify
+#'   the configuration file.
 #'
 #' @examples
 #' config_path <- tempfile(fileext = ".R")
@@ -8890,21 +9200,26 @@ load_repository_config <- function(
   cfg
 }
 
-#' Scaffold a new repository project in a directory
+#' Scaffolds a new repository project in a directory
 #'
-#' Generates everything a new user needs to run the workflow against their own
-#' data, with no hard-coded paths: a \code{repository_config.R}, an empty MDT
-#' workbook with the correct headers, a schema registry (the \code{"generic"}
-#' profile by default; \code{"hcup"} for HCUP data), and a commented
-#' \code{run_repository.R} script that executes the full pipeline
-#' (preflight -> catalog -> load -> views -> reconciliation).
-#' @param dir Project directory (created if needed).
-#' @param MasterDBPath Where source files live; defaults to
+#' Generates everything a new user needs to run the workflow against
+#' their own data, with no path hard coded into it: a
+#' \code{repository_config.R}, an empty MDT workbook with the correct
+#' headers, a schema registry, the \code{"generic"} profile by
+#' default, or \code{"hcup"} for HCUP data, and a commented
+#' \code{run_repository.R} script that runs the full pipeline:
+#' preflight, then catalog, then load, then views, then reconciliation.
+#' @param dir Project directory. Created when it does not exist.
+#' @param MasterDBPath Where the source files live. Defaults to
 #'   \code{<dir>/source_data}.
-#' @param profile Schema-registry profile: "generic" (default) or "hcup".
-#' @param overwrite Logical. Refuse to clobber existing scaffold files unless TRUE.
+#' @param profile Schema registry profile. Accepts \code{"generic"} or
+#'   \code{"hcup"}. Defaults to \code{"generic"}.
+#' @param overwrite Logical. Accepts \code{FALSE}, which refuses to
+#'   overwrite an existing scaffold file. Accepts \code{TRUE}, which
+#'   overwrites it. Defaults to \code{FALSE}.
 #' @return Invisibly, a named list of the created paths.
-#' @seealso \code{\link{generate_example_repository}} for a runnable synthetic example.
+#' @seealso \code{\link{generate_example_repository}} for a runnable
+#'   synthetic example.
 #' @examples
 #' dir <- tempfile("repoquet_project_")
 #' paths <- create_repository_project(dir, profile = "generic")
@@ -8977,22 +9292,22 @@ create_repository_project <- function(dir, MasterDBPath = file.path(dir, "source
   openxlsx::saveWorkbook(wb, paths$MDTPath, overwrite = TRUE)
   rp <- RepositoryInitialize(FormattedDBPath = formatted, profile = profile)
   writeLines(c(
-    "#### Repository loader -- run top to bottom, or step through interactively. ####",
-    "#### All machine-specific settings live in repository_config.R.             ####",
+    "#### Repository loader. Run top to bottom, or step through interactively. ####",
+    "#### All machine-specific settings live in repository_config.R. ##############",
     "library(data.table); library(openxlsx); library(DBI); library(duckdb)",
     "library(haven); library(arrow); library(glue); library(future); library(future.apply)",
     "",
     "source(\"<PATH TO REPOQUET CLONE>/R/repoquet.R\")   # development mode",
     "",
-    "#### 1. Initialize paths, configuration, and one traceable run identifier ####",
-    "#### Pass RunId through every stage so logs and validation records align.  ####",
+    "#### Initialize paths, configuration, and one traceable run identifier #######",
+    "#### Pass RunId through every stage so logs and validation records align. ####",
     sprintf("cfg <- load_repository_config(\"%s\")", norm(paths$ConfigPath)),
     "paths <- RepositoryInitialize(FormattedDBPath = cfg$FormattedDBPath)",
     "RunId <- new_repository_run_id()",
     "MDT <- openxlsx::read.xlsx(cfg$MDTPath, sheet = \"Sheet1\")",
     "DBLoad <- sort(unique(MDT$Database))",
     "",
-    "#### 2. Fail-fast inventory validation before any repository write ########",
+    "#### Fail-fast inventory validation before any repository write ##############",
     "#### Checks readers, remote declarations, partitions, names, and outputs. ####",
     "# scan_for_new_source_files(cfg$MasterDBPath, MDT)   # propose rows for new files",
     "ValidateMDTPreflight(MDT, strict = TRUE, ParquetBasePath = paths$ParquetBasePath,",
@@ -9007,7 +9322,7 @@ create_repository_project <- function(dir, MasterDBPath = file.path(dir, "source
     "                                LogPath = paths$LogPath, RunId = RunId)",
     "pending <- MDTCompleteStatus(MDT, paths$CheckpointPath, verbose = TRUE, logStatus = TRUE)",
     "",
-    "#### 3. Survey source evidence and write the compact review workbook ######",
+    "#### Survey source evidence and write the compact review workbook #############",
     "#### Source files stay read-only; detailed observations remain in Parquet. ####",
     "PrepareSchemaRegistry(MDT, DBLoad = DBLoad, MasterDBPath = cfg$MasterDBPath,",
     "                      ObservationPath = paths$SchemaObservationPath,",
@@ -9029,14 +9344,14 @@ create_repository_project <- function(dir, MasterDBPath = file.path(dir, "source
     "schema_issues <- GetSchemaObservations(paths$SchemaObservationPath, IssuesOnly = TRUE, Limit = 100L)",
     "if (nrow(schema_issues) > 0L) print(schema_issues)",
     "",
-    "#### 4. Review StartHere, resolve blocking decisions, and finalize ########",
-    "#### Accept keeps recommendations; Override supplies an approved value;   ####",
-    "#### Ignore separates unrelated compatibility fields or omits a label.    ####",
+    "#### Review StartHere, resolve blocking decisions, and finalize ##############",
+    "#### Accept keeps recommendations; Override supplies an approved value. ######",
+    "#### Ignore separates unrelated compatibility fields or omits a label.  ######",
     "repository_catalog <- FinalizeSchemaRegistry(SchemaReviewPath = paths$SchemaReviewPath,",
     "                       TableSchemaPath = paths$TableSchemaPath, strict = TRUE)",
     "",
-    "#### 5. Load reviewed schemas to Hive-partitioned, resumable Parquet #######",
-    "#### State files are snapshotted; checkpoints advance only after success.  ####",
+    "#### Load reviewed schemas to Hive-partitioned, resumable Parquet ############",
+    "#### State files are snapshotted; checkpoints advance only after success. ####",
     "run_result <- ParquetBackEndCreate(MDT = MDT, DBLoad = DBLoad,",
     "                                  MasterDBPath = cfg$MasterDBPath,",
     "                                  completed_checkpoint = load_checkpoint(paths$CheckpointPath),",
@@ -9070,7 +9385,7 @@ create_repository_project <- function(dir, MasterDBPath = file.path(dir, "source
     "                    RunId = RunId, MasterDBPath = cfg$MasterDBPath,",
     "                    SourceFingerprintMode = cfg$SourceFingerprintMode)",
     "",
-    "#### 6. Register and strictly validate persistent DuckDB views ############",
+    "#### Register and strictly validate persistent DuckDB views ##################",
     "TempDirPath <- file.path(cfg$FormattedDBPath, \"duckdb_temp\")",
     "dir.create(TempDirPath, recursive = TRUE, showWarnings = FALSE)",
     "con <- open_duckdb(FormattedDBPath = cfg$FormattedDBPath, DBName = cfg$DBName,",
@@ -9102,17 +9417,19 @@ create_repository_project <- function(dir, MasterDBPath = file.path(dir, "source
   invisible(c(paths, rp))
 }
 
-#' Generate a runnable synthetic example repository
+#' Generates a runnable synthetic example repository
 #'
-#' Builds a complete toy project on top of \code{\link{create_repository_project}}:
-#' a year-partitioned SALES database (csv, three years, with an identifier,
-#' a code column, and a sampling weight), a site-partitioned SENSORS database
-#' (csv, two sites), and a labelled Stata file to exercise the data dictionary
-#' plus a filled-in DBSetup.xlsx. Everything the quickstart in the README
-#' does runs against this.
+#' Builds a complete toy project on top of
+#' \code{\link{create_repository_project}}: a year partitioned SALES
+#' database, csv, three years, with an identifier, a code column, and
+#' a sampling weight, a site partitioned SENSORS database, csv, two
+#' sites, and a labeled Stata file to exercise the data dictionary,
+#' plus a filled in DBSetup.xlsx. Everything the quickstart in the
+#' README does runs against this.
 #' @param dir Project directory.
-#' @param seed RNG seed for reproducible fake data.
-#' @return Invisibly, the scaffold paths (as from create_repository_project).
+#' @param seed Random seed for reproducible fake data.
+#' @return Invisibly, the scaffold paths, as from
+#'   \code{create_repository_project}.
 #' @examples
 #' dir <- tempfile("repoquet_example_")
 #' paths <- generate_example_repository(dir)
@@ -9169,16 +9486,21 @@ generate_example_repository <- function(dir, seed = 1) {
   invisible(paths)
 }
 
-#' Curated official source inventory for real-world examples
+#' Curated catalog of official sources for real world examples
 #'
-#' Returns workbook rows for public sources chosen to exercise relational
-#' tables, schema drift, archive members, labelled transport files, and
-#' larger-than-memory loading. No network request is made.
-#' @param profile Example profile: quick, relational, schema_drift, stress, or
-#'   comprehensive. Comprehensive includes the packaged full NHANES and UCI
-#'   healthcare catalogs plus credentialed MIMIC-III metadata.
-#' @param IncludeLarge Include sources flagged as large. Defaults to TRUE for
-#'   stress and comprehensive.
+#' Returns workbook rows for a public source chosen to exercise a
+#' relational table, schema drift, an archive member, a labeled
+#' transport file, and loading larger than memory. Makes no network
+#' request.
+#' @param profile Character scalar. Example profile. Accepts one of
+#'   five values: \code{"quick"}, \code{"relational"},
+#'   \code{"schema_drift"}, \code{"stress"}, or \code{"comprehensive"}.
+#'   \code{"comprehensive"} includes the packaged full NHANES and UCI
+#'   healthcare catalogs, plus credentialed MIMIC-III metadata.
+#' @param IncludeLarge Logical. Accepts \code{TRUE}, which includes a
+#'   source flagged as large. Accepts \code{FALSE}, which excludes it.
+#'   Defaults to \code{NULL}, which is \code{TRUE} for \code{"stress"}
+#'   and \code{"comprehensive"}, and \code{FALSE} otherwise.
 #' @return A data frame ready for DBSetup.xlsx.
 #' @examples
 #' quick <- real_world_source_catalog("quick")
@@ -9326,13 +9648,18 @@ real_world_source_catalog <- function(
   as.data.frame(out)
 }
 
-#' Generate a project backed by curated public real-world datasets
+#' Generates a project backed by curated public real world datasets
 #' @param dir Project directory.
 #' @param profile Source profile passed to \code{real_world_source_catalog()}.
-#' @param IncludeLarge Include large stress-test sources.
-#' @param Download Download selected sources immediately. FALSE only writes the inventory.
-#' @param overwrite Replace scaffold files when TRUE.
-#' @return Invisibly, scaffold paths plus the generated MDT in \code{Sources}.
+#' @param IncludeLarge Include a source flagged for a stress test.
+#' @param Download Logical. Accepts \code{TRUE}, which downloads the
+#'   selected sources immediately. Accepts \code{FALSE}, which only
+#'   writes the inventory. Defaults to \code{FALSE}.
+#' @param overwrite Logical. Accepts \code{TRUE}, which replaces a
+#'   scaffold file. Accepts \code{FALSE}, which does not. Defaults to
+#'   \code{FALSE}.
+#' @return Invisibly, the scaffold paths, plus the generated MDT in
+#'   \code{Sources}.
 #' @examples
 #' dir <- tempfile("repoquet_public_")
 #' paths <- generate_real_world_repository(dir, profile = "quick", Download = FALSE)
@@ -9356,54 +9683,67 @@ generate_real_world_repository <- function(
   invisible(c(paths, list(Sources = mdt, Profile = profile)))
 }
 
-#' Resolve and (optionally) create every standard repository path
+#' Resolves and, optionally, creates every standard repository path
 #'
 #' Derives the full set of standard file and directory locations under
-#' \code{FormattedDBPath} (Parquet output, checkpoint, logs, download cache,
-#' schema registry and review workbooks, data contracts, and the manifest),
-#' creating any that don't yet exist. This is the first call in every
-#' workflow stage -- \code{\link{create_repository_project}},
+#' \code{FormattedDBPath}, the Parquet output, checkpoint, logs,
+#' download cache, schema registry and review workbooks, data
+#' contracts, and the manifest, creating any that do not yet exist.
+#' This is the first call in every workflow stage.
+#' \code{\link{create_repository_project}},
 #' \code{\link{generate_example_repository}}, and the packaged
-#' \code{inst/scripts/repoquet.R} command-line driver all call it before
-#' anything else.
+#' \code{inst/scripts/repoquet.R} command line driver all call it
+#' before anything else.
 #'
-#' Initialization is idempotent for the schema registry and data contracts:
-#' each is only seeded with \code{profile}'s defaults the first time (i.e.
-#' when its file does not yet exist), so calling this again on an
-#' already-initialized repository never overwrites reviewed decisions.
-#' @param FormattedDBPath Character. Root directory for the repository's
-#'   Parquet store, checkpoints, logs, schema artifacts, and manifest.
-#' @param ParquetBasePath Character. Root directory for Hive-partitioned
-#'   Parquet output. Defaults to \code{file.path(FormattedDBPath, "parquet")}.
-#' @param CheckpointPath Character. Path to the resumable-load checkpoint
-#'   \code{.rds} file.
-#' @param LogPath Character. Path to the run log file.
-#' @param DownloadCachePath Character. Directory used by
-#'   \code{\link{MaterializeRemoteSources}} to cache downloaded sources.
-#' @param SchemaRegistryPath Character. Path to the schema registry workbook.
-#' @param TableSchemaPath Character. Path to the approved table schema
-#'   catalog workbook.
-#' @param SchemaObservationPath Character. Path to the raw schema
-#'   observation Parquet file written by \code{\link{SurveyRepositorySchema}}.
-#' @param SchemaReviewPath Character. Path to the compact schema review
-#'   workbook a human resolves before \code{\link{FinalizeSchemaRegistry}}.
-#' @param ManifestPath Character (optional). Path to the transactional
-#'   manifest. \code{NULL} (the default) reuses a pre-existing legacy
-#'   \code{Manifest/ParquetManifest.csv} if one is found, otherwise defaults
-#'   to \code{Manifest/RepositoryMetadata.duckdb}.
-#' @param DataContractPath Character. Path to the data contracts workbook.
-#' @param ManifestWorkbookPath Character (optional). Path to the
-#'   human-readable manifest workbook mirror. \code{NULL} (the default)
-#'   derives it from \code{ManifestPath} via
+#' Initialization is idempotent for the schema registry and data
+#' contracts: each is seeded with \code{profile}'s defaults only the
+#' first time, that is, when its file does not yet exist, so calling
+#' this again on an already initialized repository never overwrites a
+#' reviewed decision.
+#' @param FormattedDBPath Character scalar. Root directory for the
+#'   repository's Parquet store, checkpoints, logs, schema artifacts,
+#'   and manifest.
+#' @param ParquetBasePath Character scalar. Root directory for hive
+#'   partitioned Parquet output. Defaults to
+#'   \code{file.path(FormattedDBPath, "parquet")}.
+#' @param CheckpointPath Character scalar. Path to the resumable load
+#'   checkpoint \code{.rds} file.
+#' @param LogPath Character scalar. Path to the run log file.
+#' @param DownloadCachePath Character scalar. Directory used by
+#'   \code{\link{MaterializeRemoteSources}} to cache a downloaded
+#'   source.
+#' @param SchemaRegistryPath Character scalar. Path to the schema
+#'   registry workbook.
+#' @param TableSchemaPath Character scalar. Path to the approved
+#'   table schema catalog workbook.
+#' @param SchemaObservationPath Character scalar. Path to the raw
+#'   schema observation Parquet file written by
+#'   \code{\link{SurveyRepositorySchema}}.
+#' @param SchemaReviewPath Character scalar. Path to the compact
+#'   schema review workbook a person resolves before
+#'   \code{\link{FinalizeSchemaRegistry}}.
+#' @param ManifestPath Character scalar. Path to the transactional
+#'   manifest. Defaults to \code{NULL}, which reuses an already
+#'   existing legacy \code{Manifest/ParquetManifest.csv} when one is
+#'   found, and otherwise defaults to
+#'   \code{Manifest/RepositoryMetadata.duckdb}.
+#' @param DataContractPath Character scalar. Path to the data
+#'   contracts workbook.
+#' @param ManifestWorkbookPath Character scalar. Path to the manifest
+#'   workbook mirror readable by a person. Defaults to \code{NULL},
+#'   which derives it from \code{ManifestPath} with
 #'   \code{\link{metadata_workbook_path_default}}.
-#' @param create Logical. If \code{TRUE} (default), creates every directory
-#'   in the returned path list (recursively) and seeds the schema registry
-#'   and data contracts workbooks if they don't already exist. If
-#'   \code{FALSE}, only resolves and returns the paths.
-#' @param profile Character. One of \code{"generic"} (default) or
-#'   \code{"hcup"}, passed to \code{\link{load_schema_registry}} when
-#'   seeding a new schema registry -- \code{"hcup"} preloads column-name
-#'   patterns for the HCUP hospital discharge family of databases.
+#' @param create Logical. Accepts \code{TRUE}, which creates every
+#'   directory in the returned path list, recursively, and seeds the
+#'   schema registry and data contracts workbooks when they do not
+#'   already exist. Accepts \code{FALSE}, which only resolves and
+#'   returns the paths. Defaults to \code{TRUE}.
+#' @param profile Character scalar. Accepts one of two values,
+#'   \code{"generic"} or \code{"hcup"}, passed to
+#'   \code{\link{load_schema_registry}} when seeding a new schema
+#'   registry. \code{"hcup"} preloads column name patterns for the
+#'   HCUP hospital discharge family of databases. Defaults to
+#'   \code{"generic"}.
 #' @return A named list of resolved paths: \code{FormattedDBPath},
 #'   \code{ParquetBasePath}, \code{CheckpointPath}, \code{LogPath},
 #'   \code{DownloadCachePath}, \code{SchemaDir}, \code{SchemaRegistryPath},
@@ -9468,45 +9808,56 @@ RepositoryInitialize <- function(FormattedDBPath, ParquetBasePath = file.path(Fo
   paths
 }
 
-#' Validate MDT structure and output safety before schema discovery or loading
+#' Validates MDT structure and output safety before schema discovery or loading
 #'
-#' This preflight deliberately does not open source files or execute reader
-#' options. Those checks belong to \code{\link{SurveyRepositorySchema}}, which
-#' records the detailed evidence and errors in the schema artifacts. Keeping
-#' this function structural avoids reading every large/network source twice.
-#' \code{MasterDBPath} remains accepted for backward compatibility but is not
-#' inspected. Checks performed include: required columns present and
-#' non-blank; physical table names safe and free of case/logical
-#' collisions; \code{FileType} values registered; remote-source
-#' (\code{SourceURI}/\code{ArchiveType}/etc.) fields well-formed; partition
-#' specifications parseable and consistent within a table; no duplicate
-#' repository checkpoint identities; and no two source files that would
-#' collide on the same output Parquet filename or chunk stem.
+#' This preflight deliberately does not open a source file or run a
+#' reader option. Those checks belong to
+#' \code{\link{SurveyRepositorySchema}}, which records the detailed
+#' evidence and error in the schema artifacts. Keeping this function
+#' structural avoids reading every large or networked source twice.
+#' \code{MasterDBPath} remains accepted for compatibility with an
+#' earlier version, but is not inspected. The checks performed include:
+#' the required columns are present and not blank; a physical table
+#' name is safe and free of a collision in case or in logic; a
+#' \code{FileType} value is registered; a remote source field, such as
+#' \code{SourceURI} or \code{ArchiveType}, is well formed; a partition
+#' specification can be parsed and is consistent within a table; there
+#' is no duplicate repository checkpoint identity; and no two source
+#' files would collide on the same output Parquet file name or chunk
+#' stem.
 #' @param MDT Data frame. Master Database Table to validate.
-#' @param strict Logical. If \code{TRUE} (default), throws an error if any
-#'   issue with \code{Severity == "error"} was found (after logging all
-#'   issues). If \code{FALSE}, issues are only logged/returned.
-#' @param logStatus Logical. If \code{TRUE} (default), each issue is logged
-#'   via \code{\link{log_msg}} as it is found.
-#' @param ParquetBasePath Character (optional). Root directory of the
-#'   Parquet store, used to compute realistic output paths when checking for
-#'   filename/chunk-stem collisions. If \code{NULL}, collisions are still
-#'   checked using the partition directory alone.
-#' @param MaxFileStemTruncate Logical. If \code{TRUE} (default), simulates
-#'   the filename truncation \code{\link{write_year_parquet}} would apply
-#'   when computing output stems for collision detection.
-#' @param TerminalHivePartition Logical. If \code{TRUE}, treats
-#'   \code{PartitionKey} value \code{"BATCH_ID"} as reserved (since the
-#'   chunked writer creates \code{batch_id=} directories itself) and flags
-#'   its use as an error. Default \code{FALSE}.
-#' @param MasterDBPath Character (optional). Accepted for backward
-#'   compatibility; not inspected by this function.
-#' @param LogPath,RunId Optional repository logging context, active for the
-#'   duration of the call (see \code{\link{begin_repository_run}}).
-#' @return Invisibly, a \code{data.table} of issues with columns
-#'   \code{Check}, \code{Severity} (\code{"error"} or \code{"warning"}),
-#'   \code{Message}, and \code{N} (count of affected rows/values). Empty
-#'   (zero rows) if no issues were found.
+#' @param strict Logical. Accepts \code{TRUE}, which stops with an
+#'   error when an issue with \code{Severity == "error"} was found,
+#'   after logging every issue. Accepts \code{FALSE}, which only logs
+#'   or returns the issue. Defaults to \code{TRUE}.
+#' @param logStatus Logical. Accepts \code{TRUE}, which logs each
+#'   issue with \code{\link{log_msg}} as it is found. Accepts
+#'   \code{FALSE}, which does not. Defaults to \code{TRUE}.
+#' @param ParquetBasePath Character scalar. Root directory of the
+#'   Parquet store, used to compute a realistic output path when
+#'   checking for a file name or chunk stem collision. Defaults to
+#'   \code{NULL}, which still checks for a collision, using the
+#'   partition directory alone.
+#' @param MaxFileStemTruncate Logical. Accepts \code{TRUE}, which
+#'   simulates the file name truncation \code{\link{write_year_parquet}}
+#'   would apply when computing an output stem for collision
+#'   detection. Accepts \code{FALSE}, which does not. Defaults to
+#'   \code{TRUE}.
+#' @param TerminalHivePartition Logical. Accepts \code{TRUE}, which
+#'   treats the \code{PartitionKey} value \code{"BATCH_ID"} as
+#'   reserved, since the chunked writer creates a \code{batch_id=}
+#'   directory itself, and flags its use as an error. Accepts
+#'   \code{FALSE}, which does not. Defaults to \code{FALSE}.
+#' @param MasterDBPath Character scalar. Accepted for compatibility
+#'   with an earlier version. Not inspected by this function.
+#' @param LogPath,RunId Optional repository logging context, active
+#'   for the duration of the call, see
+#'   \code{\link{begin_repository_run}}.
+#' @return Invisibly, a data.table of issues with columns
+#'   \code{Check}, \code{Severity}, one of \code{"error"} or
+#'   \code{"warning"}, \code{Message}, and \code{N}, the count of
+#'   affected rows or values. Empty, with zero rows, when no issue was
+#'   found.
 #' @examples
 #' MDT <- data.frame(
 #'   Database = "DEMO", MDBDir = "DEMO", Path = c("a.csv", "b.csv"),
@@ -10389,76 +10740,97 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
   })
 }
 
-#' Survey source schemas without applying domain policies
+#' Surveys source schemas without applying domain policies
 #'
-#' Reads every selected source through its registered reader (see
-#' \code{\link{get_file_reader}}), records one metadata row per observed
-#' source column and virtual Hive-partition column -- including the observed
-#' type, any reader warnings, and (for low-cardinality columns) a value
-#' preview -- and writes the combined evidence to \code{ObservationPath} as
-#' Parquet. Per-source results are cached under \code{ObservationCachePath}
-#' keyed by source fingerprint and survey settings, so unchanged sources are
-#' skipped on a rerun. No schema-registry override or cross-table naming
-#' rule is applied at this stage; that happens in
+#' Reads every selected source through its registered reader, see
+#' \code{\link{get_file_reader}}, records one metadata row per observed
+#' source column and virtual hive partition column, including the
+#' observed type, a reader warning, and, for a low cardinality
+#' column, a value preview, and writes the combined evidence to
+#' \code{ObservationPath} as Parquet. A per source result is cached
+#' under \code{ObservationCachePath}, keyed by the source fingerprint
+#' and the survey settings, so that an unchanged source is skipped on
+#' a rerun. No schema registry override or cross table naming rule is
+#' applied at this stage. That happens in
 #' \code{\link{RecommendRepositorySchema}}.
 #' @param MDT Data frame. Master database table with at least
 #'   \code{Database}, \code{MDBDir}, \code{Path}, \code{TableName},
 #'   \code{FileType}, \code{PartitionKey}, and \code{PartitionValue}.
-#' @param MasterDBPath Character. Root directory containing the source files
-#'   (each row's full path is \code{file.path(MasterDBPath, MDBDir, Path)}).
-#' @param ObservationPath Character. Output Parquet file path for the
-#'   detailed per-column observations. Must end in \code{.parquet}.
-#' @param DBLoad Character vector (optional). Subset of \code{MDT$Database}
-#'   values to survey. \code{NULL} (default) surveys every row.
+#' @param MasterDBPath Character scalar. Root directory containing
+#'   the source files. Each row's full path is
+#'   \code{file.path(MasterDBPath, MDBDir, Path)}.
+#' @param ObservationPath Character scalar. Output Parquet file path
+#'   for the detailed per column observations. Must end in
+#'   \code{.parquet}.
+#' @param DBLoad Character vector. Subset of \code{MDT$Database}
+#'   values to survey. Defaults to \code{NULL}, which surveys every
+#'   row.
 #' @param n_workers Integer. Number of parallel workers used to scan
-#'   sources. Default 1 (serial).
-#' @param SourceFingerprintMode Character. One of \code{"metadata"}
-#'   (default), \code{"sha256"}, or \code{"none"}; see
-#'   \code{\link{source_fingerprint}}. Used both for cache keys and for the
-#'   \code{SourceFingerprint} recorded in each observation.
-#' @param StrictReaders Logical. If \code{TRUE}, stop after the survey when
-#'   any source failed to read. Default \code{FALSE} (failures are recorded
-#'   as rows with \code{SurveyStatus != "ok"} instead of stopping).
-#' @param ValuePreviewMaxDistinct Integer from 1 to 100. Maximum number of
-#'   distinct values previewed per low-cardinality column. Default 15.
-#' @param ValuePreviewTypes Character vector of observed types eligible for
-#'   value preview. Default \code{c("character", "integer", "int64", "logical")}.
-#' @param ValuePreviewIdentifiers Logical. If \code{FALSE} (default),
-#'   suppress value previews for columns whose \code{Role} looks like a join
-#'   key or identifier.
-#' @param LogPath Character (optional). Log file path for this call.
-#' @param RunId Character (optional). Run identifier tagged onto log lines.
-#' @param SchemaSurveyMode Character. One of \code{"adaptive"} (default),
-#'   \code{"full"}, or \code{"sample"}, controlling how much of each large
-#'   file is read before inferring its schema.
-#' @param AdaptiveSampleRows Integer. Rows retained for \code{"adaptive"} or
-#'   \code{"sample"} mode. Default 100000.
-#' @param FastReadMaxBytes Numeric. Maximum source size (bytes) eligible for
-#'   the bounded in-memory fast-read path. Default 256 MiB.
+#'   a source. Defaults to \code{1}, which scans serially.
+#' @param SourceFingerprintMode Character scalar. Accepts one of
+#'   three values: \code{"metadata"}, \code{"sha256"}, or
+#'   \code{"none"}. See \code{\link{source_fingerprint}}. Used both
+#'   for a cache key and for the \code{SourceFingerprint} recorded in
+#'   each observation. Defaults to \code{"metadata"}.
+#' @param StrictReaders Logical. Accepts \code{TRUE}, which stops
+#'   after the survey when any source failed to read. Accepts
+#'   \code{FALSE}, which instead records such a failure as a row with
+#'   \code{SurveyStatus != "ok"}. Defaults to \code{FALSE}.
+#' @param ValuePreviewMaxDistinct Integer from 1 to 100. Maximum
+#'   number of distinct values previewed per low cardinality column.
+#'   Defaults to \code{15}.
+#' @param ValuePreviewTypes Character vector of observed types
+#'   eligible for a value preview. Defaults to
+#'   \code{c("character", "integer", "int64", "logical")}.
+#' @param ValuePreviewIdentifiers Logical. Accepts \code{TRUE}, which
+#'   includes a value preview for a column whose \code{Role} looks
+#'   like a join key or identifier. Accepts \code{FALSE}, which
+#'   suppresses it. Defaults to \code{FALSE}.
+#' @param LogPath Character scalar. Log file path for this call.
+#'   Defaults to \code{NULL}.
+#' @param RunId Character scalar. Run identifier tagged onto log
+#'   lines. Defaults to \code{NULL}.
+#' @param SchemaSurveyMode Character scalar. Accepts one of three
+#'   values: \code{"adaptive"}, \code{"full"}, or \code{"sample"},
+#'   controlling how much of each large file is read before inferring
+#'   its schema. Defaults to \code{"adaptive"}.
+#' @param AdaptiveSampleRows Integer. Rows retained for
+#'   \code{"adaptive"} or \code{"sample"} mode. Defaults to
+#'   \code{100000}.
+#' @param FastReadMaxBytes Numeric scalar. Maximum source size, in
+#'   bytes, eligible for the fast read path bounded in memory.
+#'   Defaults to \code{256} MiB.
 #' @param SchemaChunkSize Integer. Rows per chunk for the exhaustive
-#'   streaming schema scan. Default 100000.
-#' @param ObservationCachePath Character (optional). Directory for per-source
-#'   observation cache files. Defaults to a \verb{<ObservationPath>_sources}
-#'   directory alongside \code{ObservationPath}.
-#' @param ReuseObservationCache Logical. If \code{TRUE} (default), reuse a
-#'   cached observation for a source whose fingerprint and survey settings
-#'   are unchanged.
-#' @param RefreshObservationCache Logical. If \code{TRUE}, ignore any
-#'   existing cache and rescan every source. Default \code{FALSE}.
-#' @param FutureGlobalsMaxSizeMB Numeric. Maximum size (MB) of globals
-#'   exported to parallel workers. Default 768.
-#' @param Progress Logical. If \code{TRUE} (default), print periodic
-#'   progress messages while scanning.
-#' @param ProgressEvery Integer (optional). Force a progress message every
-#'   this many sources, in addition to the time-based interval.
-#' @param ProgressIntervalSeconds Numeric. Minimum seconds between progress
-#'   messages. Default 30.
-#' @return An object of class \code{"RepositorySchemaSurvey"}: a list with
-#'   \code{observations} (data.table of per-column evidence, also written to
-#'   \code{ObservationPath}), \code{summary} (one-row data.table of counts),
-#'   \code{ObservationPath}, \code{ValuePreviewMaxDistinct},
-#'   \code{ValuePreviewTypes}, \code{ValuePreviewIdentifiers},
-#'   \code{SchemaSurveyMode}, and \code{ObservationCachePath}.
+#'   streaming schema scan. Defaults to \code{100000}.
+#' @param ObservationCachePath Character scalar. Directory for a per
+#'   source observation cache file. Defaults to a
+#'   \verb{<ObservationPath>_sources} directory alongside
+#'   \code{ObservationPath}.
+#' @param ReuseObservationCache Logical. Accepts \code{TRUE}, which
+#'   reuses a cached observation for a source whose fingerprint and
+#'   survey settings are unchanged. Accepts \code{FALSE}, which does
+#'   not. Defaults to \code{TRUE}.
+#' @param RefreshObservationCache Logical. Accepts \code{TRUE}, which
+#'   ignores an existing cache and rescans every source. Accepts
+#'   \code{FALSE}, which does not. Defaults to \code{FALSE}.
+#' @param FutureGlobalsMaxSizeMB Numeric scalar. Maximum size, in
+#'   megabytes, of a global exported to a parallel worker. Defaults
+#'   to \code{768}.
+#' @param Progress Logical. Accepts \code{TRUE}, which prints a
+#'   periodic progress message while scanning. Accepts \code{FALSE},
+#'   which does not. Defaults to \code{TRUE}.
+#' @param ProgressEvery Integer. Forces a progress message every this
+#'   many sources, in addition to the interval based on time.
+#'   Defaults to \code{NULL}.
+#' @param ProgressIntervalSeconds Numeric scalar. Minimum seconds
+#'   between a progress message. Defaults to \code{30}.
+#' @return An object of class \code{"RepositorySchemaSurvey"}: a list
+#'   with \code{observations}, a data.table of per column evidence,
+#'   also written to \code{ObservationPath}, \code{summary}, a one
+#'   row data.table of counts, \code{ObservationPath},
+#'   \code{ValuePreviewMaxDistinct}, \code{ValuePreviewTypes},
+#'   \code{ValuePreviewIdentifiers}, \code{SchemaSurveyMode}, and
+#'   \code{ObservationCachePath}.
 #' @seealso \code{\link{RecommendRepositorySchema}}, \code{\link{GetSchemaObservations}},
 #'   \code{\link{PrepareSchemaRegistry}}
 #' @examples
@@ -10633,24 +11005,31 @@ SurveyRepositorySchema <- function(MDT, MasterDBPath, ObservationPath,
   out
 }
 
-#' Retrieve detailed schema observations from the internal Parquet store
+#' Retrieves detailed schema observations from the internal Parquet store
 #'
-#' Opens \code{ObservationPath} (as written by
-#' \code{\link{SurveyRepositorySchema}}) through an in-memory DuckDB
+#' Opens \code{ObservationPath}, as written by
+#' \code{\link{SurveyRepositorySchema}}, through an in memory DuckDB
 #' connection and returns the matching rows, ordered by \code{Database},
 #' \code{TableName}, \code{Column}, \code{PartitionValue}, and
 #' \code{SourcePath}. Intended for ad hoc inspection of survey evidence
 #' without loading the entire file into R.
-#' @param ObservationPath Character. Path to the Parquet file written by
-#'   \code{\link{SurveyRepositorySchema}}.
-#' @param Database Character scalar (optional). Restrict to one database.
-#' @param TableName Character scalar (optional). Restrict to one table.
-#' @param Column Character scalar (optional). Restrict to one column
-#'   (matched after \code{canonical_colnames} normalization).
-#' @param IssuesOnly Logical. If \code{TRUE}, return only rows where
-#'   \code{SurveyStatus != "ok"} or \code{ReaderWarning} is non-blank.
-#'   Default \code{FALSE}.
-#' @param Limit Integer (optional). Maximum number of rows to return.
+#' @param ObservationPath Character scalar. Path to the Parquet file
+#'   written by \code{\link{SurveyRepositorySchema}}.
+#' @param Database Character scalar. Restricts the result to one
+#'   database. Defaults to \code{NULL}, which does not restrict by
+#'   database.
+#' @param TableName Character scalar. Restricts the result to one
+#'   table. Defaults to \code{NULL}, which does not restrict by
+#'   table.
+#' @param Column Character scalar. Restricts the result to one
+#'   column, matched after \code{canonical_colnames} normalization.
+#'   Defaults to \code{NULL}, which does not restrict by column.
+#' @param IssuesOnly Logical. Accepts \code{TRUE}, which returns only
+#'   a row where \code{SurveyStatus != "ok"} or \code{ReaderWarning}
+#'   is non blank. Accepts \code{FALSE}, which returns every matching
+#'   row. Defaults to \code{FALSE}.
+#' @param Limit Integer. Maximum number of rows to return. Defaults
+#'   to \code{NULL}, which returns every matching row.
 #' @return A data.table of matching observation rows.
 #' @seealso \code{\link{SurveyRepositorySchema}}, \code{\link{RecommendRepositorySchema}}
 #' @examples
@@ -11097,43 +11476,52 @@ GetSchemaObservations <- function(ObservationPath, Database = NULL, TableName = 
   out[]
 }
 
-#' Recommend canonical table schemas from observed evidence
+#' Recommends canonical table schemas from observed evidence
 #'
-#' Turns the per-column evidence from a \code{\link{SurveyRepositorySchema}}
-#' survey (or a previously-written \code{ObservationPath}) into one
-#' recommended canonical type per Database/Table/Column, applying any
-#' optional schema-registry policy (see \code{\link{load_schema_registry}})
-#' and flagging columns and cross-table column groups that need a human
-#' decision before \code{\link{FinalizeRepositorySchema}} can run.
+#' Turns the per column evidence from a \code{\link{SurveyRepositorySchema}}
+#' survey, or a previously written \code{ObservationPath}, into one
+#' recommended canonical type per Database, Table, and Column,
+#' applying an optional schema registry policy, see
+#' \code{\link{load_schema_registry}}, and flagging a column and a
+#' cross table column group that needs a human decision before
+#' \code{\link{FinalizeRepositorySchema}} can run.
 #' @param survey A \code{"RepositorySchemaSurvey"} object from
-#'   \code{\link{SurveyRepositorySchema}}. If supplied, its
-#'   \code{observations} and value-preview settings are reused and
+#'   \code{\link{SurveyRepositorySchema}}. When supplied, its
+#'   \code{observations} and value preview settings are reused and
 #'   \code{ObservationPath} is not required.
-#' @param ObservationPath Character (optional). Path to a Parquet
-#'   observation file (as an alternative to \code{survey}), read via
-#'   \code{\link{GetSchemaObservations}}.
-#' @param SchemaRegistryPath Character (optional). Path to a schema-registry
-#'   workbook to load when \code{schema_registry} is not supplied directly.
-#' @param schema_registry A schema-registry object (from
-#'   \code{\link{load_schema_registry}}), pre-loaded. Takes precedence over
-#'   \code{SchemaRegistryPath}.
-#' @param SchemaProfile Character. One of \code{"none"} (default),
-#'   \code{"generic"}, or \code{"hcup"}; the packaged registry profile to
-#'   load when neither \code{schema_registry} nor \code{SchemaRegistryPath}
-#'   is supplied.
-#' @param ValuePreviewMaxDistinct Integer (optional). Overrides the survey's
-#'   recorded value-preview cardinality cutoff.
-#' @param ValuePreviewTypes Character vector (optional). Overrides the
-#'   survey's recorded value-preview eligible types.
-#' @param ValuePreviewIdentifiers Logical (optional). Overrides whether
-#'   identifier-like columns are included in the value preview.
-#' @return An object of class \code{"RepositorySchemaProposal"}: a list with
-#'   \code{registry} (one row per Database/Table/Column with its recommended
-#'   and approved type), \code{compatibility} (cross-table compatibility
-#'   candidates), \code{history} (evidence for columns whose type changed or
-#'   that raised reader warnings), \code{source_issues}, \code{value_preview},
-#'   \code{dictionary_review}, \code{summary}, \code{ObservationPath}, and the
-#'   resolved value-preview settings.
+#' @param ObservationPath Character scalar. Path to a Parquet
+#'   observation file, used as an alternative to \code{survey}, read
+#'   through \code{\link{GetSchemaObservations}}. Defaults to
+#'   \code{NULL}.
+#' @param SchemaRegistryPath Character scalar. Path to a schema
+#'   registry workbook, loaded when \code{schema_registry} is not
+#'   supplied directly. Defaults to \code{NULL}.
+#' @param schema_registry A schema registry object, from
+#'   \code{\link{load_schema_registry}}, already loaded. Takes
+#'   precedence over \code{SchemaRegistryPath}. Defaults to
+#'   \code{NULL}.
+#' @param SchemaProfile Character scalar. Accepts one of three
+#'   values: \code{"none"}, \code{"generic"}, or \code{"hcup"}, the
+#'   packaged registry profile loaded when neither
+#'   \code{schema_registry} nor \code{SchemaRegistryPath} is
+#'   supplied. Defaults to \code{"none"}.
+#' @param ValuePreviewMaxDistinct Integer. Overrides the survey's
+#'   recorded value preview cardinality cutoff. Defaults to
+#'   \code{NULL}, which keeps the survey's setting.
+#' @param ValuePreviewTypes Character vector. Overrides the survey's
+#'   recorded value preview eligible types. Defaults to \code{NULL},
+#'   which keeps the survey's setting.
+#' @param ValuePreviewIdentifiers Logical. Overrides whether an
+#'   identifier like column is included in the value preview.
+#'   Defaults to \code{NULL}, which keeps the survey's setting.
+#' @return An object of class \code{"RepositorySchemaProposal"}: a
+#'   list with \code{registry}, one row per Database, Table, and
+#'   Column with its recommended and approved type, \code{compatibility},
+#'   a set of cross table compatibility candidates, \code{history},
+#'   evidence for a column whose type changed or that raised a reader
+#'   warning, \code{source_issues}, \code{value_preview},
+#'   \code{dictionary_review}, \code{summary}, \code{ObservationPath},
+#'   and the resolved value preview settings.
 #' @seealso \code{\link{SurveyRepositorySchema}}, \code{\link{WriteSchemaProposal}},
 #'   \code{\link{FinalizeRepositorySchema}}
 #' @examples
@@ -11416,31 +11804,36 @@ RecommendRepositorySchema <- function(survey = NULL, ObservationPath = NULL,
   target
 }
 
-#' Write a compact, user-reviewable schema proposal workbook
+#' Writes a compact, user reviewable schema proposal workbook
 #'
-#' Converts a \code{\link{RecommendRepositorySchema}} proposal into the
-#' \code{SchemaReview.xlsx} workbook used for human review: a
-#' \code{StartHere} summary tab, action tabs limited to rows that still need
-#' a decision (\code{ColumnDecisions}, \code{CompatibilityDecisions},
-#' \code{DictionaryReview}), reference overview tabs, and hidden
-#' machine-readable \code{Registry}/\code{CompatibilityRegistry}/
-#' \code{DictionaryRegistry}/\code{Settings} tabs consumed by
-#' \code{\link{FinalizeRepositorySchema}}. When \code{PreserveDecisions =
-#' TRUE} and a workbook already exists at \code{SchemaReviewPath}, previously
-#' recorded \code{Accept}/\code{Override}/\code{Ignore} decisions are carried
-#' forward for rows whose evidence signature is unchanged, so re-running the
-#' survey does not discard completed review work.
+#' Converts a \code{\link{RecommendRepositorySchema}} proposal into
+#' the \code{SchemaReview.xlsx} workbook used for human review: a
+#' \code{StartHere} summary tab, an action tab limited to a row that
+#' still needs a decision, \code{ColumnDecisions},
+#' \code{CompatibilityDecisions}, \code{DictionaryReview}, a
+#' reference overview tab, and a hidden, machine readable
+#' \code{Registry}, \code{CompatibilityRegistry},
+#' \code{DictionaryRegistry}, and \code{Settings} tab, consumed by
+#' \code{\link{FinalizeRepositorySchema}}. When
+#' \code{PreserveDecisions} is \code{TRUE} and a workbook already
+#' exists at \code{SchemaReviewPath}, a previously recorded
+#' \code{Accept}, \code{Override}, or \code{Ignore} decision is
+#' carried forward for a row whose evidence signature is unchanged,
+#' so that rerunning the survey does not discard completed review
+#' work.
 #' @param proposal A \code{"RepositorySchemaProposal"} object from
 #'   \code{\link{RecommendRepositorySchema}}.
-#' @param SchemaReviewPath Character. Output \code{.xlsx} path for the review
-#'   workbook.
-#' @param PreserveDecisions Logical. If \code{TRUE} (default), carry forward
-#'   matching prior decisions from an existing workbook at
-#'   \code{SchemaReviewPath}.
+#' @param SchemaReviewPath Character scalar. Output \code{.xlsx} path
+#'   for the review workbook.
+#' @param PreserveDecisions Logical. Accepts \code{TRUE}, which
+#'   carries forward a matching prior decision from an existing
+#'   workbook at \code{SchemaReviewPath}. Accepts \code{FALSE}, which
+#'   does not. Defaults to \code{TRUE}.
 #' @return Invisibly, \code{SchemaReviewPath}, with an attribute
-#'   \code{"ReviewStatus"}: a list with \code{ColumnDecisions},
-#'   \code{CompatibilityDecisions}, \code{DictionaryDecisions}, and
-#'   \code{BlockingSourceErrors} counts, and \code{ReadyToFinalize} (logical).
+#'   named \code{"ReviewStatus"}: a list with \code{ColumnDecisions},
+#'   \code{CompatibilityDecisions}, and \code{DictionaryDecisions}
+#'   counts, \code{BlockingSourceErrors} count, and
+#'   \code{ReadyToFinalize}, a logical value.
 #' @seealso \code{\link{RecommendRepositorySchema}}, \code{\link{FinalizeRepositorySchema}}
 #' @examples
 #' \donttest{
@@ -12065,29 +12458,33 @@ WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = 
   registry
 }
 
-#' Finalize a reviewed schema proposal into the writer catalog
+#' Finalizes a reviewed schema proposal into the writer catalog
 #'
-#' Reads a completed \code{\link{WriteSchemaProposal}} review workbook,
-#' overlays any edits made on the \code{ColumnDecisions},
-#' \code{CompatibilityDecisions}, and \code{DictionaryReview} tabs onto the
-#' hidden machine-readable registries, enforces that every row requiring
-#' review has a resolved \code{Decision} (\code{"Accept"} or
-#' \code{"Override"}, or \code{"Ignore"} for compatibility/dictionary rows),
-#' applies approved cross-table compatibility groups, and writes the
-#' resulting per-column catalog via \code{\link{write_table_schema_catalog}}.
-#' @param SchemaReviewPath Character. Path to the schema review workbook
-#'   written by \code{\link{WriteSchemaProposal}} (or
-#'   \code{\link{PrepareSchemaRegistry}}), with review decisions applied.
-#' @param TableSchemaPath Character. Output path for the finalized table
-#'   schema catalog (\code{.xlsx} or \code{.csv}).
-#' @param strict Logical. If \code{TRUE} (default), stop on unresolved
-#'   decisions, blocking source errors, or invalid types. If \code{FALSE},
-#'   log a warning instead and proceed where possible.
+#' Reads a completed \code{\link{WriteSchemaProposal}} review
+#' workbook, overlays an edit made on the \code{ColumnDecisions},
+#' \code{CompatibilityDecisions}, and \code{DictionaryReview} tabs
+#' onto the hidden, machine readable registries, enforces that every
+#' row requiring review has a resolved \code{Decision}, either
+#' \code{"Accept"} or \code{"Override"}, or \code{"Ignore"} for a
+#' compatibility or dictionary row, applies an approved cross table
+#' compatibility group, and writes the resulting per column catalog
+#' through \code{\link{write_table_schema_catalog}}.
+#' @param SchemaReviewPath Character scalar. Path to the schema
+#'   review workbook written by \code{\link{WriteSchemaProposal}} or
+#'   \code{\link{PrepareSchemaRegistry}}, with review decisions
+#'   applied.
+#' @param TableSchemaPath Character scalar. Output path for the
+#'   finalized table schema catalog, accepting either an
+#'   \code{.xlsx} or a \code{.csv} extension.
+#' @param strict Logical. Accepts \code{TRUE}, which stops on an
+#'   unresolved decision, a blocking source error, or an invalid
+#'   type. Accepts \code{FALSE}, which logs a warning instead and
+#'   proceeds where possible. Defaults to \code{TRUE}.
 #' @return Invisibly, the result of
-#'   \code{\link{load_table_schema_catalog}(TableSchemaPath)}: a list with
-#'   \code{table_schema} (data.table of finalized columns),
-#'   \code{col_classes} (nested per-database/table column-class maps), and
-#'   \code{TableSchemaPath}.
+#'   \code{\link{load_table_schema_catalog}(TableSchemaPath)}: a list
+#'   with \code{table_schema}, a data.table of finalized columns,
+#'   \code{col_classes}, a nested set of per database and table
+#'   column class maps, and \code{TableSchemaPath}.
 #' @seealso \code{\link{WriteSchemaProposal}}, \code{\link{FinalizeSchemaRegistry}},
 #'   \code{\link{write_table_schema_catalog}}
 #' @examples
@@ -12344,67 +12741,84 @@ FinalizeRepositorySchema <- function(SchemaReviewPath, TableSchemaPath, strict =
   invisible(load_table_schema_catalog(TableSchemaPath, strict = TRUE))
 }
 
-#' Prepare the Parquet observations and compact review workbook
+#' Prepares the Parquet observations and compact review workbook
 #'
-#' Convenience wrapper that runs the three schema-preparation stages in
-#' sequence: \code{\link{SurveyRepositorySchema}} (survey source evidence to
-#' Parquet), \code{\link{RecommendRepositorySchema}} (derive recommended
-#' types and compatibility candidates), and \code{\link{WriteSchemaProposal}}
-#' (write the reviewable workbook). Logs one message per stage. Most
-#' arguments are passed through to the corresponding stage function; see
-#' their documentation for details.
-#' @param MDT Data frame. Master database table; see
+#' A convenience wrapper that runs the three schema preparation
+#' stages in sequence: \code{\link{SurveyRepositorySchema}}, which
+#' surveys source evidence to Parquet, \code{\link{RecommendRepositorySchema}},
+#' which derives a recommended type and a compatibility candidate,
+#' and \code{\link{WriteSchemaProposal}}, which writes the reviewable
+#' workbook. Logs one message per stage. Most arguments are passed
+#' through to the corresponding stage function. See that function's
+#' documentation for detail.
+#' @param MDT Data frame. Master database table. See
 #'   \code{\link{SurveyRepositorySchema}}.
-#' @param MasterDBPath Character. Root directory of the source files.
-#' @param ObservationPath Character. Output Parquet path for the survey
-#'   evidence.
-#' @param SchemaReviewPath Character. Output \code{.xlsx} path for the
-#'   review workbook.
-#' @param DBLoad Character vector (optional). Subset of databases to survey.
-#' @param n_workers Integer. Parallel workers for the survey stage. Default 1.
-#' @param SourceFingerprintMode Character. One of \code{"metadata"} (default),
-#'   \code{"sha256"}, or \code{"none"}.
-#' @param StrictReaders Logical. Stop if any source fails to read. Default
-#'   \code{FALSE}.
-#' @param SchemaRegistryPath Character (optional). Schema-registry workbook
-#'   path used by the recommendation stage.
-#' @param schema_registry A pre-loaded schema-registry object (optional),
-#'   taking precedence over \code{SchemaRegistryPath}.
-#' @param SchemaProfile Character. One of \code{"none"} (default),
-#'   \code{"generic"}, or \code{"hcup"}.
-#' @param ValuePreviewMaxDistinct Integer. Value-preview cardinality cutoff.
-#'   Default 15.
-#' @param ValuePreviewTypes Character vector. Types eligible for value
-#'   preview. Default \code{c("character", "integer", "int64", "logical")}.
-#' @param ValuePreviewIdentifiers Logical. Include identifier-like columns in
-#'   the value preview. Default \code{FALSE}.
-#' @param LogPath Character (optional). Log file path for this call.
-#' @param RunId Character (optional). Run identifier tagged onto log lines.
-#' @param SchemaSurveyMode Character. One of \code{"adaptive"} (default),
-#'   \code{"full"}, or \code{"sample"}.
-#' @param AdaptiveSampleRows Integer. Rows retained for adaptive/sample mode.
-#'   Default 100000.
-#' @param FastReadMaxBytes Numeric. Maximum size (bytes) for the bounded
-#'   fast-read path. Default 256 MiB.
-#' @param SchemaChunkSize Integer. Rows per exhaustive schema-scan chunk.
-#'   Default 100000.
-#' @param ObservationCachePath Character (optional). Per-source observation
-#'   cache directory.
-#' @param ReuseObservationCache Logical. Reuse unchanged cached observations.
-#'   Default \code{TRUE}.
-#' @param RefreshObservationCache Logical. Ignore the cache and rescan every
-#'   source. Default \code{FALSE}.
-#' @param FutureGlobalsMaxSizeMB Numeric. Parallel worker export size limit
-#'   (MB). Default 768.
-#' @param Progress Logical. Print periodic progress messages. Default
-#'   \code{TRUE}.
-#' @param ProgressEvery Integer (optional). Force a progress message every
-#'   this many sources.
-#' @param ProgressIntervalSeconds Numeric. Minimum seconds between progress
-#'   messages. Default 30.
-#' @return Invisibly, a list with \code{survey} (the
-#'   \code{"RepositorySchemaSurvey"}), \code{proposal} (the
-#'   \code{"RepositorySchemaProposal"}), \code{ObservationPath}, and
+#' @param MasterDBPath Character scalar. Root directory of the
+#'   source files.
+#' @param ObservationPath Character scalar. Output Parquet path for
+#'   the survey evidence.
+#' @param SchemaReviewPath Character scalar. Output \code{.xlsx}
+#'   path for the review workbook.
+#' @param DBLoad Character vector. Subset of databases to survey.
+#'   Defaults to \code{NULL}, which surveys every database.
+#' @param n_workers Integer. Parallel workers for the survey stage.
+#'   Defaults to \code{1}.
+#' @param SourceFingerprintMode Character scalar. Accepts one of
+#'   three values: \code{"metadata"}, \code{"sha256"}, or
+#'   \code{"none"}. Defaults to \code{"metadata"}.
+#' @param StrictReaders Logical. Accepts \code{TRUE}, which stops if
+#'   any source fails to read. Accepts \code{FALSE}, which does not.
+#'   Defaults to \code{FALSE}.
+#' @param SchemaRegistryPath Character scalar. Schema registry
+#'   workbook path used by the recommendation stage. Defaults to
+#'   \code{NULL}.
+#' @param schema_registry A schema registry object, already loaded,
+#'   taking precedence over \code{SchemaRegistryPath}. Defaults to
+#'   \code{NULL}.
+#' @param SchemaProfile Character scalar. Accepts one of three
+#'   values: \code{"none"}, \code{"generic"}, or \code{"hcup"}.
+#'   Defaults to \code{"none"}.
+#' @param ValuePreviewMaxDistinct Integer. Value preview cardinality
+#'   cutoff. Defaults to \code{15}.
+#' @param ValuePreviewTypes Character vector. Type eligible for a
+#'   value preview. Defaults to
+#'   \code{c("character", "integer", "int64", "logical")}.
+#' @param ValuePreviewIdentifiers Logical. Accepts \code{TRUE}, which
+#'   includes an identifier like column in the value preview.
+#'   Accepts \code{FALSE}, which does not. Defaults to \code{FALSE}.
+#' @param LogPath Character scalar. Log file path for this call.
+#'   Defaults to \code{NULL}.
+#' @param RunId Character scalar. Run identifier tagged onto log
+#'   lines. Defaults to \code{NULL}.
+#' @param SchemaSurveyMode Character scalar. Accepts one of three
+#'   values: \code{"adaptive"}, \code{"full"}, or \code{"sample"}.
+#'   Defaults to \code{"adaptive"}.
+#' @param AdaptiveSampleRows Integer. Rows retained for adaptive or
+#'   sample mode. Defaults to \code{100000}.
+#' @param FastReadMaxBytes Numeric scalar. Maximum size, in bytes,
+#'   for the bounded fast read path. Defaults to \code{256} MiB.
+#' @param SchemaChunkSize Integer. Rows per exhaustive schema scan
+#'   chunk. Defaults to \code{100000}.
+#' @param ObservationCachePath Character scalar. Per source
+#'   observation cache directory. Defaults to \code{NULL}.
+#' @param ReuseObservationCache Logical. Accepts \code{TRUE}, which
+#'   reuses an unchanged cached observation. Accepts \code{FALSE},
+#'   which does not. Defaults to \code{TRUE}.
+#' @param RefreshObservationCache Logical. Accepts \code{TRUE}, which
+#'   ignores the cache and rescans every source. Accepts
+#'   \code{FALSE}, which does not. Defaults to \code{FALSE}.
+#' @param FutureGlobalsMaxSizeMB Numeric scalar. Parallel worker
+#'   export size limit, in megabytes. Defaults to \code{768}.
+#' @param Progress Logical. Accepts \code{TRUE}, which prints a
+#'   periodic progress message. Accepts \code{FALSE}, which does
+#'   not. Defaults to \code{TRUE}.
+#' @param ProgressEvery Integer. Forces a progress message every
+#'   this many sources. Defaults to \code{NULL}.
+#' @param ProgressIntervalSeconds Numeric scalar. Minimum seconds
+#'   between a progress message. Defaults to \code{30}.
+#' @return Invisibly, a list with \code{survey}, the
+#'   \code{"RepositorySchemaSurvey"}, \code{proposal}, the
+#'   \code{"RepositorySchemaProposal"}, \code{ObservationPath}, and
 #'   \code{SchemaReviewPath}.
 #' @seealso \code{\link{SurveyRepositorySchema}}, \code{\link{RecommendRepositorySchema}},
 #'   \code{\link{WriteSchemaProposal}}, \code{\link{FinalizeSchemaRegistry}}
@@ -12495,19 +12909,22 @@ PrepareSchemaRegistry <- function(MDT, MasterDBPath, ObservationPath, SchemaRevi
                  ObservationPath = ObservationPath, SchemaReviewPath = SchemaReviewPath))
 }
 
-#' Finalize the reviewed registry using the existing table-catalog contract
+#' Finalizes the reviewed registry using the existing table catalog contract
 #'
-#' Thin wrapper around \code{\link{FinalizeRepositorySchema}}, kept as a
-#' stable name for the last step of the \code{\link{PrepareSchemaRegistry}}
-#' workflow. Arguments and behavior are identical.
-#' @param SchemaReviewPath Character. Path to the schema review workbook
-#'   with review decisions applied; see \code{\link{FinalizeRepositorySchema}}.
-#' @param TableSchemaPath Character. Output path for the finalized table
-#'   schema catalog.
-#' @param strict Logical. If \code{TRUE} (default), stop on unresolved
-#'   decisions or invalid types.
+#' A thin wrapper around \code{\link{FinalizeRepositorySchema}}, kept
+#' as a stable name for the last step of the
+#' \code{\link{PrepareSchemaRegistry}} workflow. Its arguments and
+#' behavior are identical.
+#' @param SchemaReviewPath Character scalar. Path to the schema
+#'   review workbook with review decisions applied. See
+#'   \code{\link{FinalizeRepositorySchema}}.
+#' @param TableSchemaPath Character scalar. Output path for the
+#'   finalized table schema catalog.
+#' @param strict Logical. Accepts \code{TRUE}, which stops on an
+#'   unresolved decision or an invalid type. Accepts \code{FALSE},
+#'   which does not. Defaults to \code{TRUE}.
 #' @return Invisibly, the result of
-#'   \code{\link{load_table_schema_catalog}(TableSchemaPath)}; see
+#'   \code{\link{load_table_schema_catalog}(TableSchemaPath)}. See
 #'   \code{\link{FinalizeRepositorySchema}}.
 #' @seealso \code{\link{FinalizeRepositorySchema}}, \code{\link{PrepareSchemaRegistry}}
 #' @examples
@@ -12533,27 +12950,31 @@ FinalizeSchemaRegistry <- function(SchemaReviewPath, TableSchemaPath, strict = T
   FinalizeRepositorySchema(SchemaReviewPath, TableSchemaPath, strict = strict)
 }
 
-#' Convert a named class map to a long schema table
+#' Converts a named class map to a long schema table
 #'
-#' Reshapes a named vector or list of R column classes (as produced by
-#' \code{\link{build_col_classes}} or by inspecting a data.table's column
-#' classes) into the one-row-per-column long format used by the schema
-#' catalog. Column names are normalized via \code{canonical_colnames}
-#' and classes are mapped to canonical types via
-#' \code{normalize_type_name}.
-#' @param class_map A named list or vector mapping column name to R/observed
-#'   class (for example \code{list(AGE = "numeric", SEX = "character")}).
-#'   \code{NULL} or length 0 returns an empty table.
-#' @param database Character scalar. Database name recorded on every row.
-#' @param table_name Character scalar. Table name recorded on every row.
-#' @param duckdb_table Character scalar. Physical DuckDB table name recorded
-#'   on every row.
-#' @param source Character scalar. Value recorded in the \code{Source}
-#'   column, describing where the types came from. Default \code{"inferred"}.
+#' Reshapes a named vector or list of R column classes, as produced
+#' by \code{\link{build_col_classes}} or by inspecting a data.table's
+#' column classes, into the one row per column long format used by
+#' the schema catalog. A column name is normalized through
+#' \code{canonical_colnames} and a class is mapped to a canonical
+#' type through \code{normalize_type_name}.
+#' @param class_map A named list or vector mapping a column name to
+#'   its R or observed class, for example
+#'   \code{list(AGE = "numeric", SEX = "character")}. \code{NULL} or
+#'   a length of \code{0} returns an empty table.
+#' @param database Character scalar. Database name recorded on every
+#'   row.
+#' @param table_name Character scalar. Table name recorded on every
+#'   row.
+#' @param duckdb_table Character scalar. Physical DuckDB table name
+#'   recorded on every row.
+#' @param source Character scalar. Value recorded in the
+#'   \code{Source} column, describing where the type came from.
+#'   Defaults to \code{"inferred"}.
 #' @return A data.table with columns \code{Database}, \code{TableName},
 #'   \code{DuckDBTable}, \code{Column}, \code{CanonicalType}, and
-#'   \code{Source}, one row per entry in \code{class_map} (0 rows if
-#'   \code{class_map} is empty).
+#'   \code{Source}, one row per entry in \code{class_map}, or \code{0}
+#'   rows when \code{class_map} is empty.
 #' @examples
 #' schema_map_to_long(list(AGE = "numeric", SEX = "character"),
 #'                    database = "DEMO", table_name = "Core",
@@ -12568,35 +12989,37 @@ schema_map_to_long <- function(class_map, database, table_name, duckdb_table, so
                          Column = nm, CanonicalType = vapply(unname(class_map), normalize_type_name, character(1)), Source = source)
 }
 
-#' Write the table schema catalog as Excel or CSV
+#' Writes the table schema catalog as Excel or CSV
 #'
-#' Writes the finalized per-column schema (as produced by
-#' \code{\link{FinalizeRepositorySchema}}) to \code{TableSchemaPath}. For an
-#' Excel path, writes a \code{TableSchemas} sheet plus derived
-#' \code{MergeKeys} and \code{ColumnInventory} reference sheets, and, when
-#' supplied, \code{ValueDictionary}, \code{ColumnDictionary}, and
-#' \code{Labels} sheets. For a CSV path, writes the main catalog plus a
-#' sibling \verb{*_Labels.csv} / value-dictionary / column-dictionary file
-#' for each optional table that is supplied and non-empty. Any dictionary
-#' argument left \code{NULL} is re-read from an existing file at
-#' \code{TableSchemaPath} first, so calling this repeatedly does not
-#' silently drop previously written dictionaries.
-#' @param table_schema A data frame or data.table of finalized columns (one
-#'   row per Database/TableName/Column), written to the main
-#'   \code{TableSchemas} sheet/file.
-#' @param TableSchemaPath Character. Output path (\code{.xlsx} or
-#'   \code{.csv}). \code{NULL} or blank is a no-op.
-#' @param label_catalog Data frame (optional). Variable/value-label catalog.
-#'   \code{NULL} re-reads any existing catalog via
-#'   \code{\link{load_label_catalog}}.
-#' @param value_dictionary Data frame (optional). Low-cardinality value
-#'   dictionary. \code{NULL} re-reads any existing one from
-#'   \code{TableSchemaPath}.
-#' @param column_dictionary Data frame (optional). Approved semantic-code
-#'   dictionary. \code{NULL} re-reads any existing one from
-#'   \code{TableSchemaPath}.
-#' @return Invisibly, \code{TableSchemaPath} (or \code{NULL} when it is
-#'   \code{NULL}/blank, in which case nothing is written).
+#' Writes the finalized per column schema, as produced by
+#' \code{\link{FinalizeRepositorySchema}}, to \code{TableSchemaPath}.
+#' For an Excel path, writes a \code{TableSchemas} sheet plus a
+#' derived \code{MergeKeys} and \code{ColumnInventory} reference
+#' sheet, and, when supplied, a \code{ValueDictionary},
+#' \code{ColumnDictionary}, and \code{Labels} sheet. For a CSV path,
+#' writes the main catalog plus a sibling \verb{*_Labels.csv}, value
+#' dictionary, or column dictionary file for each optional table
+#' that is supplied and non empty. A dictionary argument left
+#' \code{NULL} is read back from an existing file at
+#' \code{TableSchemaPath} first, so that calling this repeatedly does
+#' not silently drop a previously written dictionary.
+#' @param table_schema A data frame or data.table of finalized
+#'   columns, one row per Database, TableName, and Column, written to
+#'   the main \code{TableSchemas} sheet or file.
+#' @param TableSchemaPath Character scalar. Output path, accepting
+#'   either an \code{.xlsx} or a \code{.csv} extension. \code{NULL}
+#'   or a blank value is a no op.
+#' @param label_catalog Data frame. Variable and value label catalog.
+#'   Defaults to \code{NULL}, which reads back any existing catalog
+#'   through \code{\link{load_label_catalog}}.
+#' @param value_dictionary Data frame. Low cardinality value
+#'   dictionary. Defaults to \code{NULL}, which reads back any
+#'   existing dictionary from \code{TableSchemaPath}.
+#' @param column_dictionary Data frame. Approved semantic code
+#'   dictionary. Defaults to \code{NULL}, which reads back any
+#'   existing dictionary from \code{TableSchemaPath}.
+#' @return Invisibly, \code{TableSchemaPath}, or \code{NULL} when it
+#'   is \code{NULL} or blank, in which case nothing is written.
 #' @seealso \code{\link{FinalizeRepositorySchema}}, \code{\link{load_table_schema_catalog}}
 #' @examples
 #' table_schema <- data.frame(
@@ -12664,17 +13087,19 @@ label_catalog_path <- function(TableSchemaPath) {
   paste0(tools::file_path_sans_ext(TableSchemaPath), "_Labels.csv")
 }
 
-#' Read the data-dictionary (Labels) catalog back from disk
+#' Reads the data dictionary Labels catalog back from disk
 #'
-#' Companion reader for the \code{Labels} sheet of \code{TableSchemas.xlsx}
-#' (or the \code{*_Labels.csv} sibling when the catalog is CSV). Returns NULL
-#' when absent.
-#' @param TableSchemaPath Character. Path to the schema catalog written by
-#'   \code{\link{write_table_schema_catalog}} (\code{.xlsx} or \code{.csv}).
-#' @return A data.table with (at least) \code{Column}, \code{VariableLabel},
-#'   \code{ValueLabels}, and \code{SourceFile}, or \code{NULL} when
-#'   \code{TableSchemaPath} is missing, does not exist, has no \code{Labels}
-#'   sheet/sibling file, or the sheet/file is empty.
+#' A companion reader for the \code{Labels} sheet of
+#' \code{TableSchemas.xlsx}, or the \code{*_Labels.csv} sibling file
+#' when the catalog is CSV. Returns \code{NULL} when absent.
+#' @param TableSchemaPath Character scalar. Path to the schema
+#'   catalog written by \code{\link{write_table_schema_catalog}},
+#'   accepting either an \code{.xlsx} or a \code{.csv} extension.
+#' @return A data.table with at least \code{Column},
+#'   \code{VariableLabel}, \code{ValueLabels}, and \code{SourceFile},
+#'   or \code{NULL} when \code{TableSchemaPath} is missing, does not
+#'   exist, has no \code{Labels} sheet or sibling file, or that sheet
+#'   or file is empty.
 #' @seealso \code{\link{harvest_sav_labels}}, \code{\link{search_labels}}
 #' @examples
 #' tmp <- tempfile(fileext = ".csv")
@@ -12713,16 +13138,19 @@ column_dictionary_path <- function(TableSchemaPath) {
   paste0(tools::file_path_sans_ext(TableSchemaPath), "_ColumnDictionary.csv")
 }
 
-#' Read low-cardinality value evidence from the schema catalog
+#' Reads low cardinality value evidence from the schema catalog
 #'
-#' Reads the \code{ValueDictionary} sheet of \code{TableSchemas.xlsx}, or the
-#' sibling CSV written for a CSV schema catalog. Values are descriptive survey
-#' evidence and never control physical Parquet coercion.
-#' @param TableSchemaPath Character. Path to the schema catalog written by
-#'   \code{\link{write_table_schema_catalog}} (\code{.xlsx} or \code{.csv}).
-#' @return A data.table of value evidence (all columns read as character), or
-#'   \code{NULL} when \code{TableSchemaPath} is missing, does not exist, has
-#'   no \code{ValueDictionary} sheet/sibling file, or it is empty.
+#' Reads the \code{ValueDictionary} sheet of \code{TableSchemas.xlsx},
+#' or the sibling CSV written for a CSV schema catalog. The values
+#' are descriptive survey evidence and never control physical
+#' Parquet coercion.
+#' @param TableSchemaPath Character scalar. Path to the schema
+#'   catalog written by \code{\link{write_table_schema_catalog}},
+#'   accepting either an \code{.xlsx} or a \code{.csv} extension.
+#' @return A data.table of value evidence, with every column read as
+#'   character, or \code{NULL} when \code{TableSchemaPath} is
+#'   missing, does not exist, has no \code{ValueDictionary} sheet or
+#'   sibling file, or that sheet or file is empty.
 #' @seealso \code{\link{load_column_dictionary}}, \code{\link{describe_column}}
 #' @examples
 #' tmp <- tempfile(fileext = ".csv")
@@ -12755,19 +13183,23 @@ load_value_dictionary <- function(TableSchemaPath) {
   values
 }
 
-#' Read approved semantic value labels from the schema catalog
+#' Reads approved semantic value labels from the schema catalog
 #'
-#' Reads the partition-aware \code{ColumnDictionary} sheet written by
-#' \code{FinalizeSchemaRegistry()}. Unlike \code{ValueDictionary}, these rows
-#' are semantic mappings approved from source metadata or by a user.
-#' @param TableSchemaPath Character. Path to the schema catalog written by
-#'   \code{\link{write_table_schema_catalog}} (\code{.xlsx} or \code{.csv}).
-#' @return A data.table of approved column-to-label mappings (all columns
-#'   read as character; typically includes \code{Database}, \code{TableName},
-#'   \code{DuckDBTable}, \code{Column}, \code{Value}, \code{Label},
-#'   \code{PartitionKey}, \code{PartitionValue}), or \code{NULL} when
+#' Reads the partition aware \code{ColumnDictionary} sheet written by
+#' \code{FinalizeSchemaRegistry()}. Unlike \code{ValueDictionary},
+#' this row is a semantic mapping approved from source metadata or
+#' by a user.
+#' @param TableSchemaPath Character scalar. Path to the schema
+#'   catalog written by \code{\link{write_table_schema_catalog}},
+#'   accepting either an \code{.xlsx} or a \code{.csv} extension.
+#' @return A data.table of approved column to label mappings, with
+#'   every column read as character, typically including
+#'   \code{Database}, \code{TableName}, \code{DuckDBTable},
+#'   \code{Column}, \code{Value}, \code{Label}, \code{PartitionKey},
+#'   and \code{PartitionValue}, or \code{NULL} when
 #'   \code{TableSchemaPath} is missing, does not exist, has no
-#'   \code{ColumnDictionary} sheet/sibling file, or it is empty.
+#'   \code{ColumnDictionary} sheet or sibling file, or that sheet or
+#'   file is empty.
 #' @seealso \code{\link{decode_column}}, \code{\link{validate_against_dictionary}}
 #' @examples
 #' tmp <- tempfile(fileext = ".csv")
@@ -12803,26 +13235,30 @@ load_column_dictionary <- function(TableSchemaPath) {
   dictionary
 }
 
-#' Describe a repository column and its observed and semantic values
+#' Describes a repository column and its observed and semantic values
 #'
-#' One-stop lookup for a single Database/TableName/Column triple: pulls its
-#' schema-catalog row (canonical type, role, source), any low-cardinality
-#' \code{ValueDictionary} evidence observed during schema survey, and any
-#' approved \code{ColumnDictionary} semantic labels -- the three pieces
-#' \code{\link{search_labels}} would otherwise require separate calls to
-#' assemble for one column.
-#' @param TableSchemaPath Character. Path to the schema catalog written by
-#'   \code{\link{write_table_schema_catalog}}.
-#' @param Database Character scalar. Database name as recorded in the catalog.
-#' @param TableName Character scalar. Logical table name (as in the MDT
-#'   \code{TableName} column, not the physical DuckDB table name).
-#' @param Column Character scalar. Column name (canonicalized internally via
-#'   \code{canonical_colnames} before matching).
-#' @return An object of class \code{"repoquet_column_description"}: a list
-#'   with \code{schema} (the matching schema-catalog row(s), a data.table),
-#'   \code{observed_values} (matching \code{ValueDictionary} rows, or
-#'   \code{NULL}), and \code{dictionary} (matching \code{ColumnDictionary}
-#'   rows, or \code{NULL}).
+#' A one stop lookup for a single Database, TableName, and Column
+#' triple: pulls its schema catalog row, its canonical type, role,
+#' and source, any low cardinality \code{ValueDictionary} evidence
+#' observed during a schema survey, and any approved
+#' \code{ColumnDictionary} semantic label, the three pieces
+#' \code{\link{search_labels}} would otherwise require a separate
+#' call to assemble for one column.
+#' @param TableSchemaPath Character scalar. Path to the schema
+#'   catalog written by \code{\link{write_table_schema_catalog}}.
+#' @param Database Character scalar. Database name as recorded in
+#'   the catalog.
+#' @param TableName Character scalar. Logical table name, as in the
+#'   MDT \code{TableName} column, not the physical DuckDB table
+#'   name.
+#' @param Column Character scalar. Column name, canonicalized
+#'   internally through \code{canonical_colnames} before matching.
+#' @return An object of class \code{"repoquet_column_description"}:
+#'   a list with \code{schema}, the matching schema catalog row or
+#'   rows as a data.table, \code{observed_values}, the matching
+#'   \code{ValueDictionary} rows, or \code{NULL}, and
+#'   \code{dictionary}, the matching \code{ColumnDictionary} rows, or
+#'   \code{NULL}.
 #' @seealso \code{\link{search_labels}}, \code{\link{decode_column}}
 #' @examples
 #' tmp <- tempfile(fileext = ".csv")
@@ -12861,31 +13297,38 @@ describe_column <- function(TableSchemaPath, Database, TableName, Column) {
                  dictionary = dictionary), class = "repoquet_column_description")
 }
 
-#' Query a DuckDB table with one coded column decoded
+#' Queries a DuckDB table with one coded column decoded
 #'
-#' Adds a label column using the approved semantic dictionary. Partition-
-#' specific mappings take precedence over mappings whose partition scope is
-#' \code{"*"}. A conservative 1,000-row default prevents accidental retrieval
-#' of an entire large table; pass \code{limit = NULL} explicitly to remove it.
-#' @param con Live DBI/DuckDB connection with \code{table} registered.
-#' @param table Character scalar. DuckDB table (or view) name to query.
-#' @param column Character scalar. Coded column to decode; matched against
-#'   \code{ColumnDictionary} after canonicalization via
+#' Adds a label column using the approved semantic dictionary. A
+#' partition specific mapping takes precedence over a mapping whose
+#' partition scope is \code{"*"}. A conservative default of 1,000
+#' rows prevents accidental retrieval of an entire large table. Pass
+#' \code{limit = NULL} explicitly to remove it.
+#' @param con Live DBI or DuckDB connection with \code{table}
+#'   registered.
+#' @param table Character scalar. DuckDB table or view name to
+#'   query.
+#' @param column Character scalar. Coded column to decode, matched
+#'   against \code{ColumnDictionary} after canonicalization through
 #'   \code{canonical_colnames}.
-#' @param TableSchemaPath Character. Path to the schema catalog holding the
-#'   \code{ColumnDictionary} sheet (see \code{\link{load_column_dictionary}}).
-#' @param Database Character scalar (optional). Restricts dictionary lookup to
-#'   this database when \code{table} name alone is ambiguous.
-#' @param TableName Character scalar (optional). Restricts dictionary lookup to
-#'   this logical table name.
-#' @param label_column Character scalar. Name of the generated label column.
-#'   Defaults to \code{<column>_LABEL} (canonicalized).
-#' @param where Character scalar (optional). Additional raw SQL \code{WHERE}
-#'   clause appended to the generated query.
-#' @param limit Integer (optional). Maximum rows returned. Default 1000L;
-#'   pass \code{NULL} to remove the cap and return every matching row.
-#' @return A data.frame: every column of \code{table} plus \code{label_column}
-#'   holding the decoded label (\code{NA} where no dictionary entry matches).
+#' @param TableSchemaPath Character scalar. Path to the schema
+#'   catalog holding the \code{ColumnDictionary} sheet. See
+#'   \code{\link{load_column_dictionary}}.
+#' @param Database Character scalar. Restricts the dictionary lookup
+#'   to this database when the \code{table} name alone is ambiguous.
+#'   Defaults to \code{NULL}.
+#' @param TableName Character scalar. Restricts the dictionary
+#'   lookup to this logical table name. Defaults to \code{NULL}.
+#' @param label_column Character scalar. Name of the generated label
+#'   column. Defaults to \code{<column>_LABEL}, canonicalized.
+#' @param where Character scalar. Additional raw SQL \code{WHERE}
+#'   clause appended to the generated query. Defaults to \code{NULL}.
+#' @param limit Integer. Maximum rows returned. Defaults to
+#'   \code{1000}. Pass \code{NULL} to remove the cap and return every
+#'   matching row.
+#' @return A data.frame: every column of \code{table} plus
+#'   \code{label_column} holding the decoded label, with \code{NA}
+#'   where no dictionary entry matches.
 #' @seealso \code{\link{load_column_dictionary}}, \code{\link{describe_column}}
 #' @examples
 #' con <- DBI::dbConnect(duckdb::duckdb())
@@ -12977,22 +13420,35 @@ decode_column <- function(con, table, column, TableSchemaPath,
   DBI::dbGetQuery(con, sql)
 }
 
-#' Search the data dictionary for variables by label, name, or value text
+#' Searches the data dictionary for a variable by label, name, or value text
 #'
-#' Makes the harvested \code{Labels} sheet queryable: find every column across
-#' every table whose variable label, column name, or value labels match a
-#' pattern -- e.g. \code{search_labels("payer", TableSchemaPath)} to locate the
-#' payer variables in all databases at once. Resolved canonical types are
-#' merged in from the schema catalog, and when \code{ParquetBasePath} is given
-#' each hit also reports which partitions of its table exist on disk.
-#' @param pattern Regular expression (case-insensitive by default).
-#' @param TableSchemaPath Path to the schema catalog holding the Labels sheet.
-#' @param search_in Any of "label", "column", "values" (default: all three).
-#' @param ignore_case Logical, default TRUE.
-#' @param ParquetBasePath Optional. When given, adds a PartitionsOnDisk column.
-#' @return data.table of matches: Database, TableName, DuckDBTable, Column,
-#'   CanonicalType, VariableLabel, ValueLabels (and PartitionsOnDisk).
-#' @seealso \code{\link{column_availability}} for per-year column presence.
+#' Makes the harvested \code{Labels} sheet queryable: finds every
+#' column across every table whose variable label, column name, or
+#' value labels match a pattern, for example
+#' \code{search_labels("payer", TableSchemaPath)} to locate a payer
+#' variable in every database at once. A resolved canonical type is
+#' merged in from the schema catalog, and when \code{ParquetBasePath}
+#' is given each hit also reports which partition of its table
+#' exists on disk.
+#' @param pattern Character scalar. Regular expression to match,
+#'   case insensitive by default.
+#' @param TableSchemaPath Character scalar. Path to the schema
+#'   catalog holding the \code{Labels} sheet.
+#' @param search_in Character vector. Accepts any of three values:
+#'   \code{"label"}, which searches the variable label, \code{"column"},
+#'   which searches the column name, and \code{"values"}, which
+#'   searches the value labels. Defaults to all three.
+#' @param ignore_case Logical. Accepts \code{TRUE}, which matches
+#'   \code{pattern} without regard to case. Accepts \code{FALSE},
+#'   which matches case sensitively. Defaults to \code{TRUE}.
+#' @param ParquetBasePath Character scalar. When given, adds a
+#'   \code{PartitionsOnDisk} column reporting which partition of each
+#'   matched table exists on disk. Defaults to \code{NULL}.
+#' @return A data.table of matches with \code{Database},
+#'   \code{TableName}, \code{DuckDBTable}, \code{Column},
+#'   \code{CanonicalType}, \code{VariableLabel}, \code{ValueLabels},
+#'   and, when \code{ParquetBasePath} is given, \code{PartitionsOnDisk}.
+#' @seealso \code{\link{column_availability}} for column presence by year.
 #' @examples
 #' tmp <- tempfile(fileext = ".csv")
 #' schema <- data.table::data.table(Database = "DEMO", TableName = "T", Column = c("AGE", "SEX"),
@@ -13082,28 +13538,35 @@ parse_value_label_codes <- function(x) {
   unique(codes[nzchar(codes)])
 }
 
-#' Validate table contents against the data dictionary's value domains
+#' Validates table contents against the data dictionary's value domains
 #'
-#' Content-integrity companion to \code{\link{audit_repository}}: for every
-#' column whose harvested value labels define a code domain (e.g.
-#' \code{DIED} in \{0, 1\}), reports how many stored values fall outside it.
-#' This catches the silent-coercion class of problem -- source values the type
-#' normalization turned into NA, or codes that drifted between releases.
+#' A content integrity companion to \code{\link{audit_repository}}:
+#' for every column whose harvested value labels define a code
+#' domain, for example \code{DIED} in \{0, 1\}, reports how many
+#' stored values fall outside it. This catches the class of problem
+#' where a silent coercion turned a source value into \code{NA}, or a
+#' code drifted between releases.
 #'
-#' Interpretation caveat: HCUP labels continuous variables' \emph{special}
-#' codes only (e.g. AGE might label just \code{999 = missing}), so a high
-#' out-of-domain share is not automatically an error -- it can simply mean the
-#' column is continuous. Filter on \code{DomainSize} or sort by
-#' \code{PctOutOfDomain} and judge; nothing here mutates data.
-#' @param con Live DuckDB connection with the views registered (or readable
-#'   tables of the same names).
-#' @param TableSchemaPath Path to the schema catalog holding the Labels sheet.
-#' @param tables Optional character vector restricting which DuckDB tables run.
-#' @param min_domain Integer. Only validate columns whose parsed domain has a
-#'   least this many codes (default 2).
-#' @param verbose Logical. Log a summary line per table.
-#' @return data.table: DuckDBTable, Column, DomainSize, Domain (first codes),
-#'   Total, NNull, OutOfDomain, PctOutOfDomain -- sorted worst-first.
+#' Interpretation note: HCUP labels only a continuous variable's
+#' special codes, for example AGE might label only
+#' \code{999 = missing}, so a high out of domain share is not
+#' automatically an error. It can simply mean the column is
+#' continuous. Filter on \code{DomainSize} or sort by
+#' \code{PctOutOfDomain} and judge. Nothing here mutates data.
+#' @param con Live DuckDB connection with the views registered, or a
+#'   readable table of the same name.
+#' @param TableSchemaPath Character scalar. Path to the schema
+#'   catalog holding the \code{Labels} sheet.
+#' @param tables Character vector. Restricts which DuckDB table
+#'   runs. Defaults to \code{NULL}, which runs every table.
+#' @param min_domain Integer. Validates only a column whose parsed
+#'   domain has at least this many codes. Defaults to \code{2}.
+#' @param verbose Logical. Accepts \code{TRUE}, which logs a summary
+#'   line per table. Accepts \code{FALSE}, which does not.
+#' @return A data.table with \code{DuckDBTable}, \code{Column},
+#'   \code{DomainSize}, \code{Domain}, its first codes, \code{Total},
+#'   \code{NNull}, \code{OutOfDomain}, and \code{PctOutOfDomain},
+#'   sorted with the worst case first.
 #' @examples
 #' con <- DBI::dbConnect(duckdb::duckdb())
 #' DBI::dbWriteTable(con, "demo_t", data.frame(DIED = c(0L, 1L, 0L, 9L)))
@@ -13196,19 +13659,22 @@ validate_against_dictionary <- function(con, TableSchemaPath, tables = NULL,
   out[]
 }
 
-#' Harvest SPSS variable and value labels from SAV headers
+#' Harvests SPSS variable and value labels from SAV headers
 #'
-#' Reads each file with \code{n_max = 0} (schema only -- no data rows) and
-#' collects, per column, the human-readable variable label and the value-label
-#' map that \code{strip_haven} discards during loading. This is the raw
-#' material for the \code{Labels} sheet of the schema catalog: a searchable
-#' data dictionary spanning every table.
-#' @param files Character vector of full paths to \code{.sav} files, ordered
-#'   most-authoritative first (the first non-empty label per column wins, so
-#'   pass the newest year first).
-#' @param n_workers Parallel workers for the header reads.
-#' @return data.table with Column, VariableLabel, ValueLabels, SourceFile --
-#'   one row per column that carries at least one label.
+#' Reads each file with \code{n_max = 0}, schema only, with no data
+#' rows, and collects, per column, the human readable variable label
+#' and the value label map that \code{strip_haven} discards during
+#' loading. This is the raw material for the \code{Labels} sheet of
+#' the schema catalog: a searchable data dictionary spanning every
+#' table.
+#' @param files Character vector of full paths to a \code{.sav}
+#'   file, ordered with the most authoritative first. The first non
+#'   blank label for a column wins, so pass the newest year first.
+#' @param n_workers Integer. Parallel workers for the header read.
+#'   Defaults to \code{1}.
+#' @return A data.table with \code{Column}, \code{VariableLabel},
+#'   \code{ValueLabels}, and \code{SourceFile}, one row per column
+#'   that carries at least one label.
 #' @examples
 #' tmp_sav <- tempfile(fileext = ".sav")
 #' df <- data.frame(AGE = haven::labelled(c(34, 56), label = "Age in years"),
@@ -13222,25 +13688,28 @@ harvest_sav_labels <- function(files, n_workers = 1) {
   harvest_source_labels(files, reader = "sav", n_workers = n_workers)
 }
 
-#' Harvest variable and value labels from any labeled source format
+#' Harvests variable and value labels from any labeled source format
 #'
-#' Generalization of \code{\link{harvest_sav_labels}} across the reader
-#' registry: any FileType whose reader declares \code{has_labels} (SPSS
-#' \code{.sav}, Stata \code{.dta}, SAS \code{.sas7bdat}/\code{.xpt}) yields
-#' the same data-dictionary rows, since the haven family shares the label
-#' attribute structure.
-#' @param files Character vector of full paths to source files, ordered
-#'   most-authoritative first (the first non-empty label per column wins, so
-#'   pass the newest year first). An empty vector returns an empty result
-#'   immediately.
-#' @param reader Character scalar. Registered reader name (see
-#'   \code{\link{get_file_reader}}), e.g. \code{"sav"} or \code{"dta"}. If the
-#'   reader does not declare \code{has_labels}, an empty result is returned.
-#' @param n_workers Integer. Parallel workers for the header-only scans.
-#' @return data.table with Column, VariableLabel, ValueLabels, SourceFile --
-#'   one row per column that carries at least one label. Empty (zero-row, but
-#'   correctly typed) when \code{files} is empty, the reader has no label
-#'   support, or no column in any file carries a label.
+#' A generalization of \code{\link{harvest_sav_labels}} across the
+#' reader registry: any FileType whose reader declares
+#' \code{has_labels}, SPSS \code{.sav}, Stata \code{.dta}, or SAS
+#' \code{.sas7bdat} or \code{.xpt}, yields the same data dictionary
+#' row, since the haven family shares the label attribute structure.
+#' @param files Character vector of full paths to a source file,
+#'   ordered with the most authoritative first. The first non blank
+#'   label for a column wins, so pass the newest year first. An
+#'   empty vector returns an empty result immediately.
+#' @param reader Character scalar. Registered reader name. See
+#'   \code{\link{get_file_reader}}. For example \code{"sav"} or
+#'   \code{"dta"}. When the reader does not declare
+#'   \code{has_labels}, an empty result is returned.
+#' @param n_workers Integer. Parallel workers for the header only
+#'   scan. Defaults to \code{1}.
+#' @return A data.table with \code{Column}, \code{VariableLabel},
+#'   \code{ValueLabels}, and \code{SourceFile}, one row per column
+#'   that carries at least one label. Returns a correctly typed but
+#'   zero row table when \code{files} is empty, the reader has no
+#'   label support, or no column in any file carries a label.
 #' @seealso \code{\link{harvest_sav_labels}}
 #' @examples
 #' tmp_dta <- tempfile(fileext = ".dta")
@@ -13303,27 +13772,32 @@ harvest_source_labels <- function(files, reader, n_workers = 1) {
   all_lab[!duplicated(Column)]
 }
 
-#' Read the table schema catalog back as the authoritative column-type source
+#' Reads the table schema catalog back as the authoritative column type source
 #'
-#' Reads \code{TableSchemas.xlsx} (sheet \code{TableSchemas}) or the CSV
-#' equivalent and converts it into the per-table \code{col_classes} maps the
-#' loader consumes. This is the read half of the curation workflow: edit a
-#' row's \code{CanonicalType} and set its \code{Source} to \code{"manual"} to
-#' pin that column's type; \code{\link{BuildRepositoryCatalog}} preserves such
-#' rows on re-inference. In strict mode, unrecognised \code{CanonicalType}
-#' values stop the load; non-strict inspection logs them and falls back to
-#' character.
-#' @param TableSchemaPath Character. Path to the catalog written by
-#'   \code{\link{write_table_schema_catalog}}.
-#' @param strict Logical. If \code{TRUE}, a missing required column, an
-#'   unreadable file, an invalid \code{CanonicalType} value, or a conflicting
-#'   duplicate Database/TableName/Column row stops with an error instead of
-#'   logging a warning and falling back (unrecognised types become
-#'   \code{"character"}; duplicates keep the first occurrence).
-#' @return \code{NULL} when the file is absent or unusable; otherwise a list
-#'   with \code{table_schema} (data.table), \code{col_classes} (nested list:
-#'   \code{col_classes[[Database]][[TableName]]} is a named list of
-#'   column -> canonical type, YEAR excluded), and \code{TableSchemaPath}.
+#' Reads \code{TableSchemas.xlsx}, sheet \code{TableSchemas}, or its
+#' CSV equivalent, and converts it into the per table
+#' \code{col_classes} map the loader consumes. This is the read half
+#' of the curation workflow: edit a row's \code{CanonicalType} and
+#' set its \code{Source} to \code{"manual"} to pin that column's
+#' type. \code{\link{BuildRepositoryCatalog}} preserves such a row on
+#' re inference. In strict mode, an unrecognized \code{CanonicalType}
+#' value stops the load. Outside strict mode, it is logged and falls
+#' back to character.
+#' @param TableSchemaPath Character scalar. Path to the catalog
+#'   written by \code{\link{write_table_schema_catalog}}.
+#' @param strict Logical. Accepts \code{TRUE}, which stops with an
+#'   error on a missing required column, an unreadable file, an
+#'   invalid \code{CanonicalType} value, or a conflicting duplicate
+#'   Database, TableName, and Column row. Accepts \code{FALSE}, which
+#'   instead logs a warning and falls back: an unrecognized type
+#'   becomes \code{"character"}, and a duplicate keeps its first
+#'   occurrence. Defaults to \code{FALSE}.
+#' @return \code{NULL} when the file is absent or unusable.
+#'   Otherwise a list with \code{table_schema}, a data.table,
+#'   \code{col_classes}, a nested list where
+#'   \code{col_classes[[Database]][[TableName]]} is a named list
+#'   mapping a column to its canonical type, with YEAR excluded, and
+#'   \code{TableSchemaPath}.
 #' @seealso \code{\link{BuildRepositoryCatalog}}, \code{\link{ParquetBackEndCreate}}
 #' @examples
 #' tmp <- tempfile(fileext = ".csv")
@@ -13405,23 +13879,26 @@ load_table_schema_catalog <- function(TableSchemaPath, strict = FALSE) {
   list(table_schema = ts, col_classes = col_classes, TableSchemaPath = TableSchemaPath)
 }
 
-#' Merge a freshly inferred schema catalog with an existing one
+#' Merges a freshly inferred schema catalog with an existing one
 #'
-#' Preserves human curation across preflight runs: existing rows whose
-#' \code{Source} is \code{"manual"} or \code{"user_approved"} keep their
-#' reviewed fields (human decisions outrank both inference and the registry),
-#' and rows for tables or databases the fresh pass did not cover are carried
-#' forward unchanged.
-#' @param new_schema data.table of freshly inferred/resolved catalog rows.
-#' @param existing_schema data.table of the catalog currently on disk (or NULL).
-#' @return data.table combining both per the precedence rules above.
+#' Preserves human curation across a preflight run: an existing row
+#' whose \code{Source} is \code{"manual"} or \code{"user_approved"}
+#' keeps its reviewed fields, since a human decision outranks both
+#' inference and the registry, and a row for a table or database the
+#' fresh pass did not cover is carried forward unchanged.
+#' @param new_schema A data.table of freshly inferred or resolved
+#'   catalog rows.
+#' @param existing_schema A data.table of the catalog currently on
+#'   disk. Defaults to \code{NULL}.
+#' @return A data.table combining both according to the precedence
+#'   rules described above.
 #' @examples
 #' existing <- data.table::data.table(Database = "DEMO", TableName = "T", Column = "SEX",
 #'                                    CanonicalType = "character", Source = "manual")
 #' fresh <- data.table::data.table(Database = "DEMO", TableName = "T", Column = "SEX",
 #'                                 CanonicalType = "integer", Source = "resolved")
 #' merged <- merge_table_schema_catalog(fresh, existing)
-#' merged$CanonicalType # "character" -- the manual override is preserved
+#' merged$CanonicalType # "character": the manual override is preserved
 #' @export
 merge_table_schema_catalog <- function(new_schema, existing_schema = NULL) {
   new_schema <- data.table::as.data.table(new_schema)
@@ -13467,27 +13944,28 @@ merge_table_schema_catalog <- function(new_schema, existing_schema = NULL) {
   data.table::rbindlist(list(new_schema, carried), fill = TRUE)
 }
 
-#' Get registry metadata for a column
+#' Gets registry metadata for a column
 #'
-#' Finds the first \code{schema_registry} row whose \code{AppliesTo} scope
-#' matches \code{database}/\code{table_name} (see
-#' \code{schema_registry_applies}) and whose \code{ColumnPattern}
-#' matches \code{column} (after canonicalization), and returns that row in
-#' full -- including any \code{Role} used to annotate the schema catalog.
-#' Unlike \code{\link{apply_schema_registry}}, this returns the matching
-#' registry row itself rather than an overridden type map.
-#' @param column Character scalar. Column name to match (canonicalized
-#'   internally via \code{canonical_colnames}).
-#' @param schema_registry data.table of registry rows (see
-#'   \code{\link{build_default_schema_registry}}, \code{\link{load_schema_registry}}),
-#'   or \code{NULL}.
-#' @param database Character scalar (optional). Database name used to
-#'   evaluate each row's \code{AppliesTo} scope.
-#' @param table_name Character scalar (optional). Table name used to evaluate
-#'   each row's \code{AppliesTo} scope.
-#' @return A one-row data.table/data.frame (the first matching registry row),
-#'   or \code{NULL} when \code{schema_registry} is \code{NULL}/empty or no row
-#'   matches.
+#' Finds the first \code{schema_registry} row whose \code{AppliesTo}
+#' scope matches \code{database} and \code{table_name}, see
+#' \code{schema_registry_applies}, and whose \code{ColumnPattern}
+#' matches \code{column} after canonicalization, and returns that
+#' row in full, including any \code{Role} used to annotate the
+#' schema catalog. Unlike \code{\link{apply_schema_registry}}, this
+#' returns the matching registry row itself rather than an
+#' overridden type map.
+#' @param column Character scalar. Column name to match,
+#'   canonicalized internally through \code{canonical_colnames}.
+#' @param schema_registry A data.table of registry rows. See
+#'   \code{\link{build_default_schema_registry}} and
+#'   \code{\link{load_schema_registry}}. Defaults to \code{NULL}.
+#' @param database Character scalar. Database name used to evaluate
+#'   each row's \code{AppliesTo} scope. Defaults to \code{NULL}.
+#' @param table_name Character scalar. Table name used to evaluate
+#'   each row's \code{AppliesTo} scope. Defaults to \code{NULL}.
+#' @return A one row data.table or data.frame, the first matching
+#'   registry row, or \code{NULL} when \code{schema_registry} is
+#'   \code{NULL} or empty, or no row matches.
 #' @seealso \code{\link{apply_schema_registry}}, \code{\link{build_default_schema_registry}}
 #' @examples
 #' registry <- data.table::data.table(
@@ -13511,51 +13989,62 @@ schema_registry_match <- function(column, schema_registry = NULL, database = NUL
   NULL
 }
 
-#' Build a repository schema object for a database subset
+#' Builds a repository schema object for a database subset
 #'
-#' This is the phase-2 schema engine. It infers schemas per Database/TableName,
-#' applies the repository schema registry, writes a transparent long-form schema
-#' catalog, and returns the comprehensive column map plus table-specific class maps
-#' needed by the writer.
-#' @param MDTSelect Data frame. Subset of the Master Database Table (typically
-#'   one database's rows) with, at minimum, \code{Database}, \code{MDBDir},
-#'   \code{Path}, \code{TableName}, \code{FileType}, \code{PartitionKey}, and
-#'   \code{PartitionValue}.
-#' @param MasterDBPath Character. Root directory of the source files, used
-#'   with \code{MDBDir}/\code{Path} to resolve each row's full path.
-#' @param Database Character (optional). When \code{MDTSelect} spans more than
-#'   one database and this is a single value, rows are filtered to it first.
-#'   Defaults to every database present in \code{MDTSelect}.
-#' @param n_workers Integer. Parallel workers for column-sampling scans (see
-#'   \code{\link{build_comprehensive}}, \code{\link{build_col_classes}}).
-#' @param SchemaRegistryPath Character (optional). Registry path passed to
-#'   \code{\link{load_schema_registry}} when \code{schema_registry} is not
-#'   supplied directly (created if missing).
-#' @param TableSchemaPath Character (optional). Destination for the written
-#'   catalog when \code{write_catalog = TRUE} (see
-#'   \code{\link{write_table_schema_catalog}}).
-#' @param schema_registry data.table (optional). Pre-loaded registry (see
-#'   \code{\link{build_default_schema_registry}}); loaded from
-#'   \code{SchemaRegistryPath} when \code{NULL}.
-#' @param write_catalog Logical. If \code{TRUE} (default), writes the combined
-#'   schema catalog (and any harvested labels) to \code{TableSchemaPath}.
-#' @param known_col_classes Named list (optional), keyed by \code{TableName},
-#'   of already-approved column-to-type maps (as in
-#'   \code{load_table_schema_catalog()$col_classes[[Database]]}). Columns
-#'   present in the catalog keep their approved type; any column newly present
-#'   in the source files is inferred and logged for a future
-#'   \code{\link{BuildRepositoryCatalog}} run.
-#' @param harvest_labels Logical. If \code{TRUE}, also harvests variable/value
-#'   labels (see \code{\link{harvest_source_labels}}) for every table whose
-#'   reader supports labels, newest partition first.
+#' This is the phase two schema engine. It infers a schema per
+#' Database and TableName, applies the repository schema registry,
+#' writes a transparent, long form schema catalog, and returns the
+#' comprehensive column map plus a table specific class map needed
+#' by the writer.
+#' @param MDTSelect Data frame. Subset of the master database table,
+#'   typically one database's rows, with at minimum \code{Database},
+#'   \code{MDBDir}, \code{Path}, \code{TableName}, \code{FileType},
+#'   \code{PartitionKey}, and \code{PartitionValue}.
+#' @param MasterDBPath Character scalar. Root directory of the
+#'   source files, used with \code{MDBDir} and \code{Path} to
+#'   resolve each row's full path.
+#' @param Database Character scalar. When \code{MDTSelect} spans
+#'   more than one database and this is a single value, a row is
+#'   filtered to it first. Defaults to every database present in
+#'   \code{MDTSelect}.
+#' @param n_workers Integer. Parallel workers for a column sampling
+#'   scan. See \code{\link{build_comprehensive}} and
+#'   \code{\link{build_col_classes}}. Defaults to \code{1}.
+#' @param SchemaRegistryPath Character scalar. Registry path passed
+#'   to \code{\link{load_schema_registry}} when \code{schema_registry}
+#'   is not supplied directly, created when missing. Defaults to
+#'   \code{NULL}.
+#' @param TableSchemaPath Character scalar. Destination for the
+#'   written catalog when \code{write_catalog} is \code{TRUE}. See
+#'   \code{\link{write_table_schema_catalog}}. Defaults to \code{NULL}.
+#' @param schema_registry A data.table. A registry already loaded.
+#'   See \code{\link{build_default_schema_registry}}. Loaded from
+#'   \code{SchemaRegistryPath} when \code{NULL}. Defaults to
+#'   \code{NULL}.
+#' @param write_catalog Logical. Accepts \code{TRUE}, which writes
+#'   the combined schema catalog, and any harvested label, to
+#'   \code{TableSchemaPath}. Accepts \code{FALSE}, which does not.
+#'   Defaults to \code{TRUE}.
+#' @param known_col_classes A named list, keyed by \code{TableName},
+#'   of an already approved column to type map, as in
+#'   \code{load_table_schema_catalog()$col_classes[[Database]]}. A
+#'   column present in the catalog keeps its approved type. A column
+#'   newly present in the source files is inferred and logged for a
+#'   future \code{\link{BuildRepositoryCatalog}} run. Defaults to
+#'   \code{NULL}.
+#' @param harvest_labels Logical. Accepts \code{TRUE}, which also
+#'   harvests a variable and value label, see
+#'   \code{\link{harvest_source_labels}}, for every table whose
+#'   reader supports labels, newest partition first. Accepts
+#'   \code{FALSE}, which does not.
 #' @return An object of class \code{"RepositorySchema"}: a list with
-#'   \code{comprehensive} (per-table union of column names),
-#'   \code{col_classes} (per-table resolved column-to-canonical-type maps),
-#'   \code{table_schema} (long-form data.table -- one row per
-#'   Database/TableName/Column, as written to the catalog),
-#'   \code{label_catalog} (data.table of harvested labels, empty if
-#'   \code{harvest_labels = FALSE}), \code{schema_registry} (the registry
-#'   used), and \code{TableSchemaPath}.
+#'   \code{comprehensive}, a per table union of column names,
+#'   \code{col_classes}, a per table resolved column to canonical
+#'   type map, \code{table_schema}, a long form data.table, one row
+#'   per Database, TableName, and Column, as written to the catalog,
+#'   \code{label_catalog}, a data.table of a harvested label, empty
+#'   when \code{harvest_labels} is \code{FALSE}, \code{schema_registry},
+#'   the registry used, and \code{TableSchemaPath}.
 #' @seealso \code{\link{BuildRepositoryCatalog}}, \code{\link{load_table_schema_catalog}}
 #' @examples
 #' src <- tempfile("mdb_"); dir.create(file.path(src, "DEMO"), recursive = TRUE)
@@ -13713,18 +14202,20 @@ BuildRepositorySchema <- function(MDTSelect, MasterDBPath, Database = NULL, n_wo
 # Provide a small infix helper without requiring rlang.
 `%||%` <- function(x, y) if (is.null(x) || length(x) == 0L) y else x
 
-#' Validate table-schema compatibility for merge-key columns within each year
+#' Validates table schema compatibility for a merge key column within each year
 #'
-#' Heuristic used by \code{ValidateSchemaMergeKeys} to flag columns
-#' that are *likely* join/merge keys purely from their name, for tables that
-#' have not explicitly declared a \code{Role} of \code{"join_key"} or
-#' \code{"partition"} in the schema catalog. Matches common identifier
-#' suffixes (\code{_KEY}, \code{_ID}, \code{_IDENTIFIER}) plus a short list of
-#' well-known HCUP linkage columns (\code{VISITLINK}, \code{HOSP_NIS}, etc.).
-#' @param column Character vector of column names (canonicalized internally
-#'   via \code{canonical_colnames} before matching).
-#' @return Logical vector, the same length as \code{column}: \code{TRUE} where
-#'   the (canonicalized) name looks like a merge/join key.
+#' A heuristic used by \code{ValidateSchemaMergeKeys} to flag a
+#' column that is likely a join or merge key purely from its name,
+#' for a table that has not explicitly declared a \code{Role} of
+#' \code{"join_key"} or \code{"partition"} in the schema catalog.
+#' Matches a common identifier suffix, \code{_KEY}, \code{_ID}, or
+#' \code{_IDENTIFIER}, plus a short list of well known HCUP linkage
+#' columns, such as \code{VISITLINK} or \code{HOSP_NIS}.
+#' @param column Character vector of column names, canonicalized
+#'   internally through \code{canonical_colnames} before matching.
+#' @return A logical vector the same length as \code{column}:
+#'   \code{TRUE} where the canonicalized name looks like a merge or
+#'   join key.
 #' @seealso \code{ValidateSchemaMergeKeys}
 #' @examples
 #' merge_key_name_candidate(c("PATIENT_ID", "VISITLINK", "AGE", "HOSPITAL_ID"))
@@ -13788,53 +14279,70 @@ ValidateSchemaMergeKeys <- function(table_schema, strict = FALSE) {
   invisible(issues)
 }
 
-#' Preflight: build the full cross-database schema catalog before loading
+#' Preflights the full cross database schema catalog before loading
 #'
-#' Runs schema inference plus the registry for every database in \code{DBLoad}
-#' and writes one combined catalog to \code{TableSchemaPath}, so all column
-#' types across all databases and tables are established -- and reviewable --
-#' before \code{\link{ParquetBackEndCreate}} writes any Parquet. The loader
-#' then reads this catalog instead of re-inferring, which also makes resumed
-#' runs skip the expensive per-file sampling pass.
+#' Runs schema inference plus the registry for every database in
+#' \code{DBLoad} and writes one combined catalog to
+#' \code{TableSchemaPath}, so that every column type, across every
+#' database and table, is established and reviewable before
+#' \code{\link{ParquetBackEndCreate}} writes any Parquet. The loader
+#' then reads this catalog instead of re inferring, which also makes
+#' a resumed run skip the expensive per file sampling pass.
 #'
-#' Curation workflow: open the workbook, change a row's \code{CanonicalType},
-#' and set that row's \code{Source} to \code{"manual"}. Manual rows survive
-#' subsequent preflight runs and outrank both inference and the registry.
-#' A type change only affects future writes; to apply it to a table already on
-#' disk, run \code{\link{reset_table_for_reload}} and re-run the loader.
-#' Databases not listed in \code{DBLoad} keep their existing catalog rows.
+#' Curation workflow: open the workbook, change a row's
+#' \code{CanonicalType}, and set that row's \code{Source} to
+#' \code{"manual"}. A manual row survives a subsequent preflight run
+#' and outranks both inference and the registry. A type change only
+#' affects a future write. To apply it to a table already on disk,
+#' run \code{\link{reset_table_for_reload}} and rerun the loader. A
+#' database not listed in \code{DBLoad} keeps its existing catalog
+#' row.
 #'
-#' Merge-key validation runs on the combined catalog, so join-key type
-#' mismatches are caught across databases, not just within one.
-#' @param MDT Data frame. Master Database Table.
-#' @param DBLoad Character vector of databases to (re)infer. Default NULL means
-#'   every database present in \code{MDT}.
-#' @param MasterDBPath Character. Root directory of the source files.
-#' @param n_workers Integer. Parallel workers for the sampling scans.
-#' @param SchemaRegistryPath Character. Registry path (created if missing).
-#' @param TableSchemaPath Character. Catalog destination (.xlsx or .csv).
-#' @param StrictSchemaValidation Logical. Stop on merge-key type mismatches.
-#' @param HarvestLabels Logical. If \code{TRUE} (default), also harvests
-#'   variable/value labels (see \code{\link{harvest_source_labels}}) for each
-#'   database and merges them with any existing \code{Labels} sheet -- rows for
-#'   databases not in \code{DBLoad} are carried forward unchanged.
-#' @param LockRepository Logical. If \code{TRUE} (default), acquires a
-#'   repository lock for the duration of the run (see
-#'   \code{\link{acquire_repository_lock}}) so a concurrent writer cannot
-#'   corrupt the catalog.
-#' @param LockPath Character (optional). Lock file location. Defaults to
-#'   \code{.repository.lock} two directories above \code{TableSchemaPath}; if
-#'   \code{TableSchemaPath} is also \code{NULL}, locking is skipped with a
-#'   warning.
-#' @param LockStaleMinutes Numeric. Minutes after which an existing lock is
-#'   considered abandoned and may be taken over.
-#' @param LogPath Character (optional). Log file for this run; when supplied
-#'   (with or without \code{RunId}), a run-scoped logging context is started
-#'   via \code{\link{begin_repository_run}} and restored on exit.
-#' @param RunId Character (optional). Run identifier tagged onto log lines;
-#'   see \code{\link{begin_repository_run}}.
-#' @return Invisibly, the loaded catalog (as from
-#'   \code{\link{load_table_schema_catalog}}) after the round trip to disk.
+#' Merge key validation runs on the combined catalog, so a join key
+#' type mismatch is caught across every database, not only within
+#' one.
+#' @param MDT Data frame. Master database table.
+#' @param DBLoad Character vector of databases to infer or reinfer.
+#'   Defaults to \code{NULL}, which means every database present in
+#'   \code{MDT}.
+#' @param MasterDBPath Character scalar. Root directory of the
+#'   source files.
+#' @param n_workers Integer. Parallel workers for the sampling scan.
+#'   Defaults to \code{1}.
+#' @param SchemaRegistryPath Character scalar. Registry path,
+#'   created when missing.
+#' @param TableSchemaPath Character scalar. Catalog destination,
+#'   accepting either an \code{.xlsx} or a \code{.csv} extension.
+#' @param StrictSchemaValidation Logical. Accepts \code{TRUE}, which
+#'   stops on a merge key type mismatch. Accepts \code{FALSE}, which
+#'   does not.
+#' @param HarvestLabels Logical. Accepts \code{TRUE}, which also
+#'   harvests a variable and value label, see
+#'   \code{\link{harvest_source_labels}}, for each database and
+#'   merges it with any existing \code{Labels} sheet, where a row
+#'   for a database not in \code{DBLoad} is carried forward
+#'   unchanged. Accepts \code{FALSE}, which does not. Defaults to
+#'   \code{TRUE}.
+#' @param LockRepository Logical. Accepts \code{TRUE}, which
+#'   acquires a repository lock for the duration of the run, see
+#'   \code{\link{acquire_repository_lock}}, so that a concurrent
+#'   writer cannot corrupt the catalog. Accepts \code{FALSE}, which
+#'   does not. Defaults to \code{TRUE}.
+#' @param LockPath Character scalar. Lock file location. Defaults to
+#'   \code{.repository.lock} two directories above
+#'   \code{TableSchemaPath}. When \code{TableSchemaPath} is also
+#'   \code{NULL}, locking is skipped with a warning.
+#' @param LockStaleMinutes Numeric scalar. Minutes after which an
+#'   existing lock is considered abandoned and may be taken over.
+#' @param LogPath Character scalar. Log file for this run. When
+#'   supplied, with or without \code{RunId}, a run scoped logging
+#'   context is started through \code{\link{begin_repository_run}}
+#'   and restored on exit.
+#' @param RunId Character scalar. Run identifier tagged onto log
+#'   lines. See \code{\link{begin_repository_run}}.
+#' @return Invisibly, the loaded catalog, as from
+#'   \code{\link{load_table_schema_catalog}}, after the round trip
+#'   to disk.
 #' @seealso \code{\link{BuildRepositorySchema}}, \code{\link{ParquetBackEndCreate}}
 #' @examples
 #' src <- tempfile("mdb_"); dir.create(file.path(src, "DEMO"), recursive = TRUE)
@@ -13917,106 +14425,135 @@ BuildRepositoryCatalog <- function(MDT, DBLoad = NULL, MasterDBPath, n_workers =
 
 #' Loader that chooses FileType per file rather than globally
 #'
-#' Per-database driver invoked once per entry in \code{DBLoad} by
-#' \code{\link{ParquetBackEndCreate}}. Iterates the rows of \code{MDTSelect}
-#' not already present in \code{completed_checkpoint}, resolves each row's own
-#' \code{FileType} (so a single database's tables can mix e.g. \code{.sav} and
-#' \code{.csv} sources), and delegates the actual read/write of each file to
-#' \code{\link{read_fn}}. On success for a row, the manifest is updated, the
-#' checkpoint is advanced and saved to disk immediately (so an interrupted run
-#' resumes past everything already written), and progress is logged; on
-#' failure, the row is recorded in the returned \code{failures} table and the
-#' loop continues to the next file.
-#' @param files Character vector. Currently unused by the function body --
-#'   the file list actually iterated is \code{MDTSelect$Path} (one row per
-#'   source file). Retained for interface stability; do not rely on it.
-#' @param base_path Character. Root directory of the source files, combined
-#'   with each row's \code{MDBDir}/\code{Path} (or \code{ResolvedSourcePath})
-#'   to build the full path. Passed to \code{\link{read_fn}} as
-#'   \code{MasterDBPath}.
-#' @param db_prefix Character scalar. Database name recorded on manifest rows,
-#'   failure/completion rows, and passed to \code{\link{read_fn}} as
-#'   \code{Database}.
-#' @param completed_checkpoint Character vector of repository keys (see
-#'   \code{repository_checkpoint_key}) already completed; matching rows
-#'   of \code{MDTSelect} are skipped.
-#' @param CheckpointPath Character. File the checkpoint is atomically
-#'   re-saved to (see \code{\link{save_checkpoint}}) immediately after each
-#'   row completes, so progress survives an interrupted run.
-#' @param ParquetBasePath Character. Root Parquet output directory; each
-#'   table writes under \code{file.path(ParquetBasePath, table_name)}.
-#' @param MDTSelect Data frame. One database's rows of the Master Database
-#'   Table -- the actual per-file work list for this call.
-#' @param comprehensive Named list keyed by \code{TableName}: the union of
-#'   column names for that table (as from
-#'   \code{BuildRepositorySchema()$comprehensive}), passed to
-#'   \code{\link{read_fn}} as \code{all_cols} and used to align each file's
-#'   columns before writing.
-#' @param col_classes Named list keyed by \code{TableName} of
-#'   column-to-canonical-type maps (as from
-#'   \code{BuildRepositorySchema()$col_classes}), or a single flat map applied
-#'   to every table. \code{NULL} lets each file's types be inferred.
-#' @param reader Character scalar. Currently unused by the function body --
-#'   each row's reader is resolved from its own \code{MDTSelect$FileType}
-#'   instead. Retained for interface stability; do not rely on it.
-#' @param PartitionBy Character. One of \code{"NRows"}, \code{"RAMEstimate"},
-#'   or \code{"FAIL"}; passed through to \code{\link{read_fn}}.
-#' @param RAMThreshold Numeric. Passed through to \code{\link{read_fn}}.
-#' @param SAV_ROW_THRESHOLD Integer. Passed through to \code{\link{read_fn}}.
-#' @param LogPath Character. Currently unused by the function body -- log
-#'   lines are written via \code{\link{log_msg}} with no explicit
-#'   \code{log_path}, so they follow the ambient run-scoped log path set by
-#'   \code{\link{begin_repository_run}} (or \code{resolve_log_path}'s
-#'   default) rather than this argument.
-#' @param SAV_CHUNK_SIZE Integer. Passed through to \code{\link{read_fn}}.
-#' @param DelimitedChunkMaxMB Numeric. Passed through to \code{\link{read_fn}}.
-#' @param DelimitedPartitionMaxMB Numeric (optional). Passed through to
+#' A per database driver invoked once per entry in \code{DBLoad} by
+#' \code{\link{ParquetBackEndCreate}}. Iterates a row of
+#' \code{MDTSelect} not already present in
+#' \code{completed_checkpoint}, resolves each row's own
+#' \code{FileType}, so that a single database's tables can mix, for
+#' example, \code{.sav} and \code{.csv} sources, and delegates the
+#' actual read and write of each file to \code{\link{read_fn}}. On
+#' success for a row, the manifest is updated, the checkpoint is
+#' advanced and saved to disk immediately, so that an interrupted
+#' run resumes past everything already written, and progress is
+#' logged. On failure, the row is recorded in the returned
+#' \code{failures} table and the loop continues to the next file.
+#' @param files Character vector. Currently unused by the function
+#'   body. The file list actually iterated is
+#'   \code{MDTSelect$Path}, one row per source file. Retained for
+#'   interface stability. Do not rely on it.
+#' @param base_path Character scalar. Root directory of the source
+#'   files, combined with each row's \code{MDBDir} and \code{Path},
+#'   or \code{ResolvedSourcePath}, to build the full path. Passed to
+#'   \code{\link{read_fn}} as \code{MasterDBPath}.
+#' @param db_prefix Character scalar. Database name recorded on a
+#'   manifest row and a failure or completion row, and passed to
+#'   \code{\link{read_fn}} as \code{Database}.
+#' @param completed_checkpoint Character vector of a repository key,
+#'   see \code{repository_checkpoint_key}, already completed. A
+#'   matching row of \code{MDTSelect} is skipped.
+#' @param CheckpointPath Character scalar. File the checkpoint is
+#'   atomically resaved to, see \code{\link{save_checkpoint}},
+#'   immediately after each row completes, so that progress survives
+#'   an interrupted run.
+#' @param ParquetBasePath Character scalar. Root Parquet output
+#'   directory. Each table writes under
+#'   \code{file.path(ParquetBasePath, table_name)}.
+#' @param MDTSelect Data frame. One database's rows of the master
+#'   database table, the actual per file work list for this call.
+#' @param comprehensive A named list keyed by \code{TableName}: the
+#'   union of column names for that table, as from
+#'   \code{BuildRepositorySchema()$comprehensive}, passed to
+#'   \code{\link{read_fn}} as \code{all_cols} and used to align each
+#'   file's columns before writing.
+#' @param col_classes A named list keyed by \code{TableName} of a
+#'   column to canonical type map, as from
+#'   \code{BuildRepositorySchema()$col_classes}, or a single flat
+#'   map applied to every table. \code{NULL} lets each file's type
+#'   be inferred.
+#' @param reader Character scalar. Currently unused by the function
+#'   body. Each row's reader is resolved from its own
+#'   \code{MDTSelect$FileType} instead. Retained for interface
+#'   stability. Do not rely on it.
+#' @param PartitionBy Character scalar. Accepts one of three values:
+#'   \code{"NRows"}, \code{"RAMEstimate"}, or \code{"FAIL"}, passed
+#'   through to \code{\link{read_fn}}.
+#' @param RAMThreshold Numeric scalar. Passed through to
 #'   \code{\link{read_fn}}.
-#' @param FailProbeMode Character. One of \code{"subprocess"},
-#'   \code{"in_process"}, or \code{"disabled"}; passed through to
+#' @param SAV_ROW_THRESHOLD Integer. Passed through to
 #'   \code{\link{read_fn}}.
-#' @param FailProbeTimeoutSeconds Numeric. Passed through to \code{\link{read_fn}}.
-#' @param FailProbeSourcePath Character (optional). Passed through to
+#' @param LogPath Character scalar. Currently unused by the function
+#'   body. A log line is written through \code{\link{log_msg}} with
+#'   no explicit \code{log_path}, so it follows the ambient run
+#'   scoped log path set by \code{\link{begin_repository_run}}, or
+#'   \code{resolve_log_path}'s default, rather than this argument.
+#' @param SAV_CHUNK_SIZE Integer. Passed through to
 #'   \code{\link{read_fn}}.
-#' @param PrintStatus Logical. If \code{TRUE}, prints progress to the console
-#'   in addition to the log.
-#' @param ManifestPath Character (optional). DuckDB manifest path; each
-#'   successful (or verified-empty/partial) file is recorded via
-#'   \code{\link{update_parquet_manifest}}. \code{NULL} skips manifest writes.
-#' @param SchemaRegistryPath Character (optional). Registry path loaded via
-#'   \code{\link{load_schema_registry}} when \code{schema_registry} is
-#'   \code{NULL} and \code{registry_resolved} is \code{FALSE}.
-#' @param schema_registry data.table (optional). Pre-loaded registry (see
-#'   \code{\link{build_default_schema_registry}}), applied per table only
-#'   when \code{registry_resolved} is \code{FALSE}.
-#' @param TerminalHivePartition Logical. Passed through to \code{\link{read_fn}}.
-#' @param MaxFileStemTruncate Logical. Passed through to \code{\link{read_fn}}
-#'   and used when deriving each file's output stem.
-#' @param chunk_size_decrement Integer (optional). Passed through to
+#' @param DelimitedChunkMaxMB Numeric scalar. Passed through to
 #'   \code{\link{read_fn}}.
-#' @param min_chunk_size Integer (optional). Passed through to \code{\link{read_fn}}.
-#' @param registry_resolved Logical. If \code{TRUE} (as set by
-#'   \code{\link{ParquetBackEndCreate}}), \code{col_classes} is assumed to
-#'   already have the schema registry applied and \code{schema_registry}/
-#'   \code{SchemaRegistryPath} are not consulted again per file.
-#' @param RepositoryLock Repository lock handle (optional), from
-#'   \code{\link{acquire_repository_lock}}; touched periodically and passed
-#'   through to \code{\link{read_fn}} during long reads.
-#' @param MaxCoerceNAPct Numeric (optional). Passed through to
-#'   \code{\link{read_fn}}/\code{\link{align_columns}}; fails a file when type
-#'   coercion turns more than this percentage of a column's values into
-#'   \code{NA}.
-#' @param SourceFingerprintMode Character. One of \code{"metadata"},
-#'   \code{"sha256"}, or \code{"none"}; controls how \code{repository_checkpoint_key}
-#'   and \code{\link{source_fingerprint}} detect a changed source file.
-#' @param RunId Character (optional). Run identifier recorded on manifest rows.
-#' @return An object of class \code{"RepositoryLoadResult"}: a list with
-#'   \code{checkpoint} (the updated, de-duplicated character vector of
-#'   completed repository keys), \code{completed} (data.table of rows
-#'   completed in this call: Database, TableName, DuckDBTable, SourcePath,
-#'   RepositoryKey, Status), and \code{failures} (data.table of rows that
-#'   failed: Database, TableName, DuckDBTable, SourcePath, RepositoryKey,
-#'   Message).
+#' @param DelimitedPartitionMaxMB Numeric scalar. Passed through to
+#'   \code{\link{read_fn}}. Defaults to \code{NULL}.
+#' @param FailProbeMode Character scalar. Accepts one of three
+#'   values: \code{"subprocess"}, \code{"in_process"}, or
+#'   \code{"disabled"}, passed through to \code{\link{read_fn}}.
+#' @param FailProbeTimeoutSeconds Numeric scalar. Passed through to
+#'   \code{\link{read_fn}}.
+#' @param FailProbeSourcePath Character scalar. Passed through to
+#'   \code{\link{read_fn}}. Defaults to \code{NULL}.
+#' @param PrintStatus Logical. Accepts \code{TRUE}, which prints
+#'   progress to the console in addition to the log. Accepts
+#'   \code{FALSE}, which does not.
+#' @param ManifestPath Character scalar. DuckDB manifest path. Each
+#'   successful, or verified empty or partial, file is recorded
+#'   through \code{\link{update_parquet_manifest}}. \code{NULL}
+#'   skips a manifest write.
+#' @param SchemaRegistryPath Character scalar. Registry path loaded
+#'   through \code{\link{load_schema_registry}} when
+#'   \code{schema_registry} is \code{NULL} and
+#'   \code{registry_resolved} is \code{FALSE}. Defaults to
+#'   \code{NULL}.
+#' @param schema_registry A data.table. A registry already loaded.
+#'   See \code{\link{build_default_schema_registry}}. Applied per
+#'   table only when \code{registry_resolved} is \code{FALSE}.
+#'   Defaults to \code{NULL}.
+#' @param TerminalHivePartition Logical. Passed through to
+#'   \code{\link{read_fn}}.
+#' @param MaxFileStemTruncate Logical. Passed through to
+#'   \code{\link{read_fn}} and used when deriving each file's output
+#'   stem.
+#' @param chunk_size_decrement Integer. Passed through to
+#'   \code{\link{read_fn}}. Defaults to \code{NULL}.
+#' @param min_chunk_size Integer. Passed through to
+#'   \code{\link{read_fn}}. Defaults to \code{NULL}.
+#' @param registry_resolved Logical. Accepts \code{TRUE}, as set by
+#'   \code{\link{ParquetBackEndCreate}}, which assumes
+#'   \code{col_classes} already has the schema registry applied, so
+#'   that \code{schema_registry} and \code{SchemaRegistryPath} are
+#'   not consulted again per file. Accepts \code{FALSE}, which
+#'   consults them per file.
+#' @param RepositoryLock A repository lock handle, from
+#'   \code{\link{acquire_repository_lock}}, touched periodically and
+#'   passed through to \code{\link{read_fn}} during a long read.
+#'   Defaults to \code{NULL}.
+#' @param MaxCoerceNAPct Numeric scalar. Passed through to
+#'   \code{\link{read_fn}} and \code{\link{align_columns}}. Fails a
+#'   file when type coercion turns more than this percentage of a
+#'   column's values into \code{NA}. Defaults to \code{NULL}.
+#' @param SourceFingerprintMode Character scalar. Accepts one of
+#'   three values: \code{"metadata"}, \code{"sha256"}, or
+#'   \code{"none"}, controlling how \code{repository_checkpoint_key}
+#'   and \code{\link{source_fingerprint}} detect a changed source
+#'   file.
+#' @param RunId Character scalar. Run identifier recorded on a
+#'   manifest row. Defaults to \code{NULL}.
+#' @return An object of class \code{"RepositoryLoadResult"}: a list
+#'   with \code{checkpoint}, the updated, de duplicated character
+#'   vector of a completed repository key, \code{completed}, a
+#'   data.table of a row completed in this call, with
+#'   \code{Database}, \code{TableName}, \code{DuckDBTable},
+#'   \code{SourcePath}, \code{RepositoryKey}, and \code{Status}, and
+#'   \code{failures}, a data.table of a row that failed, with
+#'   \code{Database}, \code{TableName}, \code{DuckDBTable},
+#'   \code{SourcePath}, \code{RepositoryKey}, and \code{Message}.
 #' @seealso \code{\link{read_fn}}, \code{\link{ParquetBackEndCreate}}
 #' @examples
 #' \donttest{
@@ -14282,16 +14819,18 @@ write_repository_run_summary <- function(result, path) {
   invisible(path)
 }
 
-#' Print a repository run result
+#' Prints a repository run result
 #'
-#' S3 print method for the \code{RepositoryRunResult} object returned by
-#' \code{\link{ParquetBackEndCreate}} when \code{ReturnRunResult = TRUE}.
-#' Prints a one-line summary; the full detail (\code{completed},
-#' \code{file_failures}, \code{database_failures}, etc.) remains accessible
-#' via normal list indexing.
+#' An S3 print method for the \code{RepositoryRunResult} object
+#' returned by \code{\link{ParquetBackEndCreate}} when
+#' \code{ReturnRunResult} is \code{TRUE}. Prints a one line summary.
+#' The full detail, \code{completed}, \code{file_failures},
+#' \code{database_failures}, and so on, remains accessible through
+#' normal list indexing.
 #' @param x A \code{RepositoryRunResult} object.
-#' @param ... Ignored; present for S3 method consistency.
-#' @return \code{x}, invisibly. Called for its side effect of printing.
+#' @param ... Ignored. Present for S3 method consistency.
+#' @return \code{x}, invisibly. Called for its side effect of
+#'   printing.
 #' @examples
 #' result <- structure(
 #'   list(run_id = "20240101T000000_1_1", status = "success",
@@ -14306,173 +14845,227 @@ print.RepositoryRunResult <- function(x, ...) {
   invisible(x)
 }
 
-#' Orchestrate repository schema first, then write Parquet
+#' Orchestrates the repository schema first, then writes Parquet
 #'
-#' The top-level entry point of the package: for each database in
-#' \code{DBLoad}, builds/refreshes its schema (see
-#' \code{\link{BuildRepositorySchema}}) and then loads its pending source
-#' files to Hive-partitioned Parquet (see \code{\link{generic_db_loader}} and
-#' \code{\link{read_fn}}), checkpointing after every file so an interrupted
-#' run resumes cleanly. Along the way it validates the MDT (see
-#' \code{\link{ValidateMDTPreflight}}), resolves any remote
-#' (\code{SourceURI}) rows, snapshots checkpoint/manifest/schema state,
-#' upgrades legacy checkpoint entries to the current
-#' \code{SourceFingerprintMode}, disables \code{data.table} memory-mapped
-#' reads for the duration of the run (a known crash vector on Windows network
-#' drives), writes a combined schema catalog and a coercion report, exports an
-#' Excel metadata snapshot, and cleans up orphaned temporary Parquet files.
-#' @param MDT Data frame. The full Master Database Table (every database);
-#'   rows are filtered to each entry of \code{DBLoad} in turn.
-#' @param DBLoad Character vector. Databases (values of \code{MDT$Database})
-#'   to build/load in this run, in order.
-#' @param MasterDBPath Character. Root directory of the source SAV/CSV/etc.
-#'   files.
-#' @param completed_checkpoint Character vector of repository keys already
-#'   completed (see \code{\link{load_checkpoint}}); advanced and saved to
-#'   \code{CheckpointPath} as loading proceeds.
-#' @param CheckpointPath Character. Checkpoint file re-saved atomically after
-#'   every completed source file (see \code{\link{save_checkpoint}}).
-#' @param ParquetBasePath Character. Root Parquet output directory.
-#' @param SAV_ROW_THRESHOLD Integer. Row-count threshold used by
-#'   \code{PartitionBy = "NRows"} (see \code{\link{read_fn}}).
-#' @param PartitionBy Character. One of \code{"NRows"}, \code{"RAMEstimate"},
-#'   or \code{"FAIL"} (matched via \code{match.arg}); the chunking-decision
-#'   strategy used for every file this run (see \code{\link{read_fn}}).
-#' @param RAMThreshold Numeric. GB threshold used by
-#'   \code{PartitionBy = "RAMEstimate"} (see \code{\link{read_fn}}).
-#' @param SAV_CHUNK_SIZE Integer. Requested rows per chunk for chunked SAV
-#'   reads.
-#' @param DelimitedChunkMaxMB Numeric. Per-chunk memory cap (MB) for chunked
-#'   delimited reads; must be a positive number (validated at entry).
-#' @param DelimitedPartitionMaxMB Numeric or NULL. Cap (MB) on a single
-#'   source-defined partition's estimated in-memory footprint before a
-#'   route-eligible delimited file is read one partition at a time instead of
-#'   in fixed-size chunks. When NULL (default), it is half of a conservative
-#'   source-route cap: the smaller of four times \code{DelimitedChunkMaxMB}
-#'   and one quarter of \code{RAMThreshold * 1024}. Supply an explicit value
-#'   only after confirming that the resulting one-shot read fits this machine.
-#' @param FailProbeMode Character. One of \code{"subprocess"} (default),
-#'   \code{"in_process"}, or \code{"disabled"}; see \code{\link{read_fn}}.
-#' @param FailProbeTimeoutSeconds Numeric. Timeout for the isolated subprocess
-#'   under \code{FailProbeMode = "subprocess"}.
-#' @param FailProbeSourcePath Character (optional). Path to the repoquet
-#'   source the probe subprocess should \code{source()}; see \code{\link{read_fn}}.
-#' @param LogPath Character. Log file for this run. Starts a run-scoped
-#'   logging context via \code{\link{begin_repository_run}} (restored on
-#'   exit), so \code{\link{log_msg}} calls throughout the run -- including in
-#'   \code{\link{generic_db_loader}} and \code{\link{read_fn}} -- write here
-#'   by default without needing \code{log_path} passed explicitly.
-#' @param n_workers Integer. Parallel workers for schema-inference sampling
-#'   scans (see \code{\link{BuildRepositorySchema}}).
-#' @param PrintStatus Logical. If \code{TRUE}, prints extra progress messages
-#'   to the console in addition to the log.
-#' @param TerminalHivePartition Logical. If \code{TRUE}, chunk files are
-#'   written to \code{batch_id=<stem>_<NNNNN>/data.parquet} subdirectories
-#'   instead of flat files; see \code{\link{read_fn}}.
-#' @param MaxFileStemTruncate Logical. If \code{TRUE} (default here), shortens
-#'   generated output filenames for filesystems with path-length limits; see
-#'   \code{\link{read_fn}}.
-#' @param chunk_size_decrement Integer (optional). Passed through to the
-#'   chunked readers; see \code{\link{read_fn}}.
-#' @param min_chunk_size Integer (optional). Passed through to the chunked
-#'   readers; see \code{\link{read_fn}}.
-#' @param SchemaRegistryPath Character (optional). Schema registry path
-#'   (created if missing); see \code{\link{load_schema_registry}}.
-#' @param TableSchemaPath Character (optional). Schema catalog path, read (if
-#'   \code{UseSchemaCatalog = TRUE}) and re-written at the end of the run.
-#'   Defaults to \code{file.path(dirname(ParquetBasePath), "Schema", "TableSchemas.xlsx")}
-#'   when \code{NULL}.
-#' @param ManifestPath Character (optional). DuckDB manifest path; defaults
-#'   via \code{manifest_path_default} when \code{NULL}.
-#' @param StrictPreflight Logical. \code{strict} argument forwarded to
-#'   \code{\link{ValidateMDTPreflight}} when \code{RunPreflight = TRUE}.
-#' @param StrictSchemaValidation Logical. \code{strict} argument forwarded to
-#'   \code{ValidateSchemaMergeKeys}.
-#' @param UseSchemaCatalog Logical. If \code{TRUE} (default), requires a
-#'   finalized catalog at \code{TableSchemaPath} (errors if absent) and uses
-#'   its \code{col_classes} as \code{known_col_classes} for each database's
-#'   \code{\link{BuildRepositorySchema}} call, so already-reviewed column
-#'   types are reused instead of re-inferred.
-#' @param LockRepository Logical. If \code{TRUE} (default), acquires a
-#'   repository lock for the duration of the run; see
-#'   \code{\link{acquire_repository_lock}}.
-#' @param LockPath Character (optional). Lock file location; defaults via
-#'   \code{repository_lock_path_default} when \code{NULL}.
-#' @param LockStaleMinutes Numeric. Minutes after which an existing lock is
-#'   considered abandoned and may be taken over.
-#' @param RunPreflight Logical. If \code{TRUE} (default), runs
-#'   \code{\link{ValidateMDTPreflight}} before anything else; if \code{FALSE},
-#'   the caller is responsible for having already validated \code{MDT}.
-#' @param SnapshotState Logical. If \code{TRUE} (default), snapshots
-#'   checkpoint/manifest/schema state to \code{StateBackupDir} before loading;
-#'   see \code{\link{snapshot_repository_state}}.
-#' @param StateBackupDir Character (optional). Snapshot destination; defaults
-#'   to \code{file.path(dirname(ParquetBasePath), "StateBackups")}.
-#' @param SnapshotKeep Integer. Number of state snapshot generations retained.
-#' @param StopOnDatabaseError Logical. If \code{TRUE} (default), raises an
-#'   error at the end of the run if any database's schema-inference or
-#'   loading phase failed (after the run summary and metadata export have
-#'   already been written).
-#' @param StopOnFileError Logical. If \code{TRUE} (default), raises an error
-#'   at the end of the run if any individual source file failed.
-#' @param MaxCoerceNAPct Numeric (optional). Passed through to
-#'   \code{\link{read_fn}}/\code{\link{align_columns}}; fails a file when type
-#'   coercion turns more than this percentage of a column's values into
-#'   \code{NA}.
-#' @param SourceFingerprintMode Character. One of \code{"metadata"} (default),
-#'   \code{"sha256"}, or \code{"none"}; controls source-file change detection
-#'   for checkpoints (see \code{repository_checkpoint_key}). Legacy
-#'   checkpoint entries are upgraded to this fingerprint mode at the start of
-#'   the run.
-#' @param AutoCleanup Logical. If TRUE (default), temporary Parquet files are
-#'   cleaned up at the end of write operations. This prevents accumulation of
-#'   orphaned `.tmp_*.parquet` files that may be left behind due to I/O delays
-#'   or file locking.
-#' @param CleanupAfterPhase Character. Controls when cleanup occurs:
-#'   \describe{
-#'     \item{"all"}{(default) Clean only after all databases are written}
-#'     \item{"database"}{Clean after each database batch completes}
-#'     \item{"none"}{Disable auto-cleanup; user must call cleanup manually}
-#'   }
-#' @param MaxTempAgeHours Integer. Minimum age (in hours) before a temporary
-#'   file is considered safe to remove. Default 1 (files < 1 hour old are
-#'   preserved to avoid interfering with active writes).
-#' @param ReturnRunResult Logical. If \code{TRUE}, the full run result object
-#'   is returned instead of just the checkpoint (see Value).
-#' @param RunId Character (optional). Run identifier tagging log lines and
-#'   manifest rows; auto-generated (see \code{resolve_run_id}) when
+#' The top level entry point of the package: for each database in
+#' \code{DBLoad}, builds or refreshes its schema, see
+#' \code{\link{BuildRepositorySchema}}, and then loads its pending
+#' source file to hive partitioned Parquet, see
+#' \code{\link{generic_db_loader}} and \code{\link{read_fn}},
+#' checkpointing after every file so that an interrupted run resumes
+#' cleanly. Along the way it validates the MDT, see
+#' \code{\link{ValidateMDTPreflight}}, resolves a remote,
+#' \code{SourceURI}, row, snapshots checkpoint, manifest, and schema
+#' state, upgrades a legacy checkpoint entry to the current
+#' \code{SourceFingerprintMode}, disables \code{data.table} memory
+#' mapped reads for the duration of the run, a known crash vector on
+#' a Windows network drive, writes a combined schema catalog and a
+#' coercion report, exports an Excel metadata snapshot, and cleans up
+#' an orphaned temporary Parquet file.
+#' @param MDT Data frame. The full master database table, every
+#'   database. A row is filtered to each entry of \code{DBLoad} in
+#'   turn.
+#' @param DBLoad Character vector. A database, a value of
+#'   \code{MDT$Database}, to build or load in this run, in order.
+#' @param MasterDBPath Character scalar. Root directory of the
+#'   source SAV, CSV, or other file.
+#' @param completed_checkpoint Character vector of a repository key
+#'   already completed. See \code{\link{load_checkpoint}}. Advanced
+#'   and saved to \code{CheckpointPath} as loading proceeds.
+#' @param CheckpointPath Character scalar. Checkpoint file resaved
+#'   atomically after every completed source file. See
+#'   \code{\link{save_checkpoint}}.
+#' @param ParquetBasePath Character scalar. Root Parquet output
+#'   directory.
+#' @param SAV_ROW_THRESHOLD Integer. Row count threshold used by
+#'   \code{PartitionBy = "NRows"}. See \code{\link{read_fn}}.
+#' @param PartitionBy Character scalar. Accepts one of three
+#'   values, matched through \code{match.arg}: \code{"NRows"},
+#'   \code{"RAMEstimate"}, or \code{"FAIL"}, the chunking decision
+#'   strategy used for every file this run. See \code{\link{read_fn}}.
+#' @param RAMThreshold Numeric scalar. Gigabyte threshold used by
+#'   \code{PartitionBy = "RAMEstimate"}. See \code{\link{read_fn}}.
+#' @param SAV_CHUNK_SIZE Integer. Requested rows per chunk for a
+#'   chunked SAV read.
+#' @param DelimitedChunkMaxMB Numeric scalar. Per chunk memory cap,
+#'   in megabytes, for a chunked delimited read. Must be a positive
+#'   number, validated at entry.
+#' @param DelimitedPartitionMaxMB Numeric scalar. Cap, in megabytes,
+#'   on a single source defined partition's estimated in memory
+#'   footprint before a route eligible delimited file is read one
+#'   partition at a time instead of in fixed size chunks. When
+#'   \code{NULL}, the default, it is half of a conservative source
+#'   route cap: the smaller of four times \code{DelimitedChunkMaxMB}
+#'   and one quarter of \code{RAMThreshold * 1024}. Supply an
+#'   explicit value only after confirming that the resulting one
+#'   shot read fits this machine.
+#' @param FailProbeMode Character scalar. Accepts one of three
+#'   values: \code{"subprocess"}, \code{"in_process"}, or
+#'   \code{"disabled"}. See \code{\link{read_fn}}. Defaults to
+#'   \code{"subprocess"}.
+#' @param FailProbeTimeoutSeconds Numeric scalar. Timeout for the
+#'   isolated subprocess under \code{FailProbeMode = "subprocess"}.
+#' @param FailProbeSourcePath Character scalar. Path to the repoquet
+#'   source the probe subprocess should \code{source()}. See
+#'   \code{\link{read_fn}}. Defaults to \code{NULL}.
+#' @param LogPath Character scalar. Log file for this run. Starts a
+#'   run scoped logging context through
+#'   \code{\link{begin_repository_run}}, restored on exit, so that a
+#'   \code{\link{log_msg}} call throughout the run, including in
+#'   \code{\link{generic_db_loader}} and \code{\link{read_fn}},
+#'   writes here by default without needing \code{log_path} passed
+#'   explicitly.
+#' @param n_workers Integer. Parallel workers for a schema
+#'   inference sampling scan. See \code{\link{BuildRepositorySchema}}.
+#' @param PrintStatus Logical. Accepts \code{TRUE}, which prints an
+#'   extra progress message to the console in addition to the log.
+#'   Accepts \code{FALSE}, which does not.
+#' @param TerminalHivePartition Logical. Accepts \code{TRUE}, which
+#'   writes a chunk file to a
+#'   \code{batch_id=<stem>_<NNNNN>/data.parquet} subdirectory instead
+#'   of a flat file. See \code{\link{read_fn}}. Accepts \code{FALSE},
+#'   which does not.
+#' @param MaxFileStemTruncate Logical. Accepts \code{TRUE}, the
+#'   default here, which shortens a generated output filename for a
+#'   file system with a path length limit. See \code{\link{read_fn}}.
+#'   Accepts \code{FALSE}, which does not.
+#' @param chunk_size_decrement Integer. Passed through to the
+#'   chunked reader. See \code{\link{read_fn}}. Defaults to
 #'   \code{NULL}.
-#' @param RunSummaryPath Character (optional). Destination for the JSON/RDS
-#'   run summary (see \code{write_repository_run_summary}). Defaults to
+#' @param min_chunk_size Integer. Passed through to the chunked
+#'   reader. See \code{\link{read_fn}}. Defaults to \code{NULL}.
+#' @param SchemaRegistryPath Character scalar. Schema registry path,
+#'   created when missing. See \code{\link{load_schema_registry}}.
+#'   Defaults to \code{NULL}.
+#' @param TableSchemaPath Character scalar. Schema catalog path,
+#'   read when \code{UseSchemaCatalog} is \code{TRUE} and rewritten
+#'   at the end of the run. Defaults to
+#'   \code{file.path(dirname(ParquetBasePath), "Schema", "TableSchemas.xlsx")}
+#'   when \code{NULL}.
+#' @param ManifestPath Character scalar. DuckDB manifest path,
+#'   defaulting through \code{manifest_path_default} when
+#'   \code{NULL}.
+#' @param StrictPreflight Logical. The \code{strict} argument
+#'   forwarded to \code{\link{ValidateMDTPreflight}} when
+#'   \code{RunPreflight} is \code{TRUE}.
+#' @param StrictSchemaValidation Logical. The \code{strict} argument
+#'   forwarded to \code{ValidateSchemaMergeKeys}.
+#' @param UseSchemaCatalog Logical. Accepts \code{TRUE}, the
+#'   default, which requires a finalized catalog at
+#'   \code{TableSchemaPath}, erroring when absent, and uses its
+#'   \code{col_classes} as \code{known_col_classes} for each
+#'   database's \code{\link{BuildRepositorySchema}} call, so that an
+#'   already reviewed column type is reused instead of re inferred.
+#'   Accepts \code{FALSE}, which does not.
+#' @param LockRepository Logical. Accepts \code{TRUE}, the default,
+#'   which acquires a repository lock for the duration of the run.
+#'   See \code{\link{acquire_repository_lock}}. Accepts \code{FALSE},
+#'   which does not.
+#' @param LockPath Character scalar. Lock file location, defaulting
+#'   through \code{repository_lock_path_default} when \code{NULL}.
+#' @param LockStaleMinutes Numeric scalar. Minutes after which an
+#'   existing lock is considered abandoned and may be taken over.
+#' @param RunPreflight Logical. Accepts \code{TRUE}, the default,
+#'   which runs \code{\link{ValidateMDTPreflight}} before anything
+#'   else. Accepts \code{FALSE}, which relies on the caller having
+#'   already validated \code{MDT}.
+#' @param SnapshotState Logical. Accepts \code{TRUE}, the default,
+#'   which snapshots checkpoint, manifest, and schema state to
+#'   \code{StateBackupDir} before loading. See
+#'   \code{\link{snapshot_repository_state}}. Accepts \code{FALSE},
+#'   which does not.
+#' @param StateBackupDir Character scalar. Snapshot destination,
+#'   defaulting to
+#'   \code{file.path(dirname(ParquetBasePath), "StateBackups")}.
+#' @param SnapshotKeep Integer. Number of state snapshot generations
+#'   retained.
+#' @param StopOnDatabaseError Logical. Accepts \code{TRUE}, the
+#'   default, which raises an error at the end of the run if any
+#'   database's schema inference or loading phase failed, after the
+#'   run summary and metadata export have already been written.
+#'   Accepts \code{FALSE}, which does not.
+#' @param StopOnFileError Logical. Accepts \code{TRUE}, the default,
+#'   which raises an error at the end of the run if any individual
+#'   source file failed. Accepts \code{FALSE}, which does not.
+#' @param MaxCoerceNAPct Numeric scalar. Passed through to
+#'   \code{\link{read_fn}} and \code{\link{align_columns}}. Fails a
+#'   file when type coercion turns more than this percentage of a
+#'   column's values into \code{NA}. Defaults to \code{NULL}.
+#' @param SourceFingerprintMode Character scalar. Accepts one of
+#'   three values: \code{"metadata"}, \code{"sha256"}, or
+#'   \code{"none"}, controlling source file change detection for a
+#'   checkpoint. See \code{repository_checkpoint_key}. A legacy
+#'   checkpoint entry is upgraded to this fingerprint mode at the
+#'   start of the run. Defaults to \code{"metadata"}.
+#' @param AutoCleanup Logical. Accepts \code{TRUE}, the default,
+#'   which cleans up a temporary Parquet file at the end of a write
+#'   operation, preventing accumulation of an orphaned
+#'   \verb{.tmp_*.parquet} file that may be left behind due to an
+#'   input or output delay or file locking. Accepts \code{FALSE},
+#'   which does not.
+#' @param CleanupAfterPhase Character scalar. Controls when cleanup
+#'   occurs. Accepts \code{"all"}, the default, which cleans only
+#'   after every database is written. Accepts \code{"database"},
+#'   which cleans after each database batch completes. Accepts
+#'   \code{"none"}, which disables automatic cleanup, leaving the
+#'   user to call cleanup manually.
+#' @param MaxTempAgeHours Integer. Minimum age, in hours, before a
+#'   temporary file is considered safe to remove. Defaults to
+#'   \code{1}, so that a file less than one hour old is preserved to
+#'   avoid interfering with an active write.
+#' @param ReturnRunResult Logical. Accepts \code{TRUE}, which
+#'   returns the full run result object instead of just the
+#'   checkpoint. See Value. Accepts \code{FALSE}, which does not.
+#' @param RunId Character scalar. Run identifier tagging a log line
+#'   and manifest row, automatically generated, see
+#'   \code{resolve_run_id}, when \code{NULL}.
+#' @param RunSummaryPath Character scalar. Destination for the JSON
+#'   or RDS run summary. See \code{write_repository_run_summary}.
+#'   Defaults to
 #'   \code{file.path(dirname(ManifestPath), "RunSummaries", paste0("run_", RunId, ".json"))}.
-#' @param ExportMetadataWorkbook Logical or NULL. When NULL (default), creates
-#'   an accessible Excel snapshot for DuckDB manifests and skips legacy CSV
-#'   manifests. Set TRUE or FALSE explicitly to override this behavior.
-#' @param MetadataWorkbookPath Destination for the generated metadata workbook.
-#'   Defaults to \code{RepositoryMetadata.xlsx} beside the manifest.
-#' @param MetadataWorkbookMaxRowsPerSheet Maximum raw manifest rows written to
-#'   each numbered detail sheet.
-#' @param DownloadCachePath Managed local cache for rows with \code{SourceURI}.
-#' @param MaterializeRemote Materialize unresolved remote rows before loading.
-#' @param RemoteOffline Disable network access and require cached remote files.
-#' @param RemoteDefaultDownloadPolicy Default policy for blank MDT policy cells.
-#' @param RemoteDownloadMethod Method passed to \code{utils::download.file()}.
-#' @param RemoteDownloadTimeout Minimum remote download timeout in seconds.
-#' @param RemoteDownloadFunction Optional caller-managed download function.
-#' @return If \code{ReturnRunResult = TRUE}, an object of class
-#'   \code{"RepositoryRunResult"}: a list with \code{run_id}, \code{status}
-#'   (\code{"success"} or \code{"partial_failure"}), \code{started_at},
-#'   \code{finished_at}, \code{checkpoint} (updated character vector),
-#'   \code{completed} (data.table of files completed this run),
-#'   \code{file_failures}, \code{database_failures}, \code{ManifestPath},
-#'   \code{TableSchemaPath}, \code{CheckpointPath}, \code{LogPath},
-#'   \code{MetadataWorkbookPath}, and \code{MetadataWorkbookExportError}.
-#'   Otherwise (the default), just the updated checkpoint character vector.
-#'   When \code{StopOnDatabaseError} or \code{StopOnFileError} is \code{TRUE}
-#'   (the default for both) and a corresponding failure occurred, the
-#'   function \code{stop()}s after the run summary and metadata export have
-#'   already been written -- inspect \code{RunSummaryPath} or wrap the call in
-#'   \code{tryCatch()} to recover the partial result.
+#' @param ExportMetadataWorkbook Logical or \code{NULL}. When
+#'   \code{NULL}, the default, creates an accessible Excel snapshot
+#'   for a DuckDB manifest and skips a legacy CSV manifest. Set to
+#'   \code{TRUE} or \code{FALSE} explicitly to override this
+#'   behavior.
+#' @param MetadataWorkbookPath Character scalar. Destination for the
+#'   generated metadata workbook. Defaults to
+#'   \code{RepositoryMetadata.xlsx} beside the manifest.
+#' @param MetadataWorkbookMaxRowsPerSheet Integer. Maximum raw
+#'   manifest row written to each numbered detail sheet.
+#' @param DownloadCachePath Character scalar. Managed local cache
+#'   for a row with \code{SourceURI}.
+#' @param MaterializeRemote Logical. Accepts \code{TRUE}, which
+#'   materializes an unresolved remote row before loading. Accepts
+#'   \code{FALSE}, which does not.
+#' @param RemoteOffline Logical. Accepts \code{TRUE}, which disables
+#'   network access and requires a cached remote file. Accepts
+#'   \code{FALSE}, which does not.
+#' @param RemoteDefaultDownloadPolicy Character scalar. Default
+#'   policy for a blank MDT policy cell.
+#' @param RemoteDownloadMethod Character scalar. Method passed to
+#'   \code{utils::download.file()}.
+#' @param RemoteDownloadTimeout Numeric scalar. Minimum remote
+#'   download timeout, in seconds.
+#' @param RemoteDownloadFunction A function. An optional caller
+#'   managed download function.
+#' @return If \code{ReturnRunResult} is \code{TRUE}, an object of
+#'   class \code{"RepositoryRunResult"}: a list with \code{run_id},
+#'   \code{status}, either \code{"success"} or
+#'   \code{"partial_failure"}, \code{started_at}, \code{finished_at},
+#'   \code{checkpoint}, the updated character vector,
+#'   \code{completed}, a data.table of a file completed this run,
+#'   \code{file_failures}, \code{database_failures},
+#'   \code{ManifestPath}, \code{TableSchemaPath}, \code{CheckpointPath},
+#'   \code{LogPath}, \code{MetadataWorkbookPath}, and
+#'   \code{MetadataWorkbookExportError}. Otherwise, the default, just
+#'   the updated checkpoint character vector. When
+#'   \code{StopOnDatabaseError} or \code{StopOnFileError} is
+#'   \code{TRUE}, the default for both, and a corresponding failure
+#'   occurred, the function stops after the run summary and metadata
+#'   export have already been written. Inspect \code{RunSummaryPath}
+#'   or wrap the call in \code{tryCatch()} to recover the partial
+#'   result.
 #' @seealso \code{\link{BuildRepositoryCatalog}}, \code{\link{generic_db_loader}},
 #'   \code{\link{read_fn}}, \code{\link{audit_repository}},
 #'   \code{\link{create_repository_project}}
