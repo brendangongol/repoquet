@@ -7222,6 +7222,18 @@ validate_duckdb_table <- function(con, table_name, schema_registry = NULL, stric
     logical_identity <- data.table::as.data.table(table_schema)[
       tolower(as.character(DuckDBTable)) == tolower(table_name)]
   }
+  # A column with its own row in the finalized table schema catalog has
+  # already had its type reviewed and approved (possibly deliberately
+  # diverging from a generic registry pattern, e.g. a PAY column stored as
+  # double instead of integer). The exact-match catalog check below is the
+  # authoritative validator for such a column, so the generic registry
+  # pattern loop here is skipped for it and applies only to a column the
+  # catalog does not yet cover.
+  catalog_columns <- character(0)
+  if (!is.null(logical_identity) && nrow(logical_identity) > 0L &&
+      "Column" %in% names(logical_identity)) {
+    catalog_columns <- canonical_colnames(as.character(logical_identity$Column))
+  }
   if (!is.null(schema_registry) && nrow(schema_registry) > 0L) {
     if (!is.null(logical_identity) && nrow(logical_identity) > 0L &&
         all(c("Database", "TableName") %in% names(logical_identity))) {
@@ -7236,6 +7248,7 @@ validate_duckdb_table <- function(con, table_name, schema_registry = NULL, stric
     for (i in seq_len(nrow(schema_registry))) {
       if (!schema_registry_applies(applies[i], database = validation_database, table_name = validation_table)) next
       cols <- desc$canonical_name[grepl(schema_registry$ColumnPattern[i], desc$canonical_name, perl = TRUE, ignore.case = TRUE)]
+      cols <- setdiff(cols, catalog_columns)
       if (length(cols) == 0L) next
       expected <- normalize_type_name(schema_registry$CanonicalType[i])
       actual <- desc$column_type[match(cols, desc$canonical_name)]
