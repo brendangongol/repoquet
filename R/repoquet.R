@@ -2048,11 +2048,19 @@ register_parquet_view_compile <- function(con, ParquetBasePath, tables_written, 
     }
     if (!is.null(catalog)) table_schema <- catalog$table_schema
   }
+  failures <- character(0)
   for(tbl in tables_written){
-    registered <- register_parquet_view(con, ParquetBasePath = ParquetBasePath, table_name = tbl,
-                                        schema_registry = schema_registry,
-                                        validate = validate, strict_validation = strict_validation,
-                                        table_schema = table_schema)
+    registered <- tryCatch(
+      register_parquet_view(con, ParquetBasePath = ParquetBasePath, table_name = tbl,
+                            schema_registry = schema_registry,
+                            validate = validate, strict_validation = strict_validation,
+                            table_schema = table_schema),
+      error = function(e) e)
+    if (inherits(registered, "error")) {
+      failures[tbl] <- conditionMessage(registered)
+      log_msg(sprintf("[VIEW FAILED] %s: %s", tbl, conditionMessage(registered)))
+      next
+    }
     if(verbose){
       status_msg <- if (isTRUE(registered)) sprintf("View registered: %s", tbl) else sprintf("View skipped (no parquet files): %s", tbl)
       if(logStatus){
@@ -2062,6 +2070,15 @@ register_parquet_view_compile <- function(con, ParquetBasePath, tables_written, 
       }
     }
   }
+  if (length(failures) > 0L) {
+    summary_msg <- sprintf("%d of %d table(s) failed view registration or validation. %s",
+                           length(failures), length(tables_written),
+                           paste(sprintf("[%s] %s", names(failures), failures), collapse = " | "))
+    if (isTRUE(strict_validation)) stop(summary_msg, call. = FALSE)
+    log_msg(sprintf("[VIEW WARNING] %s", summary_msg))
+    warning(summary_msg, call. = FALSE)
+  }
+  invisible(NULL)
 }
 
 #' Prints a summary of completed files and failures after a load
