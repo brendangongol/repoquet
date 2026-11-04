@@ -7340,21 +7340,33 @@ read_parquet_manifest <- function(ManifestPath) {
   as_fields <- function(x) as.character(unlist(x, use.names = FALSE))
   first <- NA_real_
   replayed <- 0L
+  problem <- NA_character_
+  note_problem <- function(text) if (is.na(problem)) problem <<- text
   for (j in seq_along(offsets)) {
-    if (is.na(wanted[j]) || !nzchar(trimws(wanted[j]))) next
+    if (is.na(wanted[j]) || !nzchar(trimws(wanted[j]))) {
+      note_problem(sprintf("no record found at offset %s (file shorter than the manifest says, or a blank line)",
+                           format(offsets[j], scientific = FALSE)))
+      next
+    }
     old_skip <- if (headed) offsets[j] + 1 else info$SkipLines + offsets[j]
     old <- tryCatch(as_fields(data.table::fread(
       file = full_path, skip = old_skip, nrows = 1L, header = FALSE, sep = info$Delimiter,
-      quote = quote, colClasses = "character")), error = function(e) NULL)
-    if (is.null(old)) next
+      quote = quote, colClasses = "character")), error = function(e) e)
+    if (inherits(old, "error")) {
+      note_problem(paste("fread(skip =) failed:", conditionMessage(old)))
+      next
+    }
     truth <- tryCatch(as_fields(data.table::fread(
       text = wanted[j], header = FALSE, sep = info$Delimiter, quote = quote, colClasses = "character")),
-      error = function(e) NULL)
-    if (is.null(truth)) next
+      error = function(e) e)
+    if (inherits(truth, "error")) {
+      note_problem(paste("could not parse the record:", conditionMessage(truth)))
+      next
+    }
     replayed <- replayed + 1L
     if (!identical(old, truth) && is.na(first)) first <- offsets[j]
   }
-  list(First = first, Replayed = replayed)
+  list(First = first, Replayed = replayed, Problem = problem)
 }
 
 .audit_duplicate_rows <- function(parquet_files) {
@@ -7377,11 +7389,15 @@ read_parquet_manifest <- function(ManifestPath) {
 #' in the file, so the table holds duplicated rows and misses the tail of the
 #' file while its row count still matches the source. This audit reads only
 #' the manifest, the source files, and (optionally) Parquet row counts, and it
-#' exports no data. For every delimited source that the manifest shows was
-#' written in two or more chunks, it replays the old positioning at the chunk
-#' start offsets and compares the record it reaches with the record found by
-#' reading the file line by line. For a source where they differ, it
-#' counts identical rows in the source's Parquet pieces.
+#' exports no data. Only a delimited source with two or more chunks inside one
+#' partition can be affected, because a source with one piece per partition,
+#' as when its rows are routed by their own partition column, never positions
+#' a chunk within a partition. Such a source is reported as \code{"ok"}. For
+#' every other delimited source, the audit replays the old positioning at the
+#' chunk start offsets and compares the record it reaches with the record
+#' found by reading the file line by line. For a source where they differ, it
+#' counts identical rows in the source's Parquet pieces. Binary formats such
+#' as SAV are not audited, since they never used line positioning.
 #'
 #' The replay uses the \pkg{data.table} installed on the machine that runs the
 #' audit, so run it where the tables were loaded.
@@ -7401,9 +7417,10 @@ read_parquet_manifest <- function(ManifestPath) {
 #' @param ProbeOffsets Integer. Number of offsets spread across the file that
 #'   are replayed for a source whose chunks were routed to several partitions,
 #'   because its chunk starts cannot be read from the manifest. Defaults to 6.
-#' @return A data.table with one row per multi-chunk delimited source:
+#' @return A data.table with one row per multi-piece delimited source:
 #'   \code{Database}, \code{TableName}, \code{Path}, \code{Chunks},
-#'   \code{RowsInManifest}, \code{OldMethodMisplaced} (\code{TRUE} when old
+#'   \code{MaxChunksPerPartition}, \code{RowsInManifest},
+#'   \code{OldMethodMisplaced} (\code{TRUE} when old
 #'   positioning would reach a different record), \code{FirstMisplacedOffset},
 #'   \code{ParquetRows}, \code{DuplicateRows} (rows minus distinct rows), and
 #'   \code{Verdict}. \code{"AFFECTED: reload"} means positioning differs and
@@ -7456,10 +7473,12 @@ audit_chunk_positioning <- function(MDT, MasterDBPath, ManifestPath, ParquetBase
     mdt_row <- MDT[as.character(MDT$Database) == key$Database & as.character(MDT$Path) == key$SourcePath &
                      as.character(MDT$TableName) == key$TableName, ]
     reader <- if (nrow(mdt_row) > 0L) tolower(as.character(mdt_row$FileType[1])) else NA_character_
+    max_per_partition <- max(table(rows$PartitionValue, useNA = "ifany"))
+    if (nrow(mdt_row) > 0L && !reader %in% c("csv", "tsv", "txt", "gz")) next
     if (nrow(mdt_row) == 0L) {
       verdict <- "no matching MDT row"
-    } else if (!reader %in% c("csv", "tsv", "txt", "gz")) {
-      verdict <- "not a delimited source"
+    } else if (max_per_partition < 2L) {
+      verdict <- "ok"   # one piece per partition: no chunk was positioned within a partition
     } else {
       total <- sum(rows$NRows)
       single_partition <- length(unique(rows$PartitionValue)) == 1L
@@ -7471,7 +7490,7 @@ audit_chunk_positioning <- function(MDT, MasterDBPath, ManifestPath, ParquetBase
       if (inherits(replay, "error")) {
         verdict <- paste("could not replay:", conditionMessage(replay))
       } else if (replay$Replayed == 0L) {
-        verdict <- "could not replay any chunk start"
+        verdict <- paste("could not replay any chunk start:", replay$Problem %||% "no offsets to probe")
       } else {
         misplaced <- !is.na(replay$First)
         first <- replay$First
@@ -7496,14 +7515,16 @@ audit_chunk_positioning <- function(MDT, MasterDBPath, ManifestPath, ParquetBase
     }
     results[[length(results) + 1L]] <- data.table::data.table(
       Database = key$Database, TableName = key$TableName, Path = key$SourcePath, Chunks = nrow(rows),
+      MaxChunksPerPartition = as.integer(max_per_partition),
       RowsInManifest = sum(rows$NRows), OldMethodMisplaced = misplaced, FirstMisplacedOffset = first,
       ParquetRows = parquet_rows, DuplicateRows = duplicates, Verdict = verdict)
   }
   if (length(results) == 0L) {
     return(data.table::data.table(
       Database = character(), TableName = character(), Path = character(), Chunks = integer(),
-      RowsInManifest = numeric(), OldMethodMisplaced = logical(), FirstMisplacedOffset = numeric(),
-      ParquetRows = numeric(), DuplicateRows = numeric(), Verdict = character()))
+      MaxChunksPerPartition = integer(), RowsInManifest = numeric(), OldMethodMisplaced = logical(),
+      FirstMisplacedOffset = numeric(), ParquetRows = numeric(), DuplicateRows = numeric(),
+      Verdict = character()))
   }
   data.table::rbindlist(results)
 }

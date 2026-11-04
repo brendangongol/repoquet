@@ -39,9 +39,10 @@ are replayed for a source whose chunks were routed to several partitions,
 because its chunk starts cannot be read from the manifest. Defaults to 6.}
 }
 \value{
-A data.table with one row per multi-chunk delimited source:
+A data.table with one row per multi-piece delimited source:
   \code{Database}, \code{TableName}, \code{Path}, \code{Chunks},
-  \code{RowsInManifest}, \code{OldMethodMisplaced} (\code{TRUE} when old
+  \code{MaxChunksPerPartition}, \code{RowsInManifest},
+  \code{OldMethodMisplaced} (\code{TRUE} when old
   positioning would reach a different record), \code{FirstMisplacedOffset},
   \code{ParquetRows}, \code{DuplicateRows} (rows minus distinct rows), and
   \code{Verdict}. \code{"AFFECTED: reload"} means positioning differs and
@@ -58,11 +59,15 @@ doubled Windows text mode conversion. Such a chunk re-reads rows from earlier
 in the file, so the table holds duplicated rows and misses the tail of the
 file while its row count still matches the source. This audit reads only
 the manifest, the source files, and (optionally) Parquet row counts, and it
-exports no data. For every delimited source that the manifest shows was
-written in two or more chunks, it replays the old positioning at the chunk
-start offsets and compares the record it reaches with the record found by
-reading the file line by line. For a source where they differ, it
-counts identical rows in the source's Parquet pieces.
+exports no data. Only a delimited source with two or more chunks inside one
+partition can be affected, because a source with one piece per partition,
+as when its rows are routed by their own partition column, never positions
+a chunk within a partition. Such a source is reported as \code{"ok"}. For
+every other delimited source, the audit replays the old positioning at the
+chunk start offsets and compares the record it reaches with the record
+found by reading the file line by line. For a source where they differ, it
+counts identical rows in the source's Parquet pieces. Binary formats such
+as SAV are not audited, since they never used line positioning.
 }
 \details{
 The replay uses the \pkg{data.table} installed on the machine that runs the

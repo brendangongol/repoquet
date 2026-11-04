@@ -665,3 +665,32 @@ test_that("the chunk-positioning audit flags duplicated-rows-plus-missing-tail l
                    "positioning differs; duplicates not checked")
   expect_identical(nrow(audit_chunk_positioning(M, root, mf2, Databases = "Z")), 0L)
 })
+
+test_that("the audit treats one piece per partition as unaffected and explains a failed replay", {
+  root <- new_layout_dir(); on.exit(unlink(root, recursive = TRUE))
+  dir.create(file.path(root, "D"))
+  M <- data.frame(Database = "D", MDBDir = "D", Path = c("routed.csv", "short.csv"),
+                  TableName = c("Routed", "Short"), FileType = "csv", PartitionKey = "year",
+                  PartitionValue = "2021")
+  mf <- file.path(root, "manifest.csv")
+  add_piece <- function(table, path, k, partition, ids) {
+    piece <- file.path(root, sprintf("%s_%s_%d.parquet", table, partition, k))
+    arrow::write_parquet(data.frame(id = ids), piece)
+    update_parquet_manifest(mf, "D", table, paste0("D_", table), partition, path, piece, length(ids),
+                            Notes = sprintf("chunk_%05d", k), PartitionKey = "year", PartitionValue = partition)
+  }
+  #### Routed by its own year column: each partition holds chunk 1 only, and the source file is absent.
+  add_piece("Routed", "routed.csv", 1, "2021", 1:5)
+  add_piece("Routed", "routed.csv", 1, "2022", 6:10)
+  #### Two chunks in one partition, but the file is shorter than the manifest claims.
+  write_text_file(file.path(root, "D", "short.csv"), c("id", 1:4), eol = "\n")
+  add_piece("Short", "short.csv", 1, "2021", 1:50)
+  add_piece("Short", "short.csv", 2, "2021", 51:100)
+  audit <- audit_chunk_positioning(M, root, mf)
+  routed <- audit[audit$TableName == "Routed", ]
+  expect_identical(routed$Verdict, "ok")
+  expect_identical(routed$MaxChunksPerPartition, 1L)
+  short <- audit[audit$TableName == "Short", ]
+  expect_identical(short$MaxChunksPerPartition, 2L)
+  expect_match(short$Verdict, "could not replay any chunk start: no record found at offset 50")
+})
