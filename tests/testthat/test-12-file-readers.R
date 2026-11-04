@@ -291,6 +291,104 @@ test_that("delimited readers support declared headers and named sections", {
   expect_identical(.read_delimited_header(headerless, options),
                    c("ID", "DIAGNOSIS", "VALUE"))
 
+  #### Headerless sources (e.g. HCUP NRD/NEDS) through the chunked path:  ####
+  #### no line is a header, so chunks start at record 1 and counts include it.
+  col_names <- c("ID", "DIAGNOSIS", "VALUE")
+  records <- sprintf("%d,%s,%.1f", 1:7, LETTERS[1:7], 1:7 + 0.5)
+  headerless7 <- file.path(root, "headerless7.csv")
+  writeLines(records, headerless7)
+  full7 <- read_delimited_full(headerless7, reader_options = options)
+  expect_identical(full7$ID, 1:7)
+
+  info <- .delimited_header_info(headerless7, options)
+  expect_identical(info$Header, col_names)
+  expect_false(info$HasHeader)
+  expect_identical(info$HeaderPhysicalLine, 0L)
+  expect_identical(info$SkipLines, 0L)
+  expect_identical(info$Delimiter, ",")
+  expect_error(.delimited_header_info(headerless7,
+                                      modifyList(options, list(ColumnNames = c("ID", "VALUE")))),
+               "ColumnNames has 2 name\\(s\\) but the first record .* has 3 field\\(s\\)")
+  expect_error(.read_delimited_header(headerless7,
+                                      modifyList(options, list(ColumnNames = c("A", "B", "C", "D")))),
+               "ColumnNames has 4 name\\(s\\) but the first record .* has 3 field\\(s\\)")
+  expect_identical(.delimited_header_info(headerless7, list(Delimiter = ",", Header = FALSE))$Header,
+                   c("V1", "V2", "V3"))
+
+  expect_equal(.count_delimited_rows(headerless7, options), 7)
+  for (offset in c(0L, 3L, 6L)) {
+    chunk <- .read_delimited_chunk(headerless7, offset, 3L, col_names, reader_options = options)
+    expected_ids <- seq.int(offset + 1L, min(7L, offset + 3L))
+    expect_identical(names(chunk), col_names)
+    expect_identical(chunk$ID, expected_ids, info = sprintf("offset %d", offset))
+    expect_identical(chunk$DIAGNOSIS, LETTERS[expected_ids], info = sprintf("offset %d", offset))
+  }
+  stitched <- data.table::rbindlist(lapply(c(0L, 3L, 6L), function(offset) {
+    .read_delimited_chunk(headerless7, offset, 3L, col_names, reader_options = options)
+  }))
+  expect_equal(stitched, full7, ignore_attr = TRUE)
+
+  #### Leading blank lines precede the first record; they are skipped,   ####
+  #### never counted, and never shift a chunk's starting record.          ####
+  padded <- file.path(root, "padded.csv")
+  writeLines(c("", "", records), padded)
+  expect_identical(.delimited_header_info(padded, options)$SkipLines, 2L)
+  expect_equal(.count_delimited_rows(padded, options), 7)
+  expect_identical(.read_delimited_chunk(padded, 0L, 2L, col_names, reader_options = options)$ID,
+                   1:2)
+  expect_identical(.read_delimited_chunk(padded, 5L, 2L, col_names, reader_options = options)$ID,
+                   6:7)
+
+  #### The partition-key scan and the record stream (used when a source ####
+  #### routes its own partitions) also start at record 1.                ####
+  expect_identical(.read_delimited_partition_columns(headerless7, options, col_names,
+                                                     "DIAGNOSIS")$DIAGNOSIS, LETTERS[1:7])
+  streamed <- list()
+  stream_info <- .stream_delimited_logical_records(
+    headerless7, reader_options = options, chunk_size = 3L,
+    callback = function(df) streamed[[length(streamed) + 1L]] <<- df)
+  expect_length(streamed, 3L)
+  expect_identical(data.table::rbindlist(streamed)$ID, 1:7)
+  expect_identical(stream_info$LogicalRows, 7)
+
+  #### Files with headers behave as before, including an explicit Header = TRUE.
+  headed <- file.path(root, "headed.csv")
+  writeLines(c(paste(col_names, collapse = ","), records), headed)
+  for (headed_options in list(list(Delimiter = ","), list(Delimiter = ",", Header = TRUE))) {
+    headed_info <- .delimited_header_info(headed, headed_options)
+    expect_identical(headed_info$Header, col_names)
+    expect_true(headed_info$HasHeader)
+    expect_identical(headed_info$HeaderPhysicalLine, 1L)
+    expect_equal(.count_delimited_rows(headed, headed_options), 7)
+    expect_identical(.read_delimited_chunk(headed, 0L, 3L, col_names,
+                                           reader_options = headed_options)$ID, 1:3)
+    expect_identical(.read_delimited_chunk(headed, 6L, 3L, col_names,
+                                           reader_options = headed_options)$ID, 7L)
+  }
+
+  #### End to end: more rows than SAV_ROW_THRESHOLD forces the chunked     ####
+  #### loader (chunk size 10), so pieces start at offsets 0, 10, and 20.   ####
+  fx <- new_repo_fixture(); on.exit(unlink(fx$root, recursive = TRUE), add = TRUE)
+  writeLines(sprintf("%d,%s,%.1f", 1:25, LETTERS[1:25], 1:25 + 0.5),
+             file.path(fx$src, "headerless_2019.csv"))
+  M <- data.frame(Database = "REG", MDBDir = "REG", TableName = "Headerless",
+                  Path = "headerless_2019.csv", FileType = "csv",
+                  PartitionKey = "year", PartitionValue = "2019",
+                  ReaderOptions = jsonlite::toJSON(options, auto_unbox = TRUE))
+  loaded <- run_loader(fx, M, "REG")
+  expect_length(loaded$checkpoint, 1L)
+  pieces <- list.files(file.path(fx$pq, "REG_Headerless", "year=2019"),
+                       pattern = "parquet$", full.names = TRUE)
+  expect_length(pieces, 3L)
+  stored <- data.table::rbindlist(lapply(pieces, function(p) {
+    data.table::as.data.table(arrow::read_parquet(p))
+  }))
+  data.table::setorder(stored, ID)
+  expect_true(all(col_names %in% names(stored)))
+  expect_equal(stored$ID, 1:25)
+  expect_identical(stored$DIAGNOSIS, LETTERS[1:25])
+  expect_equal(stored$VALUE, 1:25 + 0.5)
+
   sections <- file.path(root, "sections.csv")
   writeLines(c("first_id,description", "1,One", "2,Two", "",
                "second_id,description", "7,Seven", "8,Eight"), sections)

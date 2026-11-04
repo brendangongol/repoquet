@@ -78,3 +78,24 @@
 * Remote acquisition now supports explicit ZIP members with atomic extraction,
   path-traversal protection, headerless delimited sources, and sectioned lookup
   files while preserving source files unchanged.
+* Added SPSS load programs as column layouts. A source row can set
+  `ReaderOptions` `{"LayoutFile": "<program>.SPS"}`: a `GET DATA /TYPE=TXT`
+  program names the columns of a headerless delimited file (character versus
+  numeric, plus the delimiter), and a `DATA LIST FIXED` program does the same
+  for the new fixed-width `asc` file type. `RECODE ... =SYSMIS` lines become
+  per-column special codes that load as `NA`, compared numerically. A relative
+  `LayoutFile` resolves against `set_layout_root()` (stored in the
+  `repoquet.layout_root` option and the `REPOQUET_LAYOUT_ROOT` environment
+  variable); an absolute path is used as given. `ColumnNames` and `LayoutFile`
+  must agree when both are set.
+* The `asc` reader streams records in bounded chunks, checks every record
+  against the layout's record length (reporting the line number and both
+  lengths), accepts LF or CRLF endings, and returns text fields the way
+  `haven::read_sav()` returns SPSS strings. Schema survey, preflight, chunked
+  loading, source-defined partition routing, and manifest row counts all
+  support it.
+* Delimited chunks are now positioned by reading lines, not by `fread(skip =)`,
+  which miscounts lines in files whose terminators are not a clean LF or CRLF
+  (such as CR CR LF). Added `audit_chunk_positioning()`, which checks an existing
+  manifest and Parquet store for sources loaded with the old positioning
+  (repeated rows with the same total row count) without exporting data.

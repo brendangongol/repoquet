@@ -2945,6 +2945,11 @@ reader_options_for_row <- function(row_meta) {
     }
     out[[field]] <- value
   }
+  layout_file <- out[["LayoutFile"]] %||% NULL
+  if (!is.null(layout_file) && length(layout_file) > 0L && !is.na(layout_file[1]) &&
+      nzchar(trimws(as.character(layout_file[1])))) {
+    out$LayoutFile <- .resolve_layout_path(layout_file[1])
+  }
   out
 }
 
@@ -2972,8 +2977,67 @@ fread_col_classes_positional <- function(col_classes, header) {
   split(seq_along(named), unname(named))
 }
 
+# Declared ReaderOptions$Header as TRUE/FALSE, or NULL when undeclared (fread auto-detects).
+# A source with a LayoutFile and no declared Header is headerless: the layout names its columns.
+.delimited_header_mode <- function(reader_options = list()) {
+  header_mode <- reader_options[["Header"]] %||% NULL
+  if (is.null(header_mode)) {
+    return(if (is.null(.layout_for_options(reader_options))) NULL else FALSE)
+  }
+  if (is.character(header_mode)) {
+    key <- tolower(trimws(header_mode[1]))
+    if (!key %in% c("true", "t", "yes", "y", "1", "false", "f", "no", "n", "0")) {
+      stop("ReaderOptions$Header must be TRUE or FALSE.")
+    }
+    header_mode <- key %in% c("true", "t", "yes", "y", "1")
+  }
+  if (!is.logical(header_mode) || length(header_mode) != 1L || is.na(header_mode)) {
+    stop("ReaderOptions$Header must be TRUE or FALSE.")
+  }
+  header_mode
+}
+
+# FALSE only when ReaderOptions$Header explicitly declares a headerless source, in
+# which case no physical line is a header and every non-empty record is data.
+.delimited_has_header_line <- function(reader_options = list()) {
+  !identical(.delimited_header_mode(reader_options), FALSE)
+}
+
+# Validated ReaderOptions$ColumnNames, or the LayoutFile's names, or NULL when neither is configured.
+# Declaring both is an error unless they list the same names in the same order.
+.delimited_column_names <- function(reader_options = list()) {
+  column_names <- reader_options[["ColumnNames"]] %||% NULL
+  if (!is.null(column_names)) {
+    column_names <- as.character(unlist(column_names, use.names = FALSE))
+    if (length(column_names) == 0L || anyNA(column_names) || any(!nzchar(trimws(column_names)))) {
+      stop("ReaderOptions$ColumnNames must contain non-empty column names.")
+    }
+  }
+  layout <- .layout_for_options(reader_options)
+  if (is.null(layout)) return(column_names)
+  if (!identical(layout$Style, "csv")) {
+    stop(sprintf(paste0("Layout file %s is a fixed-width layout (DATA LIST FIXED); a delimited source needs ",
+                        "a GET DATA /TYPE=TXT layout."), basename(layout$Path)), call. = FALSE)
+  }
+  layout_names <- layout$Fields$Name
+  if (!is.null(column_names) && !identical(column_names, layout_names)) {
+    first <- if (length(column_names) != length(layout_names)) NA_integer_ else
+      which(column_names != layout_names)[1]
+    stop(sprintf("ReaderOptions$ColumnNames (%d name(s)) and LayoutFile %s (%d field(s)) disagree%s.",
+                 length(column_names), basename(layout$Path), length(layout_names),
+                 if (is.na(first)) "" else sprintf(": column %d is '%s' in ColumnNames and '%s' in the layout",
+                                                  first, column_names[first], layout_names[first])),
+         call. = FALSE)
+  }
+  layout_names
+}
+
 delimited_fread_args <- function(reader_options = list(), col_classes = NULL, header = NULL) {
   sep <- reader_options$Delimiter %||% NULL
+  if (is.null(sep)) {
+    layout <- .layout_for_options(reader_options)
+    if (!is.null(layout) && !is.na(layout$Delimiter)) sep <- layout$Delimiter
+  }
   if (identical(sep, "\\t")) sep <- "\t"
   keep_leading_zeros <- reader_options$KeepLeadingZeros %||% TRUE
   if (is.character(keep_leading_zeros)) {
@@ -2983,32 +3047,20 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
                encoding = "unknown",
                colClasses = fread_col_classes(col_classes, header),
                keepLeadingZeros = isTRUE(keep_leading_zeros))
-  header_mode <- reader_options[["Header"]] %||% NULL
-  if (!is.null(header_mode)) {
-    if (is.character(header_mode)) {
-      key <- tolower(trimws(header_mode[1]))
-      if (!key %in% c("true", "t", "yes", "y", "1", "false", "f", "no", "n", "0")) {
-        stop("ReaderOptions$Header must be TRUE or FALSE.")
-      }
-      header_mode <- key %in% c("true", "t", "yes", "y", "1")
-    }
-    if (!is.logical(header_mode) || length(header_mode) != 1L || is.na(header_mode)) {
-      stop("ReaderOptions$Header must be TRUE or FALSE.")
-    }
-    args$header <- header_mode
-  }
-  column_names <- reader_options$ColumnNames %||% NULL
-  if (!is.null(column_names)) {
-    column_names <- as.character(unlist(column_names, use.names = FALSE))
-    if (length(column_names) == 0L || anyNA(column_names) || any(!nzchar(trimws(column_names)))) {
-      stop("ReaderOptions$ColumnNames must contain non-empty column names.")
-    }
-    args$col.names <- column_names
-  }
+  header_mode <- .delimited_header_mode(reader_options)
+  if (!is.null(header_mode)) args$header <- header_mode
+  column_names <- .delimited_column_names(reader_options)
+  if (!is.null(column_names)) args$col.names <- column_names
   if (!is.null(sep) && nzchar(sep)) args$sep <- sep
   if (!is.null(reader_options$Quote)) args$quote <- as.character(reader_options$Quote)
   if (!is.null(reader_options$DecimalMark)) args$dec <- as.character(reader_options$DecimalMark)
   args[!vapply(args, is.null, logical(1))]
+}
+
+# TRUE when ReaderOptions$SectionHeader names a section (checked without reading the file).
+.has_delimited_section <- function(reader_options = list()) {
+  section <- trimws(as.character(reader_options$SectionHeader %||% "")[1])
+  !is.na(section) && nzchar(section)
 }
 
 .sectioned_delimited_text <- function(path, reader_options = list()) {
@@ -3143,6 +3195,8 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
   args$sep <- header_info$Delimiter
   args$colClasses <- "character"
   args$fill <- TRUE
+  args$header <- NULL
+  args$col.names <- NULL
   parsed <- .fread_with_structural_errors(
     c(list(text = record, header = FALSE, nrows = 1L), args), path)
   if (nrow(parsed) != 1L || ncol(parsed) < expected_fields) {
@@ -3159,6 +3213,10 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
 }
 .detect_delimited_separator <- function(header_line, path, reader_options = list()) {
   configured <- reader_options$Delimiter %||% NULL
+  if (is.null(configured)) {
+    layout <- .layout_for_options(reader_options)
+    if (!is.null(layout) && !is.na(layout$Delimiter)) configured <- layout$Delimiter
+  }
   if (identical(configured, "\\t")) configured <- "\t"
   if (!is.null(configured) && nzchar(as.character(configured[1]))) {
     configured <- as.character(configured[1])
@@ -3192,8 +3250,21 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
   }
 }
 
+# Describes the column layout of a delimited source without reading its body.
+# Header holds the logical column names; HeaderPhysicalLine is the physical line
+# that holds the header (0 when ReaderOptions$Header = FALSE). SkipLines is the
+# number of physical lines a reader skips before data: through the header line
+# for a headed source, or just the blank lines ahead of the first record for a
+# headerless one, so chunk k starts at skip = SkipLines + offset. A headerless
+# source takes its names from ReaderOptions$ColumnNames (fread's V1..Vn when
+# absent), and their count must equal the field count of the first record.
 .delimited_header_info <- function(path, reader_options = list()) {
   reader_options <- .resolve_delimited_reader_options(path, reader_options)
+  has_header <- .delimited_has_header_line(reader_options)
+  configured_names <- .delimited_column_names(reader_options)
+  if (!has_header && identical(.header_duplicate_settings(reader_options), "drop_redundant")) {
+    stop("HeaderDuplicatePolicy='drop_redundant' needs a header line and cannot be combined with ReaderOptions$Header = FALSE.")
+  }
   con <- .open_delimited_text_connection(path, reader_options$.EncodingInfo$EncodingUsed)
   on.exit(close(con), add = TRUE)
   physical_line <- 0L
@@ -3207,11 +3278,45 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
       break
     }
   }
-  if (is.null(header_line)) stop("Delimited source has no non-empty header: ", path)
+  if (is.null(header_line)) {
+    stop(if (has_header) "Delimited source has no non-empty header: " else
+           "Delimited source has no non-empty record: ", path)
+  }
   delimiter <- .detect_delimited_separator(header_line, path, reader_options)
+  if (!has_header) {
+    #### The first non-empty line is data. A quoted field may span lines, so ####
+    #### keep reading until the record's quotes balance before counting.   ####
+    quote_char <- reader_options$Quote %||% "\""
+    first_record <- header_line
+    repeat {
+      if (.delimited_record_shape(first_record, delimiter, quote_char)$Balanced) break
+      line <- readLines(con, n = 1L, warn = FALSE)
+      if (length(line) == 0L) break
+      first_record <- paste(first_record, line[1], sep = "\n")
+    }
+    n_fields <- .delimited_record_shape(first_record, delimiter, quote_char)$Fields
+    header <- if (is.null(configured_names)) {
+      paste0("V", seq_len(n_fields))
+    } else if (length(configured_names) != n_fields) {
+      stop(sprintf(paste0("ReaderOptions$ColumnNames has %d name(s) but the first record of %s ",
+                          "(physical line %d) has %d field(s); with Header = FALSE, ColumnNames ",
+                          "must name every field."),
+                   length(configured_names), basename(path), physical_line, n_fields),
+           call. = FALSE)
+    } else {
+      configured_names
+    }
+    return(list(Header = header, HasHeader = FALSE, HeaderLine = NA_character_,
+                HeaderPhysicalLine = 0L, SkipLines = physical_line - 1L,
+                Delimiter = delimiter, ReaderOptions = reader_options))
+  }
   args <- delimited_fread_args(reader_options)
   args$sep <- delimiter
   args$colClasses <- NULL
+  #### The header text is parsed explicitly as a header; a declared Header ####
+  #### or ColumnNames must not reach fread twice (names are applied below). ####
+  args$header <- NULL
+  args$col.names <- NULL
   header_df <- .fread_with_structural_errors(
     c(list(text = header_line, nrows = 0L, header = TRUE), args), path)
   header_df <- normalize_character_encoding(header_df, "UTF-8")
@@ -3242,16 +3347,15 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
     }
     if (n_drop > 0L) header <- header[-tail(redundant, n_drop)]
   }
-  configured_names <- reader_options$ColumnNames %||% NULL
   if (!is.null(configured_names)) {
-    configured_names <- as.character(unlist(configured_names, use.names = FALSE))
     if (length(configured_names) != length(header)) {
       stop(sprintf("ReaderOptions$ColumnNames has %d names but %s has %d logical columns.",
                    length(configured_names), basename(path), length(header)))
     }
     header <- configured_names
   }
-  list(Header = header, HeaderLine = header_line, HeaderPhysicalLine = physical_line,
+  list(Header = header, HasHeader = TRUE, HeaderLine = header_line,
+       HeaderPhysicalLine = physical_line, SkipLines = physical_line,
        Delimiter = delimiter, ReaderOptions = reader_options)
 }
 
@@ -3273,6 +3377,8 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
   args <- delimited_fread_args(reader_options)
   args$sep <- delimiter
   args$colClasses <- NULL
+  args$header <- NULL
+  args$col.names <- NULL
   value <- .fread_with_structural_errors(
     c(list(text = record, header = FALSE, nrows = 1L), args), path)
   if (nrow(value) != 1L || ncol(value) != 1L) {
@@ -3296,6 +3402,7 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
   args$sep <- header_info$Delimiter
   args$header <- TRUE
   args$col.names <- NULL
+  args$colClasses <- .layout_named_classes(.layout_for_options(options), args$colClasses)
   repaired_header <- .encode_delimited_header(header_info$Header, header_info$Delimiter,
                                               options$Quote %||% "\"")
   text <- paste(c(repaired_header, records), collapse = "\n")
@@ -3319,6 +3426,7 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
     }
   }
   df <- normalize_character_encoding(df, "UTF-8")
+  df <- .apply_layout_missing(df, options)
   canonicalize_dataframe_names(df)
 }
 
@@ -3498,8 +3606,11 @@ read_delimited_full <- function(path, col_classes = NULL, reader_options = list(
   }
   args <- c(.delimited_input(path, reader_options),
             delimited_fread_args(reader_options, col_classes = col_classes))
+  layout <- .layout_for_options(reader_options)
+  if (!is.null(layout)) args$colClasses <- .layout_read_classes(layout, args, col_classes)
   df <- .fread_with_structural_errors(args, path)
   df <- .normalize_delimited_frame(df, reader_options, path)
+  df <- .apply_layout_missing(df, reader_options)
   canonicalize_dataframe_names(df)
 }
 
@@ -3510,6 +3621,12 @@ read_delimited_full <- function(path, col_classes = NULL, reader_options = list(
     header <- info$Header
     attr(header, "repoquet_encoding_info") <- info$ReaderOptions$.EncodingInfo
     return(header)
+  }
+  if (!.delimited_has_header_line(reader_options) && !.has_delimited_section(reader_options) &&
+      !is.null(.delimited_column_names(reader_options))) {
+    #### Validate ColumnNames against the first record up front, so a     ####
+    #### mismatch reports the declared names rather than an fread error.  ####
+    .delimited_header_info(path, reader_options)
   }
   df <- .fread_with_structural_errors(
     c(.delimited_input(path, reader_options), list(nrows = 0L),
@@ -3523,10 +3640,13 @@ read_delimited_full <- function(path, col_classes = NULL, reader_options = list(
   if (.uses_delimited_logical_stream(reader_options)) {
     return(.collect_delimited_logical_records(path, reader_options, 100000L))
   }
-  df <- .fread_with_structural_errors(
-    c(.delimited_input(path, reader_options), list(nrows = 100000L),
-      delimited_fread_args(reader_options)), path)
+  args <- c(.delimited_input(path, reader_options), list(nrows = 100000L),
+            delimited_fread_args(reader_options))
+  layout <- .layout_for_options(reader_options)
+  if (!is.null(layout)) args$colClasses <- .layout_read_classes(layout, args)
+  df <- .fread_with_structural_errors(args, path)
   df <- .normalize_delimited_frame(df, reader_options, path)
+  df <- .apply_layout_missing(df, reader_options)
   canonicalize_dataframe_names(df)
 }
 
@@ -3539,9 +3659,12 @@ read_delimited_full <- function(path, col_classes = NULL, reader_options = list(
       callback = function(df) count <<- count + nrow(df))
     return(as.numeric(count))
   }
+  #### Only one column is selected, so ColumnNames cannot be applied here; ####
+  #### a declared Header = FALSE still reaches fread, so every record counts. ####
+  args <- delimited_fread_args(reader_options)
+  args$col.names <- NULL
   nrow(.fread_with_structural_errors(
-    c(.delimited_input(path, reader_options), list(select = 1L),
-      delimited_fread_args(reader_options)), path))
+    c(.delimited_input(path, reader_options), list(select = 1L), args), path))
 }
 
 .read_delimited_chunk <- function(path, offset, n_max, header, col_classes = NULL,
@@ -3553,18 +3676,705 @@ read_delimited_full <- function(path, col_classes = NULL, reader_options = list(
     if (offset >= nrow(all_rows)) return(all_rows[0])
     return(all_rows[seq.int(offset + 1L, min(nrow(all_rows), offset + n_max))])
   }
+  #### Records are positioned by reading lines, never by fread(skip =): fread's skip ####
+  #### miscounts lines in files whose terminators are not a clean LF or CRLF (for     ####
+  #### example CR CR LF from a doubled Windows text-mode conversion).               ####
+  chunk <- .delimited_chunk_records(path, offset, n_max, reader_options)
   args <- delimited_fread_args(reader_options)
   args$header <- NULL
   args$col.names <- NULL
-  args$colClasses <- fread_col_classes_positional(col_classes, header)
+  args$sep <- chunk$Delimiter
+  args$colClasses <- .layout_positional_classes(
+    .layout_for_options(reader_options), fread_col_classes_positional(col_classes, header), header)
+  if (length(chunk$Records) == 0L) {
+    return(canonicalize_dataframe_names(data.table::as.data.table(
+      stats::setNames(replicate(length(header), character(), simplify = FALSE), header))))
+  }
   df <- .fread_with_structural_errors(
-    c(list(file = path, skip = offset + 1L, nrows = n_max,
+    c(list(text = paste0(paste(chunk$Records, collapse = "\n"), "\n"),
            header = FALSE, col.names = header), args), path)
-  df <- .normalize_delimited_frame(df, reader_options, path)
+  df <- normalize_character_encoding(df, "UTF-8")
+  df <- .apply_layout_missing(df, reader_options)
   canonicalize_dataframe_names(df)
 }
 
+.delimited_cursors <- new.env(parent = emptyenv())
+
+.close_delimited_cursor <- function(key) {
+  cursor <- .delimited_cursors[[key]]
+  if (!is.null(cursor)) {
+    try(close(cursor$con), silent = TRUE)
+    rm(list = key, envir = .delimited_cursors)
+  }
+  invisible(NULL)
+}
+
+# Closes any chunk cursor left open on a source (delimited or fixed-width).
+.close_chunk_cursors <- function(path) {
+  key <- normalizePath(path, winslash = "/", mustWork = FALSE)
+  .close_delimited_cursor(key)
+  .asc_close_cursor(key)
+}
+
+# Reads the n_max records (non-blank lines) that follow record `offset`, after the header.
+# Consecutive calls on one file reuse one open connection, so reading a file front to back
+# in chunks is a single pass; a request for any other offset reopens the file.
+.delimited_chunk_records <- function(path, offset, n_max, reader_options = list()) {
+  key <- normalizePath(path, winslash = "/", mustWork = TRUE)
+  size <- file.size(path)
+  encoding <- reader_options$.EncodingInfo$EncodingUsed %||% "UTF-8"
+  offset <- as.numeric(offset)
+  n_max <- as.numeric(n_max)
+  cursor <- .delimited_cursors[[key]]
+  if (!is.null(cursor) && (cursor$next_offset != offset || !identical(cursor$size, size) ||
+                           !identical(cursor$encoding, encoding))) {
+    .close_delimited_cursor(key)
+    cursor <- NULL
+  }
+  if (is.null(cursor)) {
+    info <- .delimited_header_info(path, reader_options)
+    con <- .open_delimited_text_connection(path, encoding)
+    if (info$SkipLines > 0L) readLines(con, n = info$SkipLines, warn = FALSE)
+    cursor <- new.env(parent = emptyenv())
+    cursor$con <- con
+    cursor$buffer <- character(0)
+    cursor$eof <- FALSE
+    cursor$next_offset <- 0
+    cursor$size <- size
+    cursor$encoding <- encoding
+    cursor$delimiter <- info$Delimiter
+    assign(key, cursor, envir = .delimited_cursors)
+    skipped <- 0
+    while (skipped < offset) {
+      .delimited_cursor_fill(cursor, min(offset - skipped, 100000))
+      take <- min(length(cursor$buffer), offset - skipped)
+      if (take == 0) break
+      cursor$buffer <- cursor$buffer[-seq_len(take)]
+      skipped <- skipped + take
+    }
+    cursor$next_offset <- skipped
+  }
+  finished <- FALSE
+  on.exit(if (!finished) .close_delimited_cursor(key), add = TRUE)
+  .delimited_cursor_fill(cursor, n_max)
+  take <- min(length(cursor$buffer), n_max)
+  records <- cursor$buffer[seq_len(take)]
+  cursor$buffer <- cursor$buffer[-seq_len(take)]
+  cursor$next_offset <- cursor$next_offset + take
+  if (length(cursor$buffer) == 0L) .delimited_cursor_fill(cursor, 1)
+  if (cursor$eof && length(cursor$buffer) == 0L) .close_delimited_cursor(key)
+  finished <- TRUE
+  list(Records = records, Delimiter = cursor$delimiter)
+}
+
+.delimited_cursor_fill <- function(cursor, want) {
+  while (length(cursor$buffer) < want && !cursor$eof) {
+    lines <- readLines(cursor$con, n = as.integer(max(want, 10000)), warn = FALSE)
+    if (length(lines) == 0L) {
+      cursor$eof <- TRUE
+      break
+    }
+    cursor$buffer <- c(cursor$buffer, lines[!grepl("^\\s*$", lines)])
+  }
+  invisible(NULL)
+}
+
+################################################################################
+#### SPSS load-program layouts (LayoutFile) and the fixed-width "asc" reader ###
+################################################################################
+# HCUP publishes an SPSS load program (.SPS) beside each data file. Its DATA LIST
+# FIXED block (ASCII files) or GET DATA /TYPE=TXT block (headerless CSV files)
+# names every column and says whether it is text or a number; its RECODE lines
+# list the special codes SPSS turns into system-missing values. ReaderOptions
+# LayoutFile points a source at one of these programs.
+
+.layout_cache <- new.env(parent = emptyenv())
+.asc_cursors <- new.env(parent = emptyenv())
+
+#' Sets the directory that relative LayoutFile paths are resolved against
+#'
+#' A source row can name its SPSS load program with
+#' \code{ReaderOptions = {"LayoutFile": "nis_spss_load_pgms/SPSSLoad_NIS_2019_Core_V1.SPS"}}.
+#' A relative \code{LayoutFile} is resolved against the layout root, so the
+#' master database table never needs a machine specific absolute path. An
+#' absolute \code{LayoutFile} is used as given. The root is stored in the R
+#' option \code{repoquet.layout_root} and in the environment variable
+#' \code{REPOQUET_LAYOUT_ROOT}, so that parallel survey workers and isolated
+#' load workers see it too.
+#' @param path Character scalar. An existing directory. Accepts \code{NULL},
+#'   which clears the layout root. Defaults to \code{NULL}.
+#' @return Invisibly, the normalized layout root, or \code{NULL} when it was
+#'   cleared.
+#' @seealso \code{\link{register_file_reader}}, \code{\link{supported_file_types}}
+#' @examples
+#' root <- tempfile("layouts_")
+#' dir.create(root)
+#' set_layout_root(root)
+#' getOption("repoquet.layout_root")
+#' set_layout_root(NULL)
+#' unlink(root, recursive = TRUE)
+#' @export
+set_layout_root <- function(path = NULL) {
+  if (is.null(path)) {
+    options(repoquet.layout_root = NULL)
+    Sys.unsetenv("REPOQUET_LAYOUT_ROOT")
+    return(invisible(NULL))
+  }
+  path <- as.character(path)[1]
+  if (is.na(path) || !dir.exists(path)) stop(sprintf("Layout root does not exist: %s", path))
+  root <- normalizePath(path, winslash = "/", mustWork = TRUE)
+  options(repoquet.layout_root = root)
+  Sys.setenv(REPOQUET_LAYOUT_ROOT = root)
+  invisible(root)
+}
+
+.layout_root <- function() {
+  root <- getOption("repoquet.layout_root", default = NULL)
+  if (is.null(root) || is.na(root[1]) || !nzchar(root[1])) root <- Sys.getenv("REPOQUET_LAYOUT_ROOT", unset = "")
+  if (!nzchar(root[1])) NA_character_ else as.character(root[1])
+}
+
+.layout_is_absolute <- function(path) grepl("^(/|~|[A-Za-z]:[/\\\\]|\\\\\\\\)", path)
+
+# Absolute, existing path of a ReaderOptions$LayoutFile value.
+.resolve_layout_path <- function(layout_file) {
+  layout_file <- trimws(as.character(layout_file)[1])
+  if (is.na(layout_file) || !nzchar(layout_file)) stop("ReaderOptions$LayoutFile must be a non-empty path.")
+  if (.layout_is_absolute(layout_file)) {
+    candidate <- path.expand(layout_file)
+  } else {
+    root <- .layout_root()
+    if (is.na(root)) {
+      stop(sprintf(paste0("ReaderOptions$LayoutFile '%s' is a relative path, but no layout root is set. ",
+                          "Call set_layout_root() once per session, or use an absolute LayoutFile."),
+                   layout_file))
+    }
+    candidate <- file.path(root, layout_file)
+  }
+  if (!file.exists(candidate) || dir.exists(candidate)) stop(sprintf("Layout file not found: %s", candidate))
+  normalizePath(candidate, winslash = "/", mustWork = TRUE)
+}
+
+.spss_split_statements <- function(lines) {
+  out <- character(0)
+  buf <- character(0)
+  for (ln in lines) {
+    if (!length(buf) && !nzchar(trimws(ln))) next
+    buf <- c(buf, ln)
+    if (grepl("\\.\\s*$", ln)) {
+      out <- c(out, paste(buf, collapse = "\n"))
+      buf <- character(0)
+    }
+  }
+  if (length(buf)) out <- c(out, paste(buf, collapse = "\n"))
+  out
+}
+
+# Runs a global regex with capture groups; returns a character matrix (one row per match)
+# and the text left after removing every match.
+.spss_scan <- function(body, pattern) {
+  m <- gregexpr(pattern, body, perl = TRUE)[[1]]
+  if (m[1] == -1L) return(list(groups = matrix(character(0), 0L, 0L), rest = trimws(body)))
+  cs <- attr(m, "capture.start")
+  cl <- attr(m, "capture.length")
+  groups <- matrix(substring(body, cs, cs + cl - 1L), nrow = nrow(cs), ncol = ncol(cs))
+  rest <- trimws(paste(regmatches(body, list(m), invert = TRUE)[[1]], collapse = " "))
+  list(groups = groups, rest = rest)
+}
+
+.spss_parse_fixed <- function(stmt, fail) {
+  parts <- regmatches(stmt, regexpr("/", stmt, fixed = TRUE), invert = TRUE)[[1]]
+  if (length(parts) < 2L) fail("DATA LIST has no variable definitions after its '/'")
+  head <- parts[1]
+  body <- sub("\\.\\s*$", "", paste(parts[-1L], collapse = "/"))
+  if (!grepl("\\bFIXED\\b", head, perl = TRUE, ignore.case = TRUE)) {
+    fail("DATA LIST is not FIXED; only DATA LIST FIXED and GET DATA /TYPE=TXT layouts are supported")
+  }
+  if (grepl("\\bRECORDS?\\b", head, perl = TRUE, ignore.case = TRUE) || grepl("/", body, fixed = TRUE)) {
+    fail("multi-record DATA LIST layouts are not supported")
+  }
+  scanned <- .spss_scan(body, paste0(
+    "([A-Za-z_@#$][A-Za-z0-9_@#$.]*)\\s+(\\d+)(?:\\s*-\\s*(\\d+))?",
+    "(?:\\s*\\(\\s*([Aa]|\\d+)\\s*\\))?"))
+  if (nrow(scanned$groups) == 0L) fail("no variable definitions were found in the DATA LIST block")
+  if (nzchar(scanned$rest)) {
+    fail("unrecognized text in the DATA LIST block near '%s'", substr(scanned$rest, 1L, 60L))
+  }
+  g <- scanned$groups
+  start <- as.integer(g[, 2])
+  end <- ifelse(nzchar(g[, 3]), as.integer(g[, 3]), start)
+  type <- ifelse(toupper(g[, 4]) == "A", "character", "numeric")
+  decimals <- ifelse(nzchar(g[, 4]) & toupper(g[, 4]) != "A", suppressWarnings(as.integer(g[, 4])), 0L)
+  if (any(start < 1L | end < start)) {
+    bad <- which(start < 1L | end < start)[1]
+    fail("column range %d-%d of '%s' is invalid", start[bad], end[bad], g[bad, 1])
+  }
+  list(Fields = data.frame(Name = g[, 1], Start = start, End = end, Type = type,
+                           Decimals = decimals, stringsAsFactors = FALSE),
+       Style = "fixed", Delimiter = NA_character_, Quote = NA_character_)
+}
+
+.spss_parse_delimited <- function(stmt, fail) {
+  if (!grepl("/type\\s*=\\s*txt\\b", stmt, perl = TRUE, ignore.case = TRUE)) {
+    fail("GET DATA is not /TYPE=TXT; only DATA LIST FIXED and GET DATA /TYPE=TXT layouts are supported")
+  }
+  if (grepl("/arrangement\\s*=\\s*fixed", stmt, perl = TRUE, ignore.case = TRUE) ||
+      grepl("/firstcase\\s*=\\s*([2-9]|[0-9]{2,})", stmt, perl = TRUE, ignore.case = TRUE)) {
+    fail("GET DATA /ARRANGEMENT=FIXED and /FIRSTCASE greater than 1 are not supported")
+  }
+  quoted <- function(subcommand) {
+    hit <- regmatches(stmt, regexec(paste0("/", subcommand, "\\s*=\\s*(['\"])(.*?)\\1"), stmt,
+                                    perl = TRUE, ignore.case = TRUE))[[1]]
+    if (length(hit) < 3L) NA_character_ else hit[3]
+  }
+  delimiter <- quoted("delimiters")
+  if (is.na(delimiter)) fail("GET DATA has no /DELIMITERS subcommand")
+  if (identical(delimiter, "\\t")) delimiter <- "\t"
+  if (nchar(delimiter) != 1L) fail("only a one-character /DELIMITERS value is supported")
+  vars_start <- regexpr("/variables\\s*=", stmt, perl = TRUE, ignore.case = TRUE)
+  if (vars_start == -1L) fail("GET DATA has no /VARIABLES subcommand")
+  body <- sub("\\.\\s*$", "", substring(stmt, vars_start + attr(vars_start, "match.length")))
+  scanned <- .spss_scan(body, "([A-Za-z_@#$][A-Za-z0-9_@#$.]*)\\s+([A-Za-z]+)(\\d+)(?:\\.(\\d+))?")
+  if (nrow(scanned$groups) == 0L) fail("no variable definitions were found in the /VARIABLES block")
+  if (nzchar(scanned$rest)) {
+    fail("unrecognized text in the /VARIABLES block near '%s'", substr(scanned$rest, 1L, 60L))
+  }
+  g <- scanned$groups
+  letter <- toupper(g[, 2])
+  unsupported <- which(!letter %in% c("F", "A"))
+  if (length(unsupported) > 0L) {
+    fail("format %s%s of variable '%s' is not supported (only F and A)", g[unsupported[1], 2],
+         g[unsupported[1], 3], g[unsupported[1], 1])
+  }
+  list(Fields = data.frame(Name = g[, 1], Start = NA_integer_, End = NA_integer_,
+                           Type = ifelse(letter == "A", "character", "numeric"),
+                           Decimals = 0L, stringsAsFactors = FALSE),
+       Style = "csv", Delimiter = delimiter, Quote = quoted("qualifier"))
+}
+
+.spss_recode_clause <- function(clause, fail) {
+  inner <- trimws(sub("\\)\\s*$", "", sub("^\\s*\\(", "", clause)))
+  sides <- strsplit(inner, "=", fixed = TRUE)[[1]]
+  if (length(sides) != 2L || !identical(toupper(trimws(sides[2])), "SYSMIS")) {
+    fail("RECODE clause '%s' is not supported (only value lists mapped =SYSMIS)", clause)
+  }
+  tokens <- strsplit(trimws(sides[1]), "\\s+")[[1]]
+  to_number <- function(token) {
+    u <- toupper(token)
+    if (u %in% c("LO", "LOWEST")) return(-Inf)
+    if (u %in% c("HI", "HIGHEST")) return(Inf)
+    value <- suppressWarnings(as.numeric(token))
+    if (is.na(value)) fail("RECODE value '%s' in '%s' is not supported", token, clause)
+    value
+  }
+  ranges <- matrix(numeric(0), 0L, 2L)
+  i <- 1L
+  while (i <= length(tokens)) {
+    if (i + 2L <= length(tokens) && identical(toupper(tokens[i + 1L]), "THRU")) {
+      ranges <- rbind(ranges, c(to_number(tokens[i]), to_number(tokens[i + 2L])))
+      i <- i + 3L
+    } else {
+      value <- to_number(tokens[i])
+      ranges <- rbind(ranges, c(value, value))
+      i <- i + 1L
+    }
+  }
+  ranges
+}
+
+.spss_parse_recodes <- function(stmts, field_names, fail) {
+  missing_ranges <- list()
+  for (stmt in stmts[grepl("^\\s*RECODE\\b", stmts, perl = TRUE, ignore.case = TRUE)]) {
+    body <- sub("^\\s*RECODE\\s+", "", sub("\\.\\s*$", "", stmt), perl = TRUE, ignore.case = TRUE)
+    vars_txt <- sub("(?s)\\(.*$", "", body, perl = TRUE)
+    clauses <- regmatches(body, gregexpr("\\([^()]*\\)", body))[[1]]
+    rest <- trimws(gsub("\\([^()]*\\)", " ", substring(body, nchar(vars_txt) + 1L)))
+    vars <- strsplit(trimws(vars_txt), "\\s+")[[1]]
+    if (!nzchar(trimws(vars_txt)) || length(clauses) == 0L || nzchar(rest)) {
+      fail("RECODE statement '%s' is not supported", substr(gsub("\\s+", " ", body), 1L, 60L))
+    }
+    ranges <- do.call(rbind, lapply(clauses, .spss_recode_clause, fail = fail))
+    for (v in vars) {
+      idx <- match(toupper(v), toupper(field_names))
+      if (is.na(idx)) fail("RECODE refers to '%s', which is not a variable in the layout", v)
+      name <- field_names[idx]
+      missing_ranges[[name]] <- unique(rbind(missing_ranges[[name]], ranges))
+    }
+  }
+  missing_ranges
+}
+
+# Parses one SPSS load program: Fields (Name, Start, End, Type, Decimals), the
+# fixed record length, per-column special codes (Missing), and, for delimited
+# programs, the delimiter. Anything outside the supported grammar is an error.
+.parse_spss_layout <- function(path) {
+  fail <- function(fmt, ...) stop(sprintf("Layout file %s: %s", basename(path), sprintf(fmt, ...)), call. = FALSE)
+  lines <- iconv(readLines(path, warn = FALSE, encoding = "latin1"), from = "latin1", to = "UTF-8", sub = "")
+  if (length(lines) == 0L) fail("the file is empty")
+  lines[1] <- sub("^\u00ef\u00bb\u00bf", "", lines[1])
+  text <- gsub("(?s)/\\*.*?\\*/", " ", paste(lines, collapse = "\n"), perl = TRUE)
+  stmts <- .spss_split_statements(strsplit(text, "\n", fixed = TRUE)[[1]])
+  stmts <- stmts[!grepl("^\\s*\\*", stmts)]
+  fixed_stmts <- stmts[grepl("^\\s*DATA\\s+LIST\\b", stmts, perl = TRUE, ignore.case = TRUE)]
+  delim_stmts <- stmts[grepl("^\\s*GET\\s+DATA\\b", stmts, perl = TRUE, ignore.case = TRUE)]
+  if (length(fixed_stmts) + length(delim_stmts) != 1L) {
+    fail(paste0("unrecognized layout program: expected exactly one DATA LIST FIXED block (fixed-width file) ",
+                "or one GET DATA /TYPE=TXT block (delimited file) and found %d"),
+         length(fixed_stmts) + length(delim_stmts))
+  }
+  parsed <- if (length(fixed_stmts) == 1L) .spss_parse_fixed(fixed_stmts, fail) else
+    .spss_parse_delimited(delim_stmts, fail)
+  fields <- parsed$Fields
+  dup <- duplicated(toupper(fields$Name))
+  if (any(dup)) fail("variable '%s' is defined more than once", fields$Name[which(dup)[1]])
+  parsed$Missing <- .spss_parse_recodes(stmts, fields$Name, fail)
+  parsed$RecordLength <- if (identical(parsed$Style, "fixed")) max(fields$End) else NA_integer_
+  parsed$Path <- normalizePath(path, winslash = "/", mustWork = FALSE)
+  parsed
+}
+
+.load_layout <- function(layout_file) {
+  path <- .resolve_layout_path(layout_file)
+  info <- file.info(path)
+  stamp <- paste(info$size, format(info$mtime, "%Y-%m-%dT%H:%M:%OS6"), sep = ":")
+  hit <- .layout_cache[[path]]
+  if (!is.null(hit) && identical(hit$Stamp, stamp)) return(hit)
+  layout <- .parse_spss_layout(path)
+  layout$Stamp <- stamp
+  layout$Digest <- digest::digest(file = path, algo = "sha256")
+  assign(path, layout, envir = .layout_cache)
+  layout
+}
+
+# The parsed layout named by ReaderOptions$LayoutFile, or NULL when there is none.
+.layout_for_options <- function(reader_options = list()) {
+  layout_file <- reader_options[["LayoutFile"]] %||% NULL
+  if (is.null(layout_file) || length(layout_file) == 0L || is.na(layout_file[1]) ||
+      !nzchar(trimws(as.character(layout_file[1])))) return(NULL)
+  .load_layout(layout_file[1])
+}
+
+# Row indexes of numeric values that fall in any [lo, hi] range of a column's special codes.
+.layout_missing_index <- function(values, ranges) {
+  hit <- logical(length(values))
+  for (k in seq_len(nrow(ranges))) {
+    lo <- ranges[k, 1]
+    hi <- ranges[k, 2]
+    lo_tol <- if (is.finite(lo)) 1e-9 * max(1, abs(lo)) else 0
+    hi_tol <- if (is.finite(hi)) 1e-9 * max(1, abs(hi)) else 0
+    hit <- hit | (values >= lo - lo_tol & values <= hi + hi_tol) %in% TRUE
+  }
+  which(hit)
+}
+
+# Sets values equal to a column's special codes to NA, comparing numerically after
+# parsing (a numeric column that the catalog reads as text is parsed to compare).
+.apply_layout_missing <- function(df, reader_options = list()) {
+  layout <- .layout_for_options(reader_options)
+  if (is.null(layout) || length(layout$Missing) == 0L) return(df)
+  if (!data.table::is.data.table(df)) data.table::setDT(df)
+  for (name in names(layout$Missing)) {
+    j <- match(toupper(name), toupper(names(df)))
+    if (is.na(j)) next
+    column <- df[[j]]
+    numeric_values <- if (is.numeric(column)) column else suppressWarnings(as.numeric(as.character(column)))
+    idx <- .layout_missing_index(numeric_values, layout$Missing[[name]])
+    if (length(idx) > 0L) data.table::set(df, i = idx, j = j, value = NA)
+  }
+  df
+}
+
+# fread colClasses (named vector) with the layout's text columns forced to character.
+.layout_named_classes <- function(layout, classes) {
+  if (is.null(layout)) return(classes)
+  text_names <- layout$Fields$Name[layout$Fields$Type == "character"]
+  if (length(text_names) == 0L) return(classes)
+  classes <- classes %||% character(0)
+  for (name in text_names) {
+    hit <- match(toupper(name), toupper(names(classes)))
+    if (is.na(hit)) classes[name] <- "character" else classes[hit] <- "character"
+  }
+  classes
+}
+
+# Positional fread colClasses for a layout-named source (fread matches colClasses names to the
+# file's own header, not to col.names, so classes are given by column position).
+.layout_read_classes <- function(layout, args, col_classes = NULL) {
+  header <- args$col.names
+  if (is.null(header)) return(.layout_named_classes(layout, args$colClasses))
+  .layout_positional_classes(layout, fread_col_classes_positional(col_classes, header), header)
+}
+
+# fread colClasses (list of column positions per class) with the layout's text columns forced to character.
+.layout_positional_classes <- function(layout, classes, header) {
+  if (is.null(layout)) return(classes)
+  positions <- which(toupper(header) %in% toupper(layout$Fields$Name[layout$Fields$Type == "character"]))
+  if (length(positions) == 0L) return(classes)
+  classes <- lapply(classes %||% list(), function(p) setdiff(p, positions))
+  classes <- classes[lengths(classes) > 0L]
+  classes$character <- sort(union(classes$character, positions))
+  classes
+}
+
+#### The fixed-width "asc" reader #############################################
+
+.asc_layout <- function(reader_options = list()) {
+  layout <- .layout_for_options(reader_options)
+  if (is.null(layout)) {
+    stop(paste0("The 'asc' reader needs ReaderOptions$LayoutFile: the SPSS load program (.SPS) that ",
+                "describes the fixed-width file."), call. = FALSE)
+  }
+  if (!identical(layout$Style, "fixed")) {
+    stop(sprintf(paste0("Layout file %s describes a delimited file (GET DATA); the 'asc' reader needs a ",
+                        "fixed-width DATA LIST FIXED layout."), basename(layout$Path)), call. = FALSE)
+  }
+  layout
+}
+
+.asc_connection <- function(path, reader_options = list()) {
+  encoding <- .canonical_encoding_name(reader_options$Encoding %||% NULL)
+  if (identical(encoding, "auto")) encoding <- "ISO-8859-1"
+  file(path, open = "rt", encoding = encoding)
+}
+
+.asc_line_error <- function(path, layout, line_no, found) {
+  stop(sprintf("%s line %s has %s character(s), but layout %s defines %d-character records.",
+               basename(path), format(line_no, big.mark = ",", scientific = FALSE),
+               if (is.na(found)) "an invalid number of" else format(found, scientific = FALSE),
+               basename(layout$Path), layout$RecordLength), call. = FALSE)
+}
+
+.asc_blank_error <- function(path, line_no) {
+  stop(sprintf("%s line %s is blank but is followed by more records.", basename(path),
+               format(line_no, big.mark = ",", scientific = FALSE)), call. = FALSE)
+}
+
+# Splits one batch of raw lines into complete records: removes a trailing CR, checks every
+# record against the layout's record length, and separates a trailing run of empty lines.
+# Returns the records and the line number where a trailing empty run starts (NA if none).
+.asc_records <- function(lines, layout, first_line, path) {
+  if (length(lines) == 0L) return(list(records = lines, trailing_blank = NA_real_))
+  if (any(grepl("\r", lines, fixed = TRUE))) lines <- sub("\r+$", "", lines)
+  n <- nchar(lines, type = "chars", allowNA = TRUE)
+  nonempty <- which(is.na(n) | n > 0L)
+  last_data <- if (length(nonempty)) max(nonempty) else 0L
+  if (last_data > 0L) {
+    blank_inside <- which(n[seq_len(last_data)] == 0L)
+    if (length(blank_inside)) .asc_blank_error(path, first_line + blank_inside[1] - 1)
+    bad <- which(is.na(n[seq_len(last_data)]) | n[seq_len(last_data)] != layout$RecordLength)
+    if (length(bad)) .asc_line_error(path, layout, first_line + bad[1] - 1, n[bad[1]])
+  }
+  list(records = lines[seq_len(last_data)],
+       trailing_blank = if (last_data < length(lines)) first_line + last_data else NA_real_)
+}
+
+# Applies a per-string conversion once per distinct value when a column repeats few values
+# (flags, codes, blanks), which is most columns in HCUP files; otherwise converts directly.
+.asc_map_unique <- function(raw, fun) {
+  if (length(raw) > 2000L && length(unique(raw[seq_len(1000L)])) <= 300L) {
+    distinct <- unique(raw)
+    if (length(distinct) < length(raw) / 2) return(fun(distinct)[match(raw, distinct)])
+  }
+  fun(raw)
+}
+
+# Parses validated fixed-width records into a data.table: text fields keep their value
+# minus trailing spaces (as haven::read_sav returns SPSS strings); numeric fields become
+# doubles, with the layout's special codes set to NA.
+.asc_parse_records <- function(records, layout, first_line, path) {
+  fields <- layout$Fields
+  out <- vector("list", nrow(fields))
+  for (i in seq_len(nrow(fields))) {
+    raw <- substr(records, fields$Start[i], fields$End[i])
+    if (identical(fields$Type[i], "character")) {
+      out[[i]] <- .asc_map_unique(raw, function(x) sub(" +$", "", x))
+      next
+    }
+    values <- .asc_map_unique(raw, function(x) suppressWarnings(as.numeric(x)))
+    unparsed <- which(is.na(values))
+    if (length(unparsed) > 0L) {
+      texts <- unique(raw[unparsed])
+      trimmed <- trimws(texts)
+      bad_text <- texts[nzchar(trimmed) & trimmed != "." & toupper(trimmed) != "NA"]
+      if (length(bad_text) > 0L) {
+        first <- unparsed[match(TRUE, raw[unparsed] %in% bad_text)]
+        stop(sprintf("%s line %s: column %s (positions %d-%d) holds '%s', which is not a number; check that the layout file matches this data file.",
+                     basename(path), format(first_line + first - 1, big.mark = ",", scientific = FALSE),
+                     fields$Name[i], fields$Start[i], fields$End[i], trimws(raw[first])), call. = FALSE)
+      }
+    }
+    if (fields$Decimals[i] > 0L) {
+      implied <- which(!is.na(values) & !grepl(".", raw, fixed = TRUE))
+      if (length(implied) > 0L) values[implied] <- values[implied] / 10^fields$Decimals[i]
+    }
+    ranges <- layout$Missing[[fields$Name[i]]]
+    if (!is.null(ranges)) {
+      idx <- .layout_missing_index(values, ranges)
+      if (length(idx) > 0L) values[idx] <- NA_real_
+    }
+    out[[i]] <- values
+  }
+  names(out) <- fields$Name
+  data.table::setDT(out)
+  out
+}
+
+.asc_empty_table <- function(layout) {
+  out <- lapply(layout$Fields$Type, function(type) if (identical(type, "character")) character(0) else numeric(0))
+  names(out) <- layout$Fields$Name
+  data.table::setDT(out)
+  out
+}
+
+# Streams the file in one pass: callback receives consecutive data.tables of at most
+# chunk_size records. Memory is bounded by one chunk, whatever the file size.
+.stream_asc_records <- function(path, reader_options = list(), chunk_size = 100000L,
+                                max_rows = Inf, col_classes = NULL, callback) {
+  if (!is.function(callback)) stop("Fixed-width streaming requires a callback function.")
+  layout <- .asc_layout(reader_options)
+  chunk_size <- max(1L, as.integer(chunk_size[1]))
+  con <- .asc_connection(path, reader_options)
+  on.exit(close(con), add = TRUE)
+  line_no <- 0
+  rows <- 0
+  trailing_blank <- NA_real_
+  repeat {
+    want <- if (is.finite(max_rows)) min(chunk_size, max_rows - rows) else chunk_size
+    if (want <= 0) break
+    lines <- readLines(con, n = want, warn = FALSE)
+    if (length(lines) == 0L) break
+    first_line <- line_no + 1
+    line_no <- line_no + length(lines)
+    batch <- .asc_records(lines, layout, first_line, path)
+    rm(lines)
+    if (!is.na(trailing_blank) && length(batch$records) > 0L) .asc_blank_error(path, trailing_blank)
+    if (is.na(trailing_blank)) trailing_blank <- batch$trailing_blank
+    if (length(batch$records) == 0L) next
+    chunk <- .asc_parse_records(batch$records, layout, first_line, path)
+    rm(batch)
+    rows <- rows + nrow(chunk)
+    callback(chunk)
+    rm(chunk)
+  }
+  list(Header = layout$Fields$Name, LogicalRows = as.numeric(rows), PhysicalLinesRead = as.numeric(line_no),
+       RepairCount = 0, RepairLines = integer(), RepairPolicy = "error", ContinuationColumn = "",
+       EncodingInfo = NULL)
+}
+
+.read_asc_header <- function(path, reader_options = list()) .asc_layout(reader_options)$Fields$Name
+
+.read_asc_rows <- function(path, reader_options, max_rows) {
+  layout <- .asc_layout(reader_options)
+  chunks <- list()
+  .stream_asc_records(path, reader_options, chunk_size = 100000L, max_rows = max_rows,
+                      callback = function(df) chunks[[length(chunks) + 1L]] <<- df)
+  if (length(chunks) == 0L) .asc_empty_table(layout) else data.table::rbindlist(chunks, use.names = TRUE)
+}
+
+read_asc_full <- function(path, col_classes = NULL, reader_options = list()) {
+  .read_asc_rows(path, reader_options, Inf)
+}
+
+.read_asc_sample <- function(path, reader_options = list(), n_max = 100000L) {
+  .read_asc_rows(path, reader_options, max(1, as.numeric(n_max[1])))
+}
+
+# Counts records from the raw bytes (one pass over the file, no strings built).
+.count_asc_rows <- function(path, reader_options = list()) {
+  .asc_layout(reader_options)
+  size <- file.size(path)
+  if (is.na(size)) stop("Fixed-width source not found: ", path)
+  if (size == 0) return(0)
+  con <- file(path, open = "rb")
+  on.exit(close(con), add = TRUE)
+  newline <- as.raw(10L)
+  carriage <- as.raw(13L)
+  n_newline <- 0
+  n_cr <- 0
+  repeat {
+    block <- readBin(con, what = "raw", n = 16L * 1024L^2)
+    if (length(block) == 0L) break
+    n_newline <- n_newline + sum(block == newline)
+    n_cr <- n_cr + sum(block == carriage)
+  }
+  if (n_newline == 0 && n_cr > 0) {
+    return(as.numeric(length(read_asc_full(path, reader_options = reader_options)[[1]])))
+  }
+  #### A final record without a terminator adds one line; k terminators after the last ####
+  #### record's own mean k - 1 empty trailing lines, which are not records.           ####
+  tail_len <- as.integer(min(size, 4096))
+  seek(con, where = size - tail_len, origin = "start", rw = "read")
+  tail_bytes <- readBin(con, what = "raw", n = tail_len)
+  is_eol <- tail_bytes == newline | tail_bytes == carriage
+  if (all(is_eol)) {
+    return(as.numeric(length(read_asc_full(path, reader_options = reader_options)[[1]])))
+  }
+  last_data_byte <- max(which(!is_eol))
+  if (last_data_byte == length(tail_bytes)) return(n_newline + 1)
+  k <- sum(tail_bytes[(last_data_byte + 1L):length(tail_bytes)] == newline)
+  if (k == 0) return(n_newline + 1)
+  n_newline - (k - 1)
+}
+
+.asc_close_cursor <- function(key) {
+  cursor <- .asc_cursors[[key]]
+  if (!is.null(cursor)) {
+    try(close(cursor$con), silent = TRUE)
+    rm(list = key, envir = .asc_cursors)
+  }
+  invisible(NULL)
+}
+
+# Reads n_max records starting at record `offset`. Consecutive calls on one file reuse a
+# single open connection, so reading a file front to back in chunks is one pass.
+.read_asc_chunk <- function(path, offset, n_max, header = NULL, col_classes = NULL, reader_options = list()) {
+  layout <- .asc_layout(reader_options)
+  key <- normalizePath(path, winslash = "/", mustWork = TRUE)
+  size <- file.size(path)
+  offset <- as.numeric(offset)
+  n_max <- as.integer(n_max)
+  cursor <- .asc_cursors[[key]]
+  if (!is.null(cursor) && (cursor$next_offset != offset || !identical(cursor$size, size))) {
+    .asc_close_cursor(key)
+    cursor <- NULL
+  }
+  if (is.null(cursor)) {
+    con <- .asc_connection(path, reader_options)
+    to_skip <- offset
+    while (to_skip > 0) {
+      skipped <- length(readLines(con, n = as.integer(min(to_skip, 100000)), warn = FALSE))
+      if (skipped == 0L) break
+      to_skip <- to_skip - skipped
+    }
+    cursor <- list(con = con, next_offset = offset, size = size)
+  }
+  finished <- FALSE
+  on.exit(if (!finished) .asc_close_cursor(key), add = TRUE)
+  lines <- readLines(cursor$con, n = n_max, warn = FALSE)
+  at_end <- length(lines) < n_max
+  batch <- .asc_records(lines, layout, offset + 1, path)
+  if (!is.na(batch$trailing_blank) && !at_end) .asc_blank_error(path, batch$trailing_blank)
+  out <- if (length(batch$records) == 0L) .asc_empty_table(layout) else
+    .asc_parse_records(batch$records, layout, offset + 1, path)
+  if (at_end) {
+    .asc_close_cursor(key)
+  } else {
+    cursor$next_offset <- offset + length(lines)
+    assign(key, cursor, envir = .asc_cursors)
+  }
+  finished <- TRUE
+  out
+}
+
 register_builtin_file_readers <- function() {
+  register_file_reader("asc",
+    read_full   = function(p, col_classes = NULL, reader_options = list()) read_asc_full(p, col_classes, reader_options),
+    read_header = function(p, reader_options = list()) .read_asc_header(p, reader_options),
+    read_sample = function(p, reader_options = list(), n_max = 100000L) .read_asc_sample(p, reader_options, n_max),
+    count_rows  = function(p, reader_options = list()) .count_asc_rows(p, reader_options),
+    read_chunk  = function(p, offset, n_max, header = NULL, col_classes = NULL, reader_options = list())
+      .read_asc_chunk(p, offset, n_max, header, col_classes, reader_options),
+    chunkable = TRUE)
   for (tp in c("csv", "tsv", "txt", "gz")) {
     register_file_reader(tp,
       read_full   = function(p, col_classes = NULL, reader_options = list()) read_delimited_full(p, col_classes, reader_options),
@@ -4569,8 +5379,17 @@ safe_read_sav_chunked <- function(path, chunk_size = 1000000L, TerminalHiveParti
     header[idx]
   }, character(1)))
   args <- delimited_fread_args(reader_options)
-  args$select <- raw_names
-  df <- .fread_with_structural_errors(c(.delimited_input(path, reader_options), args), path)
+  if (is.null(args$col.names)) {
+    args$select <- raw_names
+    df <- .fread_with_structural_errors(c(.delimited_input(path, reader_options), args), path)
+  } else {
+    #### ColumnNames (including a headerless source's names) are not in the ####
+    #### file, so fread cannot select by them; select by position instead.  ####
+    args$col.names <- NULL
+    args$select <- match(partition_keys, header_canonical)
+    df <- .fread_with_structural_errors(c(.delimited_input(path, reader_options), args), path)
+    data.table::setnames(df, raw_names)
+  }
   df <- .normalize_delimited_frame(df, reader_options, path)
   canonicalize_dataframe_names(df)
 }
@@ -4822,7 +5641,9 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
   if (!is.null(all_cols)) all_cols <- unique(canonical_colnames(all_cols))
   rd <- get_file_reader(reader)
   if (is.null(rd$read_chunk)) stop(sprintf("Reader '%s' has no read_chunk callback.", reader))
+  on.exit(.close_chunk_cursors(path), add = TRUE)
   logical_stream <- .uses_delimited_logical_stream(reader_options)
+  fixed_width <- identical(tolower(reader), "asc") && is.null(preloaded_data)
   if (!is.null(preloaded_data) && !is.data.frame(preloaded_data)) {
     stop("preloaded_data must be a data frame when supplied.")
   }
@@ -4878,7 +5699,8 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
   current_chunk_size <- requested_chunk_size
   read_strategy <- if (!is.null(preloaded_data)) "whole_file" else "chunked"
   chunk_row_plan <- NULL
-  if (is.null(preloaded_data) && route_source_partitions && !logical_stream && is.finite(total_rows) && total_rows > 0 &&
+  if (is.null(preloaded_data) && route_source_partitions && !logical_stream && !fixed_width &&
+      is.finite(total_rows) && total_rows > 0 &&
       !is.null(MaxWholeFileMemoryMB) && !adaptive_chunking) {
     plan <- .plan_partition_aligned_read(
       path = path, reader_options = reader_options, header = header,
@@ -4909,7 +5731,9 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
       "[CHUNKED-DELIM] %s: FAIL-mode fallback starts at chunk_size=%d; no calculated memory cap will be applied. Recoverable memory errors reduce by %d rows to a floor of %d.",
       basename(path), current_chunk_size, chunk_decrement, chunk_floor))
   }
-  one_pass_stream <- logical_stream ||
+  #### A fixed-width source is always read front to back in one pass: its records have ####
+  #### no header or logical-record repair, and a stream avoids re-reading skipped lines. ####
+  one_pass_stream <- logical_stream || fixed_width ||
     (route_source_partitions && identical(read_strategy, "chunked") && !adaptive_chunking)
   if (one_pass_stream && !logical_stream) {
     log_msg(sprintf("[CHUNKED-DELIM] %s: using a one-pass record stream for memory-capped chunks.",
@@ -5043,9 +5867,14 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
   }
   tryCatch({
     if (one_pass_stream) {
-      diagnostics <- .stream_delimited_logical_records(
-        path, reader_options = reader_options, chunk_size = chunk_size,
-        col_classes = col_classes, callback = process_chunk)
+      diagnostics <- if (fixed_width) {
+        .stream_asc_records(path, reader_options = reader_options, chunk_size = chunk_size,
+                            col_classes = col_classes, callback = process_chunk)
+      } else {
+        .stream_delimited_logical_records(
+          path, reader_options = reader_options, chunk_size = chunk_size,
+          col_classes = col_classes, callback = process_chunk)
+      }
       total_rows <- diagnostics$LogicalRows
       if (diagnostics$RepairCount > 0L) {
         if (identical(diagnostics$RepairPolicy, "trim_trailing_missing")) {
@@ -6484,6 +7313,201 @@ read_parquet_manifest <- function(ManifestPath) {
   data.table::as.data.table(DBI::dbReadTable(con, manifest_table_name()))
 }
 
+# First chunk-start offset where the old fread(skip=) positioning lands on a different record
+# than reading the file line by line; NA when every probed offset agrees (or none could be replayed).
+.audit_first_misplaced <- function(full_path, reader_options, offsets) {
+  options <- .resolve_delimited_reader_options(full_path, reader_options)
+  info <- .delimited_header_info(full_path, options)
+  offsets <- sort(unique(offsets[is.finite(offsets) & offsets >= 1]))
+  if (length(offsets) == 0L) return(list(First = NA_real_, Replayed = 0L))
+  target <- info$SkipLines + offsets + 1
+  con <- .open_delimited_text_connection(full_path, options$.EncodingInfo$EncodingUsed)
+  on.exit(close(con), add = TRUE)
+  wanted <- rep(NA_character_, length(target))
+  seen <- 0
+  idx <- 1L
+  while (idx <= length(target)) {
+    block <- readLines(con, n = 100000L, warn = FALSE)
+    if (length(block) == 0L) break
+    while (idx <= length(target) && target[idx] <= seen + length(block)) {
+      wanted[idx] <- block[target[idx] - seen]
+      idx <- idx + 1L
+    }
+    seen <- seen + length(block)
+  }
+  quote <- options$Quote %||% "\""
+  headed <- .delimited_has_header_line(options)
+  as_fields <- function(x) as.character(unlist(x, use.names = FALSE))
+  first <- NA_real_
+  replayed <- 0L
+  for (j in seq_along(offsets)) {
+    if (is.na(wanted[j]) || !nzchar(trimws(wanted[j]))) next
+    old_skip <- if (headed) offsets[j] + 1 else info$SkipLines + offsets[j]
+    old <- tryCatch(as_fields(data.table::fread(
+      file = full_path, skip = old_skip, nrows = 1L, header = FALSE, sep = info$Delimiter,
+      quote = quote, colClasses = "character")), error = function(e) NULL)
+    if (is.null(old)) next
+    truth <- tryCatch(as_fields(data.table::fread(
+      text = wanted[j], header = FALSE, sep = info$Delimiter, quote = quote, colClasses = "character")),
+      error = function(e) NULL)
+    if (is.null(truth)) next
+    replayed <- replayed + 1L
+    if (!identical(old, truth) && is.na(first)) first <- offsets[j]
+  }
+  list(First = first, Replayed = replayed)
+}
+
+.audit_duplicate_rows <- function(parquet_files) {
+  con <- DBI::dbConnect(duckdb::duckdb())
+  on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
+  files <- paste(DBI::dbQuoteString(con, parquet_files), collapse = ", ")
+  source_sql <- sprintf("read_parquet([%s], union_by_name = true)", files)
+  out <- DBI::dbGetQuery(con, sprintf(
+    "SELECT (SELECT count(*) FROM %s) AS n, (SELECT count(*) FROM (SELECT DISTINCT * FROM %s)) AS d",
+    source_sql, source_sql))
+  c(Rows = as.numeric(out$n[1]), Distinct = as.numeric(out$d[1]))
+}
+
+#' Audits delimited sources loaded in chunks for mispositioned chunk starts
+#'
+#' Earlier versions positioned each chunk after the first with
+#' \code{data.table::fread(skip = )}, which miscounts lines in a file whose
+#' line terminators are not a clean LF or CRLF, for example CR CR LF from a
+#' doubled Windows text mode conversion. Such a chunk re-reads rows from earlier
+#' in the file, so the table holds duplicated rows and misses the tail of the
+#' file while its row count still matches the source. This audit reads only
+#' the manifest, the source files, and (optionally) Parquet row counts, and it
+#' exports no data. For every delimited source that the manifest shows was
+#' written in two or more chunks, it replays the old positioning at the chunk
+#' start offsets and compares the record it reaches with the record found by
+#' reading the file line by line. For a source where they differ, it
+#' counts identical rows in the source's Parquet pieces.
+#'
+#' The replay uses the \pkg{data.table} installed on the machine that runs the
+#' audit, so run it where the tables were loaded.
+#' @param MDT Data frame. The master database table used for the load.
+#' @param MasterDBPath Character scalar. Root of the source files.
+#' @param ManifestPath Character scalar. The Parquet manifest written by the
+#'   load, for example \code{RepositoryPaths$ManifestPath}.
+#' @param ParquetBasePath Character scalar. Directory holding the Parquet
+#'   tables, used when the manifest records a relative Parquet path. Defaults
+#'   to \code{NULL}.
+#' @param Databases Character vector. Restricts the audit to these
+#'   \code{Database} values. Defaults to \code{NULL}, which audits all.
+#' @param CheckDuplicates Logical. Accepts \code{TRUE}, which counts rows and
+#'   distinct rows in the Parquet pieces of every source whose positioning
+#'   differs. Accepts \code{FALSE}, which skips the count. Defaults to
+#'   \code{TRUE}.
+#' @param ProbeOffsets Integer. Number of offsets spread across the file that
+#'   are replayed for a source whose chunks were routed to several partitions,
+#'   because its chunk starts cannot be read from the manifest. Defaults to 6.
+#' @return A data.table with one row per multi-chunk delimited source:
+#'   \code{Database}, \code{TableName}, \code{Path}, \code{Chunks},
+#'   \code{RowsInManifest}, \code{OldMethodMisplaced} (\code{TRUE} when old
+#'   positioning would reach a different record), \code{FirstMisplacedOffset},
+#'   \code{ParquetRows}, \code{DuplicateRows} (rows minus distinct rows), and
+#'   \code{Verdict}. \code{"AFFECTED: reload"} means positioning differs and
+#'   duplicated rows were found. \code{"positioning differs, no duplicate
+#'   rows"} means a table loaded after the fix, or one without repeats.
+#'   \code{DuplicateRows} also counts genuinely repeated source records, so
+#'   compare it with the source when the source can repeat whole records.
+#' @seealso \code{\link{read_parquet_manifest}}, \code{\link{reset_table_for_reload}}
+#' @examples
+#' \donttest{
+#' root <- tempfile("audit_"); dir.create(file.path(root, "D"), recursive = TRUE)
+#' writeLines(c("id,v", sprintf("%d,%d", 1:6, 1:6)), file.path(root, "D", "a.csv"))
+#' M <- data.frame(Database = "D", MDBDir = "D", Path = "a.csv", TableName = "T",
+#'                 FileType = "csv", PartitionKey = "year", PartitionValue = "2024")
+#' mf <- file.path(root, "manifest.csv")
+#' pq <- file.path(root, "T_1.parquet")
+#' arrow::write_parquet(data.frame(id = 1:3, v = 1:3), pq)
+#' update_parquet_manifest(mf, "D", "T", "D_T", 2024, "a.csv", pq, 3, Notes = "chunk_00001")
+#' arrow::write_parquet(data.frame(id = 4:6, v = 4:6), file.path(root, "T_2.parquet"))
+#' update_parquet_manifest(mf, "D", "T", "D_T", 2024, "a.csv", file.path(root, "T_2.parquet"), 3,
+#'                         Notes = "chunk_00002")
+#' audit_chunk_positioning(M, root, mf)
+#' unlink(root, recursive = TRUE)
+#' }
+#' @export
+audit_chunk_positioning <- function(MDT, MasterDBPath, ManifestPath, ParquetBasePath = NULL,
+                                    Databases = NULL, CheckDuplicates = TRUE, ProbeOffsets = 6L) {
+  manifest <- read_parquet_manifest(ManifestPath)
+  needed <- c("Database", "TableName", "SourcePath", "ParquetPath", "NRows", "Status", "Notes", "PartitionValue")
+  if (nrow(manifest) == 0L || length(setdiff(needed, names(manifest))) > 0L) {
+    stop("The manifest is empty or lacks the columns: ", paste(setdiff(needed, names(manifest)), collapse = ", "))
+  }
+  MDT <- data.table::as.data.table(MDT)
+  chunks <- manifest[manifest$Status %in% "written" & grepl("^chunk_[0-9]+$", manifest$Notes), ]
+  if (!is.null(Databases)) chunks <- chunks[chunks$Database %in% Databases, ]
+  chunks$ChunkNumber <- as.integer(sub("^chunk_", "", chunks$Notes))
+  keys <- unique(chunks[, c("Database", "TableName", "SourcePath")])
+  results <- list()
+  for (i in seq_len(nrow(keys))) {
+    key <- keys[i, ]
+    rows <- chunks[chunks$Database == key$Database & chunks$TableName == key$TableName &
+                     chunks$SourcePath == key$SourcePath, ]
+    if (nrow(rows) < 2L) next
+    rows <- rows[order(rows$ChunkNumber), ]
+    verdict <- NA_character_
+    misplaced <- NA
+    first <- NA_real_
+    parquet_rows <- NA_real_
+    duplicates <- NA_real_
+    mdt_row <- MDT[as.character(MDT$Database) == key$Database & as.character(MDT$Path) == key$SourcePath &
+                     as.character(MDT$TableName) == key$TableName, ]
+    reader <- if (nrow(mdt_row) > 0L) tolower(as.character(mdt_row$FileType[1])) else NA_character_
+    if (nrow(mdt_row) == 0L) {
+      verdict <- "no matching MDT row"
+    } else if (!reader %in% c("csv", "tsv", "txt", "gz")) {
+      verdict <- "not a delimited source"
+    } else {
+      total <- sum(rows$NRows)
+      single_partition <- length(unique(rows$PartitionValue)) == 1L
+      offsets <- if (single_partition) cumsum(rows$NRows)[-nrow(rows)] else
+        round(seq(0.1, 0.9, length.out = max(1L, as.integer(ProbeOffsets))) * total)
+      full_path <- source_path_for_row(mdt_row[1, ], MasterDBPath)
+      replay <- tryCatch(.audit_first_misplaced(full_path, reader_options_for_row(mdt_row[1, ]), offsets),
+                         error = function(e) e)
+      if (inherits(replay, "error")) {
+        verdict <- paste("could not replay:", conditionMessage(replay))
+      } else if (replay$Replayed == 0L) {
+        verdict <- "could not replay any chunk start"
+      } else {
+        misplaced <- !is.na(replay$First)
+        first <- replay$First
+        if (!misplaced) {
+          verdict <- "ok"
+        } else if (!isTRUE(CheckDuplicates)) {
+          verdict <- "positioning differs; duplicates not checked"
+        } else {
+          files <- as.character(rows$ParquetPath)
+          missing_file <- !file.exists(files)
+          if (!is.null(ParquetBasePath)) files[missing_file] <- file.path(ParquetBasePath, files[missing_file])
+          counts <- tryCatch(.audit_duplicate_rows(files[file.exists(files)]), error = function(e) NULL)
+          if (is.null(counts) || !all(file.exists(files))) {
+            verdict <- "positioning differs; Parquet pieces not readable"
+          } else {
+            parquet_rows <- counts[["Rows"]]
+            duplicates <- counts[["Rows"]] - counts[["Distinct"]]
+            verdict <- if (duplicates > 0) "AFFECTED: reload" else "positioning differs, no duplicate rows"
+          }
+        }
+      }
+    }
+    results[[length(results) + 1L]] <- data.table::data.table(
+      Database = key$Database, TableName = key$TableName, Path = key$SourcePath, Chunks = nrow(rows),
+      RowsInManifest = sum(rows$NRows), OldMethodMisplaced = misplaced, FirstMisplacedOffset = first,
+      ParquetRows = parquet_rows, DuplicateRows = duplicates, Verdict = verdict)
+  }
+  if (length(results) == 0L) {
+    return(data.table::data.table(
+      Database = character(), TableName = character(), Path = character(), Chunks = integer(),
+      RowsInManifest = numeric(), OldMethodMisplaced = logical(), FirstMisplacedOffset = numeric(),
+      ParquetRows = numeric(), DuplicateRows = numeric(), Verdict = character()))
+  }
+  data.table::rbindlist(results)
+}
+
 .metadata_excel_clean <- function(x) {
   if (!is.character(x)) return(x)
   x <- iconv(x, from = "", to = "UTF-8", sub = "byte")
@@ -7714,10 +8738,11 @@ read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL, tab
     table_dir <- year_dir
     for (i in seq_along(partition_keys)) table_dir <- dirname(table_dir)
   }
-  delimited_reader <- tolower(reader) %in% c("csv", "tsv", "txt", "gz")
+  fixed_width_reader <- identical(tolower(reader), "asc")
+  delimited_reader <- tolower(reader) %in% c("csv", "tsv", "txt", "gz") || fixed_width_reader
   route_source_partitions <- FALSE
   if (delimited_reader) {
-    reader_options <- .resolve_delimited_reader_options(full_path, reader_options)
+    if (!fixed_width_reader) reader_options <- .resolve_delimited_reader_options(full_path, reader_options)
     source_header <- call_reader(rd, "read_header", full_path, reader_options = reader_options)
     route_source_partitions <- length(partition_keys) > 0L &&
       all(canonical_colnames(partition_keys) %in% canonical_colnames(source_header))
@@ -9959,6 +10984,21 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
     if (any(bad_filetype)) add_issue("bad_filetype", "error",
                                      sprintf("One or more MDT FileType values have no registered reader. Supported: %s.",
                                              paste(supported_file_types(), collapse = ", ")), sum(bad_filetype))
+    layout_problem <- vapply(seq_len(nrow(MDTdt)), function(i) {
+      row <- MDTdt[i]
+      tryCatch({
+        options <- reader_options_for_row(row)
+        layout <- .layout_for_options(options)
+        reader_type <- tolower(as.character(row$FileType[1]))
+        if (identical(reader_type, "asc")) .asc_layout(options)
+        else if (!is.null(layout)) .delimited_column_names(options)
+        ""
+      }, error = function(e) conditionMessage(e))
+    }, character(1))
+    if (any(nzchar(layout_problem))) add_issue(
+      "bad_layout_file", "error",
+      sprintf("LayoutFile problem at MDT row %d: %s", which(nzchar(layout_problem))[1],
+              layout_problem[which(nzchar(layout_problem))[1]]), sum(nzchar(layout_problem)))
     if ("SourceURI" %in% names(MDTdt)) {
       uri <- trimws(as.character(MDTdt$SourceURI))
       remote <- !is.na(uri) & nzchar(uri)
@@ -10344,7 +11384,8 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
   if (!is.finite(FastReadMaxBytes) || FastReadMaxBytes < 0) {
     stop("FastReadMaxBytes must be a non-negative number of bytes.")
   }
-  reader_options <- .resolve_delimited_reader_options(path, reader_options)
+  fixed_width <- identical(if (is.list(reader)) reader$type else reader, "asc")
+  if (!fixed_width) reader_options <- .resolve_delimited_reader_options(path, reader_options)
   header <- call_reader(reader, "read_header", path, reader_options = reader_options)
   columns <- canonical_unique_colnames(header)
   accumulators <- stats::setNames(vector("list", length(columns)), columns)
@@ -10439,7 +11480,8 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
                       ProgressContext %||% basename(path),
                       format(round(source_size / 1024^2, 1), nsmall = 1)))
     }
-    df <- read_delimited_full(path, reader_options = reader_options)
+    df <- if (fixed_width) read_asc_full(path, reader_options = reader_options) else
+      read_delimited_full(path, reader_options = reader_options)
     profile_chunk(df)
     list(Header = names(df), LogicalRows = as.numeric(nrow(df)),
          PhysicalLinesRead = NA_real_, RepairCount = 0, RepairLines = integer(),
@@ -10447,7 +11489,8 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
          EncodingInfo = reader_options$.EncodingInfo,
          ProfileMode = "full_fast")
   } else if (use_sample) {
-    df <- call_reader(reader, "read_sample", path, reader_options = reader_options)
+    df <- call_reader(reader, "read_sample", path, reader_options = reader_options,
+                      n_max = AdaptiveSampleRows)
     if (nrow(df) > AdaptiveSampleRows) df <- utils::head(df, AdaptiveSampleRows)
     profile_chunk(df)
     list(Header = names(df), LogicalRows = as.numeric(nrow(df)),
@@ -10456,9 +11499,14 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
          EncodingInfo = reader_options$.EncodingInfo,
          ProfileMode = if (SchemaSurveyMode == "sample") "sample" else "adaptive_sample")
   } else {
-    result <- .stream_delimited_logical_records(
-      path, reader_options = reader_options, chunk_size = chunk_size,
-      callback = profile_chunk)
+    result <- if (fixed_width) {
+      .stream_asc_records(path, reader_options = reader_options, chunk_size = chunk_size,
+                          callback = profile_chunk)
+    } else {
+      .stream_delimited_logical_records(
+        path, reader_options = reader_options, chunk_size = chunk_size,
+        callback = profile_chunk)
+    }
     result$ProfileMode <- "full_stream"
     result
   }
@@ -10527,6 +11575,8 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
   reader_settings <- jsonlite::toJSON(
     reader_options_for_row(row_meta), auto_unbox = TRUE, null = "null",
     na = "null", digits = NA)
+  layout_file <- reader_options_for_row(row_meta)[["LayoutFile"]]
+  if (!is.null(layout_file)) reader_settings <- paste(reader_settings, .load_layout(layout_file)$Digest, sep = "||")
   identity <- paste(
     "schema_survey_cache_v1",
     as.character(row_meta$Database[1]), as.character(row_meta$TableName[1]),
@@ -10584,6 +11634,8 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
       options <- .resolve_delimited_reader_options(full_path, options)
       encoding_info <- options$.EncodingInfo
     }
+    #### The fixed-width asc reader is profiled like a delimited source: all of its ####
+    #### columns come from a layout, so a deep pass finds integer-valued columns.    ####
     labeled_header <- NULL
     if (isTRUE(rd$has_labels) && !is.null(rd$read_labels_header)) {
       labeled_header <- capture_warnings(call_reader(
@@ -10595,7 +11647,7 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
     }
     header_encoding_info <- attr(original_header, "repoquet_encoding_info")
     if (!is.null(header_encoding_info)) encoding_info <- header_encoding_info
-    delimited <- reader_type %in% c("csv", "tsv", "txt", "gz")
+    delimited <- reader_type %in% c("csv", "tsv", "txt", "gz", "asc")
     profile <- NULL
     sample <- NULL
     if (delimited) {
