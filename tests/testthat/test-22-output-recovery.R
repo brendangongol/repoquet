@@ -47,6 +47,8 @@ test_that("the loader does not checkpoint a source whose output vanishes after w
 
   result <- run_loader(fx, MDT, "REG", PartitionBy = "NRows")
   expect_length(result$checkpoint, 0L)
+  expect_true(any(grepl("[SOURCE START]", result$output, fixed = TRUE)))
+  expect_true(any(grepl("[SOURCE READ]", result$output, fixed = TRUE)))
   expect_true(any(grepl("Post-write output verification failed", result$output)))
   expect_length(list.files(fx$pq, pattern = "\\.parquet$", recursive = TRUE), 0L)
   expect_identical(nrow(read_parquet_manifest(fx$mf)), 0L)

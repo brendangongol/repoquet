@@ -9463,6 +9463,7 @@ read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL, tab
   } else {
     file.path(MasterDBPath, path)
   }
+  log_msg(sprintf("[READ START] %s: reader=%s, PartitionBy=%s", basename(full_path), reader, PartitionBy))
   source_root <- if (startsWith(normalizePath(full_path, winslash = "/", mustWork = FALSE),
                                 normalizePath(MasterDBPath, winslash = "/", mustWork = FALSE))) {
     MasterDBPath
@@ -16480,6 +16481,10 @@ generic_db_loader <- function(files, base_path, db_prefix, completed_checkpoint,
     suffix <- NULL; table_col_classes <- NULL; completion_status <- NULL
     loaded_partitions <- NULL
     full_source_path <- source_path_for_row(row_meta, base_path)
+    log_msg(sprintf("[SOURCE START] %d/%d %s -> %s (declared partition %s)",
+                    a, nrow(pending_meta), source_path,
+                    repository_table_name_for_row(row_meta),
+                    partition_spec_for_row(row_meta)$dir))
     source_meta <- source_fingerprint(full_source_path, mode = SourceFingerprintMode)
     if(PrintStatus){ print(paste("Working on", source_path)) }
     Comp <- FALSE
@@ -16505,6 +16510,8 @@ generic_db_loader <- function(files, base_path, db_prefix, completed_checkpoint,
                                        MaxFileStemTruncate = MaxFileStemTruncate)
       out_path <- file.path(year_dir, paste0(safe_stem, ".parquet"))
       if(PrintStatus){ print("Performing database Read") }
+      log_msg(sprintf("[SOURCE READ] %s: reader=%s, PartitionBy=%s, output=%s",
+                      source_path, reader_file, PartitionBy, out_path))
       gc(verbose = FALSE)
       touch_repository_lock(RepositoryLock)
       accept_partial <- "AcceptPartial" %in% names(row_meta) &&
