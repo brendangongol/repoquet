@@ -20,6 +20,8 @@ ParquetBackEndCreate(
   FailProbeMode = c("subprocess", "in_process", "disabled"),
   FailProbeTimeoutSeconds = 7200,
   FailProbeSourcePath = NULL,
+  IORetryAttempts = 3L,
+  IORetryPauseSeconds = 10,
   LogPath,
   n_workers = 1,
   PrintStatus = FALSE,
@@ -123,6 +125,23 @@ isolated subprocess under \code{FailProbeMode = "subprocess"}.}
 \item{FailProbeSourcePath}{Character scalar. Path to the repoquet
 source the probe subprocess should \code{source()}. See
 \code{\link{read_fn}}. Defaults to \code{NULL}.}
+
+\item{IORetryAttempts}{Integer. Number of attempts, counting the
+first, for an operation that fails with a transient input or output
+error, such as a network drive dropping out. Applies to the Parquet
+writes, the checkpoint and manifest saves, a direct whole file read,
+each batch of a chunked delimited or fixed width read, which restarts
+from its own byte offset when a record is cut off or the file ends
+too early, and the isolated direct worker, which is relaunched. A deterministic
+failure, such as a memory allocation error, a result over 2^31-1
+bytes, or a layout file error, is never retried. A direct read whose
+row count differs from the independent count is retried once. Defaults
+to \code{3}.}
+
+\item{IORetryPauseSeconds}{Numeric scalar. Seconds to wait before the
+first retry. Each later retry waits three times as long as the one
+before, so the defaults wait 10 seconds and then 30 seconds. Defaults
+to \code{10}.}
 
 \item{LogPath}{Character scalar. Log file for this run. Starts a
 run scoped logging context through

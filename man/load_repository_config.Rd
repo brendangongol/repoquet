@@ -12,6 +12,8 @@ load_repository_config(
   FailProbeMode = NULL,
   FailProbeTimeoutSeconds = NULL,
   FailProbeSourcePath = NULL,
+  IORetryAttempts = NULL,
+  IORetryPauseSeconds = NULL,
   SAV_ROW_THRESHOLD = NULL,
   RAMThreshold = NULL,
   PartitionBy = NULL,
@@ -74,6 +76,14 @@ tree's \code{R/repoquet.R}, for a worker running from source
 rather than an installed package. Defaults to
 \code{REPOQUET_SOURCE}, then the current working directory. An
 installed package loads its namespace instead.}
+
+\item{IORetryAttempts}{Integer. Attempts, counting the first, for an
+operation that fails with a transient input or output error. Passed
+to \code{ParquetBackEndCreate}. Defaults to \code{3}.}
+
+\item{IORetryPauseSeconds}{Numeric scalar. Seconds before the first
+retry; later retries wait three times as long as the one before.
+Passed to \code{ParquetBackEndCreate}. Defaults to \code{10}.}
 
 \item{SAV_ROW_THRESHOLD}{Integer. Row count above which a SAV file
 streams in chunks. Accepts \code{NULL}, which keeps the

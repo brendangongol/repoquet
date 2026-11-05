@@ -99,3 +99,27 @@
   (such as CR CR LF). Added `audit_chunk_positioning()`, which checks an existing
   manifest and Parquet store for sources loaded with the old positioning
   (repeated rows with the same total row count) without exporting data.
+* Added retries for transient I/O failures, for loading from a network drive that
+  drops out briefly. `ParquetBackEndCreate(IORetryAttempts = 3, IORetryPauseSeconds = 10)`
+  (and the same keys in `repository_config.R`) control one shared policy: a failed
+  Parquet write, checkpoint save, manifest write, or direct whole-file read is
+  repeated after a pause (10 s, then 30 s with the defaults), and the isolated
+  direct worker is relaunched, before the loader falls back to chunked reading.
+  Memory, size, layout-file and timeout failures are never retried.
+* A direct whole-file read is now checked against the independent row count
+  (`count_rows`, or the SAV header). A read cut short at a line boundary is
+  retried once, then falls back to the chunked reader, or fails clearly in
+  direct mode, instead of loading short.
+* The chunked delimited reader and the fixed-width stream now read the source as
+  bytes and remember the byte offset where each batch of records starts. A batch
+  cut short by a dropped connection (a record with too few fields or the wrong
+  length, or an end of file before the expected row count) is retried from its
+  own offset instead of failing the whole file, and a genuinely malformed file
+  still fails clearly once the retries are used up. Batches reach `fread` as a
+  temporary file, which is also several times faster on a wide table, and
+  `normalize_character_encoding` no longer copies a wide table to rewrite names
+  that did not change.
+* A source that is not visible when a file starts loading is waited for with the
+  same retry settings, but only when its root folder is also missing, which is
+  what a dropped network drive looks like. A file missing under a visible root
+  still fails at once, with no pause.

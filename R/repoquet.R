@@ -1143,6 +1143,118 @@ write_arrow_table_safely <- function(arrow_tbl, path) {
   invisible(path)
 }
 
+################################################################################
+#### Retrying transient I/O failures (for example a network drive dropping out) ##
+################################################################################
+# ParquetBackEndCreate(IORetryAttempts, IORetryPauseSeconds) sets these options for a run.
+# Attempts include the first try. The pause before retry k is IORetryPauseSeconds * 3^(k - 2),
+# so the defaults (3 attempts, 10 s) wait 10 s and then 30 s, as the Parquet write retry always did.
+.io_retry_settings <- function() {
+  attempts <- suppressWarnings(as.integer(getOption("repoquet.io_retry_attempts", 3L)))
+  pause <- suppressWarnings(as.numeric(getOption("repoquet.io_retry_pause_seconds", 10)))
+  list(attempts = if (length(attempts) != 1L || is.na(attempts) || attempts < 1L) 3L else attempts,
+       pause = if (length(pause) != 1L || is.na(pause) || pause < 0) 10 else pause)
+}
+
+.io_retry_wait <- function(attempt, pause) if (attempt <= 1L) 0 else pause * 3^(attempt - 2L)
+
+# Seconds to wait before each attempt, for the existing retry loops.
+.io_retry_waits <- function() {
+  settings <- .io_retry_settings()
+  vapply(seq_len(settings$attempts), function(k) .io_retry_wait(k, settings$pause), numeric(1))
+}
+
+# TRUE when an error message looks like an I/O failure that a pause and a second try can clear:
+# a dropped connection, a cut-off read, or a failed move. Memory, size, layout-file and
+# timeout failures are deterministic and are never retried.
+.is_transient_io_error <- function(message) {
+  message <- paste(as.character(message), collapse = " ")
+  if (is.na(message) || !nzchar(message)) return(FALSE)
+  deterministic <- paste(
+    "cannot allocate|bad_alloc|out of memory|memory exhausted|vector memory|cannot reserve",
+    "exceed 2\\^31|Layout file|timed out|timeout|must be|Unknown |Unsupported", sep = "|")
+  if (grepl(deterministic, message, ignore.case = TRUE)) return(FALSE)
+  transient <- paste(
+    "IOError|IO Error|I/O error|input/output|errno|Invalid argument",
+    "cannot open (the )?(file|connection)|cannot (copy|rename|read|write)|error (reading|writing)",
+    "(read|write) (error|failed)|connection (was )?(reset|aborted|closed|lost)",
+    "network (name|path|error)|device is not ready|no longer available|semaphore",
+    "Could not set lock|Could not (replace|move existing) file|Could not preserve previous",
+    "Checkpoint verification failed|unexpected end of file|premature end|truncated|embedded nul",
+    "has [0-9,]+ character\\(s\\), but layout|row count mismatch",
+    "did not contain the expected number of rows|Delimited structure error|Malformed delimited record",
+    "exited with status -1073741818", sep = "|")
+  grepl(transient, message, ignore.case = TRUE)
+}
+
+# Runs operation(), retrying a transient failure up to the configured number of attempts.
+# A row-count mismatch is retried once only: a real mismatch repeats, and each try is a full read.
+.retry_io <- function(operation, label, retryable = .is_transient_io_error) {
+  settings <- .io_retry_settings()
+  attempt <- 1L
+  repeat {
+    result <- tryCatch(list(value = operation()), error = function(e) e)
+    if (!inherits(result, "error")) return(result$value)
+    message <- conditionMessage(result)
+    limit <- if (grepl("row count mismatch", message, ignore.case = TRUE)) min(settings$attempts, 2L) else
+      settings$attempts
+    if (attempt >= limit || !isTRUE(retryable(message))) stop(result)
+    attempt <- attempt + 1L
+    wait <- .io_retry_wait(attempt, settings$pause)
+    log_msg(sprintf("[IO RETRY] Attempt %d/%d after %gs: %s (%s)", attempt, limit, wait, label,
+                    substr(gsub("[\r\n]+", " ", message), 1L, 200L)))
+    if (wait > 0) Sys.sleep(wait)
+  }
+}
+
+# Relaunches the isolated direct worker after a transient I/O failure (the same classifier and
+# settings as .retry_io); a deterministic failure is returned at once for the chunked fallback.
+.retry_fail_probe <- function(run_probe, label) {
+  settings <- .io_retry_settings()
+  attempt <- 1L
+  repeat {
+    probe <- run_probe()
+    if (isTRUE(probe$ok)) return(probe)
+    error <- paste(as.character(probe$error %||% ""), collapse = " ")
+    limit <- if (grepl("row count mismatch", error, ignore.case = TRUE)) min(settings$attempts, 2L) else
+      settings$attempts
+    if (attempt >= limit || !.is_transient_io_error(error)) return(probe)
+    attempt <- attempt + 1L
+    wait <- .io_retry_wait(attempt, settings$pause)
+    log_msg(sprintf("[IO RETRY] Attempt %d/%d after %gs: relaunching the isolated direct worker for %s (%s)",
+                    attempt, limit, wait, label, substr(gsub("[\r\n]+", " ", error), 1L, 200L)))
+    if (wait > 0) Sys.sleep(wait)
+  }
+}
+
+# A dropped network drive makes every source on it vanish at once, so a missing source is waited
+# for only while its root folder is also missing. A missing file under a visible root is
+# genuinely missing, and returns at once (no pause for the many unlisted or removed files).
+.wait_for_source <- function(full_path, root, file_exists = file.exists, dir_exists = dir.exists) {
+  if (file_exists(full_path)) return(TRUE)
+  waits <- .io_retry_waits()
+  for (attempt in seq_along(waits)[-1L]) {
+    if (dir_exists(root)) return(FALSE)
+    log_msg(sprintf("[IO RETRY] Attempt %d/%d after %gs: source root %s is not visible, so %s may be a dropped drive.",
+                    attempt, length(waits), waits[attempt], root, basename(full_path)))
+    if (waits[attempt] > 0) Sys.sleep(waits[attempt])
+    if (file_exists(full_path)) return(TRUE)
+  }
+  FALSE
+}
+
+# An independent row count (count_rows, a SAV header) must match what a whole-file read returned;
+# a read cut short at a line boundary would otherwise load silently short.
+.check_read_row_count <- function(n_read, expected, path) {
+  expected <- suppressWarnings(as.numeric(expected)[1])
+  if (length(expected) == 1L && is.finite(expected) && as.numeric(n_read) != expected) {
+    stop(sprintf("row count mismatch: read %s row(s) from %s but the independent count is %s.",
+                 format(n_read, big.mark = ",", scientific = FALSE), basename(path),
+                 format(expected, big.mark = ",", scientific = FALSE)), call. = FALSE)
+  }
+  invisible(TRUE)
+}
+
 replace_file_safely <- function(tmp, path) {
   dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
   backup <- tempfile(pattern = paste0(basename(path), ".bak_"), tmpdir = dirname(path))
@@ -1828,13 +1940,13 @@ write_year_parquet <- function(df, ParquetBasePath, table_name, year_val, source
   })
   rm(df)
   dir.create(year_dir, recursive = TRUE, showWarnings = FALSE)
-  write_attempts <- 3L
-  write_wait_s   <- c(0L, 10L, 30L)
+  write_wait_s   <- .io_retry_waits()
+  write_attempts <- length(write_wait_s)
   tmp_path <- NULL
   for (attempt in seq_len(write_attempts)) {
     write_err <- tryCatch({
       if (attempt > 1L) {
-        log_msg(sprintf("[WRITE RETRY] Attempt %d/%d after %ds pause: %s",
+        log_msg(sprintf("[WRITE RETRY] Attempt %d/%d after %gs pause: %s",
                         attempt, write_attempts, write_wait_s[attempt], basename(out_path)))
         Sys.sleep(write_wait_s[attempt])
       }
@@ -2544,7 +2656,8 @@ normalize_character_encoding <- function(df, source_encoding = NULL,
                            legacy_fallback_encoding = legacy_fallback_encoding)
   })
   names(converted) <- char_cols
-  names(df) <- new_names
+  #### Rewriting names copies a whole wide table, so only do it when a name actually changed.
+  if (!identical(new_names, names(df))) data.table::setnames(df, new_names)
   for (col in char_cols) data.table::set(df, j = col, value = converted[[col]])
   df
 }
@@ -3668,7 +3781,8 @@ read_delimited_full <- function(path, col_classes = NULL, reader_options = list(
 }
 
 .read_delimited_chunk <- function(path, offset, n_max, header, col_classes = NULL,
-                                  reader_options = list(), batch_rows = 50000L, batch_bytes = 5e8) {
+                                  reader_options = list(), batch_rows = 1000000L, batch_bytes = 128e6,
+                                  exact_rows = FALSE) {
   reader_options <- .resolve_delimited_reader_options(path, reader_options)
   header <- unname(as.character(header))
   if (!is.null(.sectioned_delimited_text(path, reader_options))) {
@@ -3676,11 +3790,11 @@ read_delimited_full <- function(path, col_classes = NULL, reader_options = list(
     if (offset >= nrow(all_rows)) return(all_rows[0])
     return(all_rows[seq.int(offset + 1L, min(nrow(all_rows), offset + n_max))])
   }
-  #### Records are positioned by reading lines, never by fread(skip =): fread's skip ####
-  #### miscounts lines in files whose terminators are not a clean LF or CRLF (for     ####
-  #### example CR CR LF from a doubled Windows text-mode conversion).               ####
-  #### The chunk is parsed in batches whose text stays well under R's 2^31-1 byte string ####
-  #### limit; a 4,000,000-row chunk of a wide table is many gigabytes of text.        ####
+  #### Records are positioned by byte offset, never by fread(skip =): fread's skip miscounts ####
+  #### lines in a file whose terminators are not a clean LF or CRLF (for example CR CR LF).  ####
+  #### The chunk is parsed in batches of at most batch_bytes of text, far below R's 2^31-1  ####
+  #### byte string limit, and each batch is retried from its own start offset when a        ####
+  #### transient read problem (a cut-off record, an early end of file) is detected.         ####
   args <- delimited_fread_args(reader_options)
   args$header <- NULL
   args$col.names <- NULL
@@ -3688,21 +3802,58 @@ read_delimited_full <- function(path, col_classes = NULL, reader_options = list(
     .layout_for_options(reader_options), fread_col_classes_positional(col_classes, header), header)
   parts <- list()
   got <- 0
-  repeat {
-    if (got >= n_max) break
-    batch <- .delimited_chunk_records(path, offset + got, n_max - got, reader_options,
-                                      batch_rows = batch_rows, batch_bytes = batch_bytes)
-    if (length(batch$Records) == 0L) break
-    batch_args <- args
-    batch_args$sep <- batch$Delimiter
-    df <- .fread_with_structural_errors(
-      c(list(text = paste0(paste(batch$Records, collapse = "\n"), "\n"),
-             header = FALSE, col.names = header), batch_args), path)
-    got <- got + length(batch$Records)
-    rm(batch)
-    df <- normalize_character_encoding(df, "UTF-8")
-    parts[[length(parts) + 1L]] <- .apply_layout_missing(df, reader_options)
-  }
+  tryCatch({
+    repeat {
+      if (got >= n_max) break
+      tries <- 0L
+      batch <- .retry_io(function() {
+        tries <<- tries + 1L
+        taken <- .delimited_chunk_batch(path, offset + got, n_max - got, reader_options,
+                                        batch_rows = batch_rows, batch_bytes = batch_bytes,
+                                        reopen = tries > 1L)
+        if (taken$Rows == 0L) {
+          if (isTRUE(exact_rows)) {
+            stop(sprintf("row count mismatch: %s ended at record %s, but %s more record(s) were expected.",
+                         basename(path), format(offset + got, big.mark = ",", scientific = FALSE),
+                         format(n_max - got, big.mark = ",", scientific = FALSE)), call. = FALSE)
+          }
+          return(NULL)
+        }
+        batch_args <- args
+        batch_args$sep <- taken$Delimiter
+        #### A raw batch goes to fread as a temporary file: fread copies a text argument to one anyway, ####
+        #### and reading the file directly is several times faster on a wide table.                    ####
+        input <- if (!is.null(taken$Raw)) {
+          batch_file <- tempfile("repoquet_batch_", fileext = ".csv")
+          on.exit(unlink(batch_file), add = TRUE)
+          writeBin(taken$Raw, batch_file)
+          list(file = batch_file)
+        } else {
+          list(text = taken$Text)
+        }
+        df <- .fread_with_structural_errors(
+          c(input, list(header = FALSE, col.names = header), batch_args), path)
+        if (nrow(df) != taken$Rows) {
+          stop(sprintf("row count mismatch: parsed %s row(s) from %s record(s) of %s.",
+                       nrow(df), taken$Rows, basename(path)), call. = FALSE)
+        }
+        df <- normalize_character_encoding(df, "UTF-8")
+        list(df = .apply_layout_missing(df, reader_options), rows = taken$Rows)
+      }, label = sprintf("chunk read %s from record %s", basename(path),
+                         format(offset + got, big.mark = ",", scientific = FALSE)))
+      if (is.null(batch)) {
+        .cursor_release_if_drained(path)
+        break
+      }
+      got <- got + batch$rows
+      parts[[length(parts) + 1L]] <- batch$df
+      rm(batch)
+      .cursor_release_if_drained(path)
+    }
+  }, error = function(e) {
+    .close_chunk_cursors(path)
+    stop(e)
+  })
   if (length(parts) == 0L) {
     return(canonicalize_dataframe_names(data.table::as.data.table(
       stats::setNames(replicate(length(header), character(), simplify = FALSE), header))))
@@ -3730,72 +3881,236 @@ read_delimited_full <- function(path, col_classes = NULL, reader_options = list(
   .asc_close_cursor(key)
 }
 
-# Reads the n_max records (non-blank lines) that follow record `offset`, after the header.
-# Consecutive calls on one file reuse one open connection, so reading a file front to back
-# in chunks is a single pass; a request for any other offset reopens the file.
-.delimited_chunk_records <- function(path, offset, n_max, reader_options = list(),
-                                     batch_rows = 50000L, batch_bytes = 5e8) {
+################################################################################
+#### Byte-positioned record cursor (delimited chunks and the fixed-width stream) ####
+################################################################################
+# A cursor reads one source as raw bytes in blocks, cuts the buffer at line ends, and records the
+# byte offset at which each batch of records starts. A retry therefore reopens the file and seeks
+# straight to the failed batch's start instead of re-reading from the beginning, and positioning
+# never depends on fread(skip =). Offsets count records (non-blank lines), or lines when blanks
+# are kept. Plain, .gz and .bz2 sources are all supported; a compressed source seeks by reading
+# forward from its start.
+
+.cursor_block_bytes <- 32 * 1024^2
+
+.binary_open <- function(path) {
+  if (grepl("\\.(gz|gzip|bz2)$", path, ignore.case = TRUE)) gzfile(path, open = "rb") else file(path, open = "rb")
+}
+
+# Opens a fresh connection positioned at byte p.
+.binary_open_at <- function(path, p) {
+  con <- .binary_open(path)
+  if (p > 0) {
+    if (grepl("\\.(gz|gzip|bz2)$", path, ignore.case = TRUE)) {
+      left <- p
+      while (left > 0) {
+        got <- length(readBin(con, what = "raw", n = min(left, .cursor_block_bytes)))
+        if (got == 0L) break
+        left <- left - got
+      }
+    } else {
+      seek(con, where = p, origin = "start", rw = "read")
+    }
+  }
+  con
+}
+
+# Positions of newline bytes within the first `upto` bytes.
+.raw_newlines <- function(buf, upto) {
+  upto <- as.integer(upto)
+  if (upto <= 0L) return(integer(0))
+  found <- grepRaw(as.raw(10L), buf, fixed = TRUE, all = TRUE)
+  found[found <= upto]
+}
+
+.cursor_fill <- function(cursor, want_bytes) {
+  while (!cursor$eof && length(cursor$buf) < want_bytes) {
+    #### One read for everything still needed (at least a block), so the buffer is not rebuilt by repeated c().
+    n_read <- as.integer(min(max(want_bytes - length(cursor$buf), .cursor_block_bytes), 512 * 1024^2))
+    block <- readBin(cursor$con, what = "raw", n = n_read)
+    if (length(block) == 0L) {
+      cursor$eof <- TRUE
+    } else {
+      cursor$buf <- if (length(cursor$buf) == 0L) block else c(cursor$buf, block)
+    }
+  }
+  invisible(NULL)
+}
+
+.cursor_new <- function(path, key, encoding, delimiter, skip_lines = 0L, register = TRUE) {
+  cursor <- new.env(parent = emptyenv())
+  cursor$path <- path
+  cursor$key <- key
+  cursor$encoding <- encoding
+  cursor$delimiter <- delimiter
+  cursor$size <- file.size(path)
+  cursor$con <- .binary_open(path)
+  cursor$buf <- raw(0)
+  cursor$pos <- 0
+  cursor$eof <- FALSE
+  cursor$next_offset <- 0
+  cursor$po <- 0
+  cursor$pp <- 0
+  if (isTRUE(register)) assign(key, cursor, envir = .delimited_cursors)
+  if (skip_lines > 0L) {
+    skipped <- 0L
+    while (skipped < skip_lines) {
+      taken <- .cursor_take(cursor, max_rows = skip_lines - skipped, max_bytes = .cursor_block_bytes,
+                            keep_blank = TRUE, discard = TRUE)
+      if (taken$Rows == 0L) break
+      skipped <- skipped + taken$Rows
+    }
+  } else if (toupper(encoding) %in% c("UTF-8", "UTF8")) {
+    .cursor_fill(cursor, 3)
+    if (length(cursor$buf) >= 3L && identical(cursor$buf[1:3], as.raw(c(0xEF, 0xBB, 0xBF)))) {
+      cursor$buf <- if (length(cursor$buf) > 3L) cursor$buf[4:length(cursor$buf)] else raw(0)
+      cursor$pos <- 3
+    }
+  }
+  cursor$next_offset <- 0
+  cursor$po <- 0
+  cursor$pp <- cursor$pos
+  cursor
+}
+
+# Moves the cursor so that its next record is `offset`. It continues forward when it can, and
+# otherwise (or when force_reopen is set, after a failure) reopens the file at the nearest
+# remembered batch start at or before `offset` and skips forward from there.
+.cursor_move <- function(cursor, offset, force_reopen = FALSE) {
+  forward <- !isTRUE(force_reopen) && cursor$next_offset <= offset
+  if (!forward) {
+    known <- which(cursor$po <= offset)
+    k <- known[which.max(cursor$po[known])]
+    try(close(cursor$con), silent = TRUE)
+    cursor$con <- .binary_open_at(cursor$path, cursor$pp[k])
+    cursor$buf <- raw(0)
+    cursor$pos <- cursor$pp[k]
+    cursor$eof <- FALSE
+    cursor$next_offset <- cursor$po[k]
+  }
+  while (cursor$next_offset < offset) {
+    taken <- .cursor_take(cursor, max_rows = min(offset - cursor$next_offset, 1000000),
+                          max_bytes = 128e6, discard = TRUE)
+    if (taken$Rows == 0L) break
+  }
+  invisible(cursor)
+}
+
+# Takes up to max_rows records, within about max_bytes of text, from the cursor. Returns the text
+# (decoded to UTF-8, one record per line) and the number of records. Blank and whitespace-only
+# lines are dropped unless keep_blank, in which case Rows counts lines. A final line without a
+# terminator is a record. discard skips the records without returning their text.
+.cursor_take <- function(cursor, max_rows, max_bytes, keep_blank = FALSE, discard = FALSE, as_raw = FALSE) {
+  max_rows <- max(1, max_rows)
+  window <- max(1, max_bytes)
+  repeat {
+    if (!cursor$eof && length(cursor$buf) < window) .cursor_fill(cursor, window)
+    n <- length(cursor$buf)
+    if (n == 0L) return(list(Text = "", Rows = 0L))
+    scan_to <- min(n, window)
+    nl <- .raw_newlines(cursor$buf, scan_to)
+    if (length(nl) > 0L || (cursor$eof && scan_to == n)) break
+    window <- window + .cursor_block_bytes   # a line longer than the window: look further
+  }
+  k <- min(max_rows, length(nl))
+  end <- if (k > 0L) nl[k] else 0L
+  if (cursor$eof && scan_to == n && k == length(nl) && k < max_rows && end < n) {
+    end <- n
+    k <- k + 1L
+  }
+  #### Fast path: when no line is blank (every complete line is longer than a bare line ending), the ####
+  #### records are exactly the lines, so skipping needs no text at all and a UTF-8 batch can go   ####
+  #### to fread as raw bytes without ever becoming an R string.                                  ####
+  utf8 <- toupper(cursor$encoding) %in% c("UTF-8", "UTF8", "ASCII", "US-ASCII")
+  complete <- nl[seq_len(min(k, length(nl)))]
+  fast <- keep_blank || length(complete) == 0L || min(diff(c(0L, complete))) > 2L
+  if (fast && isTRUE(discard)) {
+    .cursor_advance(cursor, end, k)
+    return(list(Text = "", Rows = as.integer(k)))
+  }
+  bytes <- cursor$buf[seq_len(end)]
+  if (fast && isTRUE(as_raw) && utf8) {
+    .cursor_advance(cursor, end, k)
+    return(list(Raw = bytes, Rows = as.integer(k)))
+  }
+  text <- tryCatch(rawToChar(bytes), error = function(e) {
+    stop("embedded nul bytes in the source block (a corrupt or cut-off read).", call. = FALSE)
+  })
+  rm(bytes)
+  rows <- k
+  if (grepl("\r", text, fixed = TRUE)) text <- gsub("\r+\n", "\n", text, perl = TRUE)
+  if (!keep_blank && grepl("(^|\n)[ \t]*\n", text, perl = TRUE)) {
+    lines <- strsplit(text, "\n", fixed = TRUE)[[1]]
+    lines <- lines[!grepl("^[ \t]*$", lines)]
+    rows <- length(lines)
+    text <- if (rows > 0L) paste0(paste(lines, collapse = "\n"), "\n") else ""
+  }
+  if (isTRUE(discard)) {
+    text <- ""
+  } else if (nzchar(text)) {
+    text <- .decode_cursor_text(text, cursor$encoding)
+  }
+  .cursor_advance(cursor, end, rows)
+  list(Text = text, Rows = as.integer(rows))
+}
+
+# Consumes `end` bytes holding `rows` records: updates the buffer, the byte position, the record
+# count, and the table of remembered batch starts, and learns whether the end of file was reached.
+.cursor_advance <- function(cursor, end, rows) {
+  n <- length(cursor$buf)
+  cursor$buf <- if (end < n) cursor$buf[(end + 1L):n] else raw(0)
+  cursor$pos <- cursor$pos + end
+  cursor$next_offset <- cursor$next_offset + rows
+  last <- length(cursor$po)
+  if (cursor$next_offset > cursor$po[last]) {
+    cursor$po <- c(cursor$po, cursor$next_offset)
+    cursor$pp <- c(cursor$pp, cursor$pos)
+  }
+  if (length(cursor$buf) == 0L && !cursor$eof) .cursor_fill(cursor, 1)   # detects a true end of file
+  invisible(cursor)
+}
+
+.decode_cursor_text <- function(text, encoding) {
+  if (toupper(encoding) %in% c("UTF-8", "UTF8", "ASCII", "US-ASCII")) {
+    Encoding(text) <- "UTF-8"
+    if (!validUTF8(text)) stop("The source holds bytes that are not valid UTF-8; declare its ReaderOptions Encoding.", call. = FALSE)
+    return(text)
+  }
+  converted <- iconv(text, from = encoding, to = "UTF-8")
+  if (is.na(converted)) stop(sprintf("The source could not be converted from %s to UTF-8.", encoding), call. = FALSE)
+  converted
+}
+
+# Closes the cursor of a source whose last record has been read and parsed.
+.cursor_release_if_drained <- function(path) {
+  key <- normalizePath(path, winslash = "/", mustWork = FALSE)
+  cursor <- .delimited_cursors[[key]]
+  if (!is.null(cursor) && cursor$eof && length(cursor$buf) == 0L) .close_delimited_cursor(key)
+  invisible(NULL)
+}
+
+# One batch of records starting at record `offset`. Consecutive calls on one file continue on the
+# same open cursor; `reopen` (a retry) reopens the file at the recorded start of the batch.
+.delimited_chunk_batch <- function(path, offset, n_max, reader_options = list(),
+                                   batch_rows = 1000000L, batch_bytes = 128e6, reopen = FALSE) {
   key <- normalizePath(path, winslash = "/", mustWork = TRUE)
   size <- file.size(path)
   encoding <- reader_options$.EncodingInfo$EncodingUsed %||% "UTF-8"
-  offset <- as.numeric(offset)
-  n_max <- as.numeric(n_max)
   cursor <- .delimited_cursors[[key]]
-  if (!is.null(cursor) && (cursor$next_offset != offset || !identical(cursor$size, size) ||
-                           !identical(cursor$encoding, encoding))) {
+  if (!is.null(cursor) && (!identical(cursor$size, size) || !identical(cursor$encoding, encoding))) {
     .close_delimited_cursor(key)
     cursor <- NULL
   }
   if (is.null(cursor)) {
     info <- .delimited_header_info(path, reader_options)
-    con <- .open_delimited_text_connection(path, encoding)
-    if (info$SkipLines > 0L) readLines(con, n = info$SkipLines, warn = FALSE)
-    cursor <- new.env(parent = emptyenv())
-    cursor$con <- con
-    cursor$buffer <- character(0)
-    cursor$eof <- FALSE
-    cursor$next_offset <- 0
-    cursor$size <- size
-    cursor$encoding <- encoding
-    cursor$delimiter <- info$Delimiter
-    assign(key, cursor, envir = .delimited_cursors)
-    skipped <- 0
-    while (skipped < offset) {
-      .delimited_cursor_fill(cursor, min(offset - skipped, 100000))
-      take <- min(length(cursor$buffer), offset - skipped)
-      if (take == 0) break
-      cursor$buffer <- cursor$buffer[-seq_len(take)]
-      skipped <- skipped + take
-    }
-    cursor$next_offset <- skipped
+    cursor <- .cursor_new(path, key, encoding, info$Delimiter, info$SkipLines)
   }
-  finished <- FALSE
-  on.exit(if (!finished) .close_delimited_cursor(key), add = TRUE)
-  #### At most batch_rows records and batch_bytes of text are returned per call; the caller ####
-  #### asks again from the new offset, which continues on the same open cursor.        ####
-  .delimited_cursor_fill(cursor, min(n_max, batch_rows))
-  available <- min(length(cursor$buffer), n_max, batch_rows)
-  take <- if (available == 0) 0 else
-    max(1, sum(cumsum(nchar(cursor$buffer[seq_len(available)], type = "bytes") + 1) <= batch_bytes))
-  records <- cursor$buffer[seq_len(take)]
-  cursor$buffer <- cursor$buffer[-seq_len(take)]
-  cursor$next_offset <- cursor$next_offset + take
-  if (length(cursor$buffer) == 0L) .delimited_cursor_fill(cursor, 1)
-  if (cursor$eof && length(cursor$buffer) == 0L) .close_delimited_cursor(key)
-  finished <- TRUE
-  list(Records = records, Delimiter = cursor$delimiter)
-}
-
-.delimited_cursor_fill <- function(cursor, want) {
-  while (length(cursor$buffer) < want && !cursor$eof) {
-    lines <- readLines(cursor$con, n = as.integer(max(want, 10000)), warn = FALSE)
-    if (length(lines) == 0L) {
-      cursor$eof <- TRUE
-      break
-    }
-    cursor$buffer <- c(cursor$buffer, lines[!grepl("^\\s*$", lines)])
+  if (isTRUE(reopen) || cursor$next_offset != offset) {
+    .cursor_move(cursor, offset, force_reopen = isTRUE(reopen))
   }
-  invisible(NULL)
+  taken <- .cursor_take(cursor, max_rows = min(n_max, batch_rows), max_bytes = batch_bytes, as_raw = TRUE)
+  taken$Delimiter <- cursor$delimiter
+  taken
 }
 
 ################################################################################
@@ -4247,33 +4562,85 @@ set_layout_root <- function(path = NULL) {
 
 # Streams the file in one pass: callback receives consecutive data.tables of at most
 # chunk_size records. Memory is bounded by one chunk, whatever the file size.
+#
+# The file is read as bytes in batches of at most batch_bytes of text; each batch is checked against
+# the layout's record length and parsed inside a retry. A batch cut short by a dropped connection
+# (a record of the wrong length) or an early end of file (fewer records than expected_rows) is
+# re-read from that batch's own byte offset, and the file fails only after the retries are used up.
+# The callback is called outside the retry, so a chunk is never delivered twice.
 .stream_asc_records <- function(path, reader_options = list(), chunk_size = 100000L,
-                                max_rows = Inf, col_classes = NULL, callback) {
+                                max_rows = Inf, col_classes = NULL, callback,
+                                expected_rows = NA_real_, batch_bytes = 128e6) {
   if (!is.function(callback)) stop("Fixed-width streaming requires a callback function.")
   layout <- .asc_layout(reader_options)
   chunk_size <- max(1L, as.integer(chunk_size[1]))
-  con <- .asc_connection(path, reader_options)
-  on.exit(close(con), add = TRUE)
+  encoding <- .canonical_encoding_name(reader_options$Encoding %||% NULL)
+  if (identical(encoding, "auto")) encoding <- "ISO-8859-1"
+  cursor <- .cursor_new(path, normalizePath(path, winslash = "/", mustWork = TRUE), encoding,
+                        delimiter = NA_character_, skip_lines = 0L, register = FALSE)
+  on.exit(try(close(cursor$con), silent = TRUE), add = TRUE)
   line_no <- 0
   rows <- 0
   trailing_blank <- NA_real_
+  finished <- FALSE
   repeat {
     want <- if (is.finite(max_rows)) min(chunk_size, max_rows - rows) else chunk_size
-    if (want <= 0) break
-    lines <- readLines(con, n = want, warn = FALSE)
-    if (length(lines) == 0L) break
-    first_line <- line_no + 1
-    line_no <- line_no + length(lines)
-    batch <- .asc_records(lines, layout, first_line, path)
-    rm(lines)
-    if (!is.na(trailing_blank) && length(batch$records) > 0L) .asc_blank_error(path, trailing_blank)
-    if (is.na(trailing_blank)) trailing_blank <- batch$trailing_blank
-    if (length(batch$records) == 0L) next
-    chunk <- .asc_parse_records(batch$records, layout, first_line, path)
-    rm(batch)
-    rows <- rows + nrow(chunk)
-    callback(chunk)
-    rm(chunk)
+    if (want <= 0 || finished) break
+    parts <- list()
+    chunk_lines <- 0
+    chunk_rows <- 0
+    while (chunk_lines < want) {
+      start_line <- line_no
+      tries <- 0L
+      early_end <- function(n_records) {
+        stop(sprintf("row count mismatch: %s ended at record %s, but the independent count is %s.",
+                     basename(path), format(rows + chunk_rows + n_records, big.mark = ",", scientific = FALSE),
+                     format(expected_rows, big.mark = ",", scientific = FALSE)), call. = FALSE)
+      }
+      res <- .retry_io(function() {
+        tries <<- tries + 1L
+        if (tries > 1L) .cursor_move(cursor, start_line, force_reopen = TRUE)
+        taken <- .cursor_take(cursor, max_rows = want - chunk_lines, max_bytes = batch_bytes, keep_blank = TRUE)
+        if (taken$Rows == 0L) {
+          if (is.finite(expected_rows) && rows + chunk_rows < expected_rows) early_end(0)
+          return(NULL)
+        }
+        lines <- strsplit(taken$Text, "\n", fixed = TRUE)[[1]]
+        batch <- .asc_records(lines, layout, start_line + 1, path)
+        parsed <- if (length(batch$records) > 0L) {
+          .asc_parse_records(batch$records, layout, start_line + 1, path)
+        } else NULL
+        at_end <- cursor$eof && length(cursor$buf) == 0L
+        n_parsed <- if (is.null(parsed)) 0 else nrow(parsed)
+        if (at_end && is.finite(expected_rows) && rows + chunk_rows + n_parsed < expected_rows) early_end(n_parsed)
+        list(n = taken$Rows, trailing = batch$trailing_blank, parsed = parsed, at_end = at_end,
+             n_records = length(batch$records))
+      }, label = sprintf("fixed-width read %s from line %s", basename(path),
+                         format(start_line + 1, big.mark = ",", scientific = FALSE)))
+      if (is.null(res)) {
+        finished <- TRUE
+        break
+      }
+      line_no <- line_no + res$n
+      chunk_lines <- chunk_lines + res$n
+      if (!is.na(trailing_blank) && res$n_records > 0L) .asc_blank_error(path, trailing_blank)
+      if (is.na(trailing_blank)) trailing_blank <- res$trailing
+      if (!is.null(res$parsed)) {
+        parts[[length(parts) + 1L]] <- res$parsed
+        chunk_rows <- chunk_rows + nrow(res$parsed)
+      }
+      if (res$at_end) {
+        finished <- TRUE
+        break
+      }
+    }
+    if (length(parts) > 0L) {
+      chunk <- if (length(parts) == 1L) parts[[1L]] else data.table::rbindlist(parts, use.names = TRUE)
+      rm(parts)
+      rows <- rows + nrow(chunk)
+      callback(chunk)
+      rm(chunk)
+    }
   }
   list(Header = layout$Fields$Name, LogicalRows = as.numeric(rows), PhysicalLinesRead = as.numeric(line_no),
        RepairCount = 0, RepairLines = integer(), RepairPolicy = "error", ContinuationColumn = "",
@@ -4400,8 +4767,9 @@ register_builtin_file_readers <- function() {
       read_header = function(p, reader_options = list()) .read_delimited_header(p, reader_options),
       read_sample = function(p, reader_options = list()) .read_delimited_sample(p, reader_options),
       count_rows  = function(p, reader_options = list()) .count_delimited_rows(p, reader_options),
-      read_chunk = function(p, offset, n_max, header, col_classes = NULL, reader_options = list())
-        .read_delimited_chunk(p, offset, n_max, header, col_classes, reader_options),
+      read_chunk = function(p, offset, n_max, header, col_classes = NULL, reader_options = list(),
+                            exact_rows = FALSE)
+        .read_delimited_chunk(p, offset, n_max, header, col_classes, reader_options, exact_rows = exact_rows),
       chunkable = TRUE)
   }
   register_file_reader("sav",
@@ -5131,12 +5499,12 @@ safe_read_sav_chunked <- function(path, chunk_size = 1000000L, TerminalHiveParti
                            })
                 })
             }
-            chunk_write_attempts <- 3L
-            chunk_wait_s <- c(0L, 10L, 30L)
+            chunk_wait_s <- .io_retry_waits()
+            chunk_write_attempts <- length(chunk_wait_s)
             for (cattempt in seq_len(chunk_write_attempts)) {
               chunk_write_err <- tryCatch({
                 if (cattempt > 1L) {
-                  log_msg(sprintf("[CHUNKED WRITE RETRY] Attempt %d/%d after %ds: %s",
+                  log_msg(sprintf("[CHUNKED WRITE RETRY] Attempt %d/%d after %gs: %s",
                                   cattempt, chunk_write_attempts, chunk_wait_s[cattempt], basename(chunk_file)))
                   Sys.sleep(chunk_wait_s[cattempt])
                 }
@@ -5831,12 +6199,12 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
       file.path(target_dir, sprintf("%s_%05d.parquet", file_stem, chunk_num))
     }
     #### A network share can fail a large write transiently (errno 22); retry like the SAV writer.
-    write_attempts <- 3L
-    write_wait_s <- c(0L, 10L, 30L)
+    write_wait_s <- .io_retry_waits()
+    write_attempts <- length(write_wait_s)
     for (write_attempt in seq_len(write_attempts)) {
       write_err <- tryCatch({
         if (write_attempt > 1L) {
-          log_msg(sprintf("[CHUNKED WRITE RETRY] Attempt %d/%d after %ds: %s",
+          log_msg(sprintf("[CHUNKED WRITE RETRY] Attempt %d/%d after %gs: %s",
                           write_attempt, write_attempts, write_wait_s[write_attempt], basename(chunk_file)))
           Sys.sleep(write_wait_s[write_attempt])
         }
@@ -5904,7 +6272,8 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
     if (one_pass_stream) {
       diagnostics <- if (fixed_width) {
         .stream_asc_records(path, reader_options = reader_options, chunk_size = chunk_size,
-                            col_classes = col_classes, callback = process_chunk)
+                            col_classes = col_classes, callback = process_chunk,
+                            expected_rows = total_rows)
       } else {
         .stream_delimited_logical_records(
           path, reader_options = reader_options, chunk_size = chunk_size,
@@ -5944,7 +6313,7 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
                         formatC(total_rows, format = "d", big.mark = ",")))
         df_chunk <- tryCatch(
           call_reader(rd, "read_chunk", path, reader_options = reader_options,
-                      offset = offset, n_max = n_this, header = header,
+                      offset = offset, n_max = n_this, header = header, exact_rows = TRUE,
                       col_classes = col_classes),
           error = function(e) e)
         if (inherits(df_chunk, "error")) {
@@ -5981,7 +6350,7 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
                         formatC(total_rows, format = "d", big.mark = ",")))
         df_chunk <- tryCatch(
           call_reader(rd, "read_chunk", path, reader_options = reader_options,
-                      offset = offset, n_max = n_this, header = header,
+                      offset = offset, n_max = n_this, header = header, exact_rows = TRUE,
                       col_classes = col_classes),
           error = function(e) e)
         if (inherits(df_chunk, "error")) {
@@ -6251,22 +6620,27 @@ load_checkpoint <- function(path){
 #' unlink(c(tmp_checkpoint, paste0(tmp_checkpoint, ".previous")))
 #' @export
 save_checkpoint <- function(checkpoint, path) {
-  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
-  pending <- paste0(path, ".pending")
-  previous <- paste0(path, ".previous")
-  if (file.exists(pending)) unlink(pending)
-  saveRDS(unique(checkpoint), pending)
-  verified <- readRDS(pending)
-  if (!identical(unique(checkpoint), verified)) stop("Checkpoint verification failed before replacement.")
-  if (file.exists(path)) {
-    if (!file.copy(path, previous, overwrite = TRUE, copy.date = TRUE)) {
-      stop(sprintf("Could not preserve previous checkpoint generation: %s", previous))
+  #### A transient I/O error repeats the whole verified sequence from a fresh .pending file;  ####
+  #### replace_file_safely restores the old file if a replacement fails, so no retry can      ####
+  #### leave a half-written checkpoint in place.                                              ####
+  .retry_io(function() {
+    dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+    pending <- paste0(path, ".pending")
+    previous <- paste0(path, ".previous")
+    if (file.exists(pending)) unlink(pending)
+    saveRDS(unique(checkpoint), pending)
+    verified <- readRDS(pending)
+    if (!identical(unique(checkpoint), verified)) stop("Checkpoint verification failed before replacement.")
+    if (file.exists(path)) {
+      if (!file.copy(path, previous, overwrite = TRUE, copy.date = TRUE)) {
+        stop(sprintf("Could not preserve previous checkpoint generation: %s", previous))
+      }
     }
-  }
-  replace_file_safely(pending, path)
-  final <- readRDS(path)
-  if (!identical(verified, final)) stop("Checkpoint verification failed after replacement.")
-  invisible(TRUE)
+    replace_file_safely(pending, path)
+    final <- readRDS(path)
+    if (!identical(verified, final)) stop("Checkpoint verification failed after replacement.")
+    invisible(TRUE)
+  }, label = paste("checkpoint", basename(path)))
 }
 
 ################################################################################
@@ -6606,6 +6980,268 @@ rename_checkpoint_table <- function(CheckpointPath, MDT, Database, OldTableName,
     log_msg(sprintf("[RENAME] Migration complete for %s/%s -> %s.", Database, OldTableName, NewTableName))
   }
   invisible(list(n_checkpoint_migrated = n_ckpt, n_manifest_migrated = n_manifest))
+}
+
+# Post-write verification and narrow reload recovery --------------------------
+
+.source_parquet_files <- function(ManifestPath, Database, TableName, SourcePath,
+                                  expected_directories = character(),
+                                  MaxFileStemTruncate = FALSE) {
+  manifest_files <- character()
+  if (!is.null(ManifestPath) && nzchar(ManifestPath) && file.exists(ManifestPath)) {
+    manifest <- read_parquet_manifest(ManifestPath)
+    if (nrow(manifest) > 0L && all(c("Database", "TableName", "SourcePath", "ParquetPath") %in% names(manifest))) {
+      hit <- as.character(manifest$Database) == as.character(Database) &
+        as.character(manifest$TableName) == as.character(TableName) &
+        as.character(manifest$SourcePath) == as.character(SourcePath) &
+        grepl("\\.parquet$", as.character(manifest$ParquetPath), ignore.case = TRUE)
+      if ("Status" %in% names(manifest)) hit <- hit & as.character(manifest$Status) == "written"
+      manifest_files <- unique(as.character(manifest$ParquetPath[hit]))
+    }
+  }
+
+  if (length(manifest_files) > 0L) return(manifest_files)
+
+  dirs <- unique(as.character(expected_directories))
+  dirs <- dirs[!is.na(dirs) & nzchar(dirs) & dir.exists(dirs)]
+  if (length(dirs) == 0L) return(character())
+
+  candidates <- unlist(lapply(dirs, function(directory) {
+    list.files(directory, pattern = "\\.parquet$", recursive = TRUE,
+               full.names = TRUE, ignore.case = TRUE)
+  }), use.names = FALSE)
+  if (length(candidates) == 0L) return(character())
+
+  stems <- unique(unlist(lapply(dirs, function(directory) c(
+    parquet_output_stem(SourcePath, partition_dir = directory,
+                        MaxFileStemTruncate = MaxFileStemTruncate),
+    parquet_chunk_stem(SourcePath, partition_dir = directory,
+                       MaxFileStemTruncate = MaxFileStemTruncate)
+  )), use.names = FALSE))
+  keep <- vapply(basename(candidates), function(filename) {
+    any(startsWith(tolower(filename), tolower(stems)))
+  }, logical(1))
+  unique(candidates[keep])
+}
+
+.verify_source_parquet_output <- function(ManifestPath, Database, TableName, SourcePath,
+                                          expected_rows, expected_directories = character(),
+                                          MaxFileStemTruncate = FALSE) {
+  directories <- unique(as.character(expected_directories))
+  directories <- directories[!is.na(directories) & nzchar(directories)]
+  absent_dirs <- directories[!dir.exists(directories)]
+  if (length(absent_dirs) > 0L) {
+    stop(sprintf("Post-write output verification failed for %s: partition directory is missing: %s",
+                 SourcePath, absent_dirs[1]))
+  }
+
+  files <- .source_parquet_files(
+    ManifestPath = ManifestPath, Database = Database, TableName = TableName,
+    SourcePath = SourcePath, expected_directories = directories,
+    MaxFileStemTruncate = MaxFileStemTruncate
+  )
+  if (length(files) == 0L) {
+    stop(sprintf("Post-write output verification failed for %s: no source-specific Parquet files were found.",
+                 SourcePath))
+  }
+  missing_files <- files[!file.exists(files)]
+  if (length(missing_files) > 0L) {
+    stop(sprintf("Post-write output verification failed for %s: expected Parquet file is missing: %s",
+                 SourcePath, missing_files[1]))
+  }
+
+  if (length(directories) > 0L) {
+    file_paths <- normalize_repo_path(files)
+    for (directory in directories) {
+      prefix <- paste0(normalize_repo_path(directory), "/")
+      if (!any(startsWith(file_paths, prefix))) {
+        stop(sprintf("Post-write output verification failed for %s: no Parquet file was found in %s.",
+                     SourcePath, directory))
+      }
+    }
+  }
+
+  file_rows <- vapply(files, function(path) {
+    .retry_io(function() {
+      reader <- arrow::ParquetFileReader$create(path)
+      reader$GetSchema()
+      as.numeric(reader$num_rows)
+    }, label = paste("Parquet verification", basename(path)))
+  }, numeric(1))
+  expected_rows <- suppressWarnings(as.numeric(expected_rows[1]))
+  actual_rows <- sum(file_rows)
+  if (!is.na(expected_rows) && !isTRUE(all.equal(actual_rows, expected_rows, tolerance = 0))) {
+    stop(sprintf("Post-write output verification failed for %s: wrote %s row(s), but expected %s.",
+                 SourcePath, format(actual_rows, scientific = FALSE),
+                 format(expected_rows, scientific = FALSE)))
+  }
+  invisible(list(files = files, n_rows = actual_rows, directories = directories))
+}
+
+.cleanup_source_parquet_output <- function(ManifestPath, Database, TableName, SourcePath,
+                                           expected_directories = character(),
+                                           MaxFileStemTruncate = FALSE,
+                                           DryRun = FALSE) {
+  files <- .source_parquet_files(
+    ManifestPath = ManifestPath, Database = Database, TableName = TableName,
+    SourcePath = SourcePath, expected_directories = expected_directories,
+    MaxFileStemTruncate = MaxFileStemTruncate
+  )
+  if (!DryRun && length(files) > 0L) {
+    failed <- files[!vapply(files, safe_unlink, logical(1), log_failures = TRUE)]
+    if (length(failed) > 0L) {
+      stop(sprintf("Could not remove %d Parquet file(s) for failed source %s.",
+                   length(failed), SourcePath))
+    }
+  }
+  n_manifest <- if (!DryRun) {
+    remove_parquet_manifest_rows(ManifestPath, Database = Database,
+                                 TableName = TableName, SourcePath = SourcePath)
+  } else 0L
+  cleanup_directories <- unique(c(as.character(expected_directories), dirname(files)))
+  cleanup_directories <- cleanup_directories[!is.na(cleanup_directories) & nzchar(cleanup_directories)]
+  for (directory in cleanup_directories) {
+    if (!DryRun) .prune_empty_output_directories(directory)
+  }
+  invisible(list(files = files, n_files = length(files), n_manifest_removed = n_manifest))
+}
+
+#' Resets one or more source files so the loader rewrites them
+#'
+#' Removes only the output, manifest records, and checkpoint entries belonging
+#' to selected MDT source paths. This is the narrow recovery option for a
+#' checkpointed source whose output is missing or needs to be rebuilt. A source
+#' that supplies multiple Hive partitions is reset as a whole because a
+#' checkpoint belongs to the source file rather than to an individual output
+#' partition.
+#' @param MDT Data frame. Master Database Table.
+#' @param Database,TableName Character scalars identifying one logical table.
+#' @param SourcePath Character vector of exact values from code{MDT$Path}.
+#' @param ParquetBasePath,CheckpointPath,ManifestPath Repository paths.
+#' @param DryRun Logical. Report the affected files and records when
+#'   code{TRUE}; remove them only when code{FALSE}.
+#' @param LogPath Optional log file path.
+#' @return Invisibly, a list describing removed or planned output, checkpoint,
+#'   and manifest records.
+#' @export
+reset_source_for_reload <- function(MDT, Database, TableName, SourcePath,
+                                    ParquetBasePath, CheckpointPath,
+                                    ManifestPath = NULL, DryRun = TRUE,
+                                    LogPath = NULL) {
+  rows <- MDT[as.character(MDT$Database) == as.character(Database) &
+                as.character(MDT$TableName) == as.character(TableName) &
+                as.character(MDT$Path) %in% as.character(SourcePath), , drop = FALSE]
+  if (nrow(rows) == 0L) {
+    log_msg(sprintf("[RESET] No MDT rows match %s/%s and the requested source path(s).", Database, TableName),
+            log_path = LogPath)
+    return(invisible(list(n_sources = 0L, n_files = 0L, n_checkpoint_removed = 0L,
+                          n_manifest_removed = 0L)))
+  }
+  table_name <- repository_table_name_for_row(rows[1, , drop = FALSE])
+  source_paths <- unique(as.character(rows$Path))
+  expected_dirs_for <- function(source_path) {
+    source_rows <- rows[as.character(rows$Path) == source_path, , drop = FALSE]
+    unique(vapply(seq_len(nrow(source_rows)), function(i) {
+      file.path(ParquetBasePath, table_name, partition_spec_for_row(source_rows[i, , drop = FALSE])$dir)
+    }, character(1)))
+  }
+  checkpoint <- load_checkpoint(path = CheckpointPath)
+  checkpoint_base <- sub("\\|\\|SOURCE=.*$", "", checkpoint)
+  reset_keys <- c(repository_checkpoint_key(rows), repository_checkpoint_legacy_key(rows), source_paths)
+  stale <- checkpoint_base %in% reset_keys
+  plans <- lapply(source_paths, function(source_path) .cleanup_source_parquet_output(
+    ManifestPath = ManifestPath, Database = Database, TableName = TableName,
+    SourcePath = source_path, expected_directories = expected_dirs_for(source_path),
+    DryRun = TRUE
+  ))
+  n_files <- sum(vapply(plans, `[[`, integer(1), "n_files"))
+  manifest <- if (!is.null(ManifestPath) && file.exists(ManifestPath)) read_parquet_manifest(ManifestPath) else NULL
+  n_manifest <- if (!is.null(manifest) && nrow(manifest) > 0L &&
+                    all(c("Database", "TableName", "SourcePath") %in% names(manifest))) {
+    sum(as.character(manifest$Database) == as.character(Database) &
+          as.character(manifest$TableName) == as.character(TableName) &
+          as.character(manifest$SourcePath) %in% source_paths)
+  } else 0L
+  log_msg(sprintf("[RESET]%s %s: %s %d source(s), %d Parquet file(s), %d checkpoint entrie(s), and %d manifest row(s).",
+                  if (DryRun) " (dry run)" else "", table_name,
+                  if (DryRun) "would remove" else "removing", length(source_paths), n_files,
+                  sum(stale), n_manifest), log_path = LogPath)
+  if (!DryRun) {
+    reset_lock <- acquire_repository_lock(repository_lock_path_default(ParquetBasePath),
+                                          owner_note = sprintf("reset_source_for_reload %s", table_name),
+                                          LogPath = LogPath)
+    on.exit(release_repository_lock(reset_lock, LogPath = LogPath), add = TRUE)
+    actual <- lapply(source_paths, function(source_path) .cleanup_source_parquet_output(
+      ManifestPath = ManifestPath, Database = Database, TableName = TableName,
+      SourcePath = source_path, expected_directories = expected_dirs_for(source_path),
+      DryRun = FALSE
+    ))
+    if (any(stale)) save_checkpoint(checkpoint[!stale], CheckpointPath)
+    n_files <- sum(vapply(actual, `[[`, integer(1), "n_files"))
+    n_manifest <- sum(vapply(actual, `[[`, integer(1), "n_manifest_removed"))
+    log_msg(sprintf("[RESET] %s source reset complete. Re-run ParquetBackEndCreate with DBLoad = \"%s\".",
+                    table_name, Database), log_path = LogPath)
+  }
+  invisible(list(n_sources = length(source_paths), n_files = n_files,
+                 n_checkpoint_removed = sum(stale), n_manifest_removed = n_manifest,
+                 source_paths = source_paths))
+}
+
+#' Resets every source contributing to one Hive partition
+#'
+#' Finds the MDT and manifest source records for a partition, then delegates to
+#' code{reset_source_for_reload()}. When a single source populates several
+#' partitions, all output from that source is reset to keep source-level
+#' checkpointing and manifest provenance consistent.
+#' @inheritParams reset_source_for_reload
+#' @param PartitionKey,PartitionValue Hive partition key and value to recover.
+#' @return Invisibly, the result from code{reset_source_for_reload()}.
+#' @export
+reset_partition_for_reload <- function(MDT, Database, TableName,
+                                       PartitionKey, PartitionValue,
+                                       ParquetBasePath, CheckpointPath,
+                                       ManifestPath = NULL, DryRun = TRUE,
+                                       LogPath = NULL) {
+  key <- toupper(trimws(as.character(PartitionKey[1])))
+  value <- as.character(PartitionValue[1])
+  table_rows <- MDT[as.character(MDT$Database) == as.character(Database) &
+                      as.character(MDT$TableName) == as.character(TableName), , drop = FALSE]
+  row_sources <- if (nrow(table_rows) > 0L) {
+    keep <- vapply(seq_len(nrow(table_rows)), function(i) {
+      spec <- partition_spec_for_row(table_rows[i, , drop = FALSE])
+      pos <- match(key, toupper(spec$keys))
+      !is.na(pos) && identical(as.character(spec$values[pos]), value)
+    }, logical(1))
+    unique(as.character(table_rows$Path[keep]))
+  } else character()
+  manifest_sources <- character()
+  if (!is.null(ManifestPath) && file.exists(ManifestPath)) {
+    manifest <- read_parquet_manifest(ManifestPath)
+    if (nrow(manifest) > 0L && all(c("Database", "TableName", "PartitionKey", "PartitionValue", "SourcePath") %in% names(manifest))) {
+      manifest_partition_match <- vapply(seq_len(nrow(manifest)), function(i) {
+        keys <- strsplit(as.character(manifest$PartitionKey[i]), ";", fixed = TRUE)[[1]]
+        values <- strsplit(as.character(manifest$PartitionValue[i]), ";", fixed = TRUE)[[1]]
+        pos <- match(key, toupper(keys))
+        !is.na(pos) && length(values) >= pos && identical(values[pos], value)
+      }, logical(1))
+      hit <- as.character(manifest$Database) == as.character(Database) &
+        as.character(manifest$TableName) == as.character(TableName) &
+        manifest_partition_match
+      manifest_sources <- unique(as.character(manifest$SourcePath[hit]))
+    }
+  }
+  sources <- unique(c(row_sources, manifest_sources))
+  sources <- sources[!is.na(sources) & nzchar(sources)]
+  if (length(sources) == 0L) {
+    log_msg(sprintf("[RESET] No source contributes to %s/%s partition %s=%s.",
+                    Database, TableName, key, value), log_path = LogPath)
+    return(invisible(list(n_sources = 0L, n_files = 0L, n_checkpoint_removed = 0L,
+                          n_manifest_removed = 0L)))
+  }
+  reset_source_for_reload(MDT = MDT, Database = Database, TableName = TableName,
+                          SourcePath = sources, ParquetBasePath = ParquetBasePath,
+                          CheckpointPath = CheckpointPath, ManifestPath = ManifestPath,
+                          DryRun = DryRun, LogPath = LogPath)
 }
 
 #' Resets one table so the loader rewrites it under the current schema registry
@@ -7867,16 +8503,21 @@ ExportRepositoryMetadata <- function(
 }
 
 manifest_transaction <- function(ManifestPath, code) {
-  dir.create(dirname(ManifestPath), recursive = TRUE, showWarnings = FALSE)
-  con <- DBI::dbConnect(duckdb::duckdb(), dbdir = ManifestPath, read_only = FALSE)
-  on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
-  DBI::dbBegin(con)
-  committed <- FALSE
-  on.exit(if (!committed) try(DBI::dbRollback(con), silent = TRUE), add = TRUE)
-  value <- force(code(con))
-  DBI::dbCommit(con)
-  committed <- TRUE
-  value
+  #### Each attempt is one whole transaction on a fresh connection: it commits or rolls back,   ####
+  #### and every caller's statements are idempotent (delete-then-append by key, overwrite, set), ####
+  #### so repeating a transaction after a dropped connection cannot duplicate or half-apply.    ####
+  .retry_io(function() {
+    dir.create(dirname(ManifestPath), recursive = TRUE, showWarnings = FALSE)
+    con <- DBI::dbConnect(duckdb::duckdb(), dbdir = ManifestPath, read_only = FALSE)
+    on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
+    DBI::dbBegin(con)
+    committed <- FALSE
+    on.exit(if (!committed) try(DBI::dbRollback(con), silent = TRUE), add = TRUE)
+    value <- force(code(con))
+    DBI::dbCommit(con)
+    committed <- TRUE
+    value
+  }, label = paste("manifest", basename(ManifestPath)))
 }
 
 manifest_add_missing_columns <- function(con, row) {
@@ -7922,10 +8563,13 @@ write_parquet_manifest_atomic <- function(manifest, ManifestPath) {
     })
     return(invisible(ManifestPath))
   }
-  dir.create(dirname(ManifestPath), recursive = TRUE, showWarnings = FALSE)
-  tmp <- tempfile(pattern = paste0(basename(ManifestPath), ".tmp_"), tmpdir = dirname(ManifestPath))
-  data.table::fwrite(data.table::as.data.table(manifest), tmp)
-  replace_file_safely(tmp, ManifestPath)
+  .retry_io(function() {
+    dir.create(dirname(ManifestPath), recursive = TRUE, showWarnings = FALSE)
+    tmp <- tempfile(pattern = paste0(basename(ManifestPath), ".tmp_"), tmpdir = dirname(ManifestPath))
+    on.exit(if (file.exists(tmp)) unlink(tmp), add = TRUE)
+    data.table::fwrite(data.table::as.data.table(manifest), tmp)
+    replace_file_safely(tmp, ManifestPath)
+  }, label = paste("manifest", basename(ManifestPath)))
   invisible(ManifestPath)
 }
 
@@ -8116,7 +8760,9 @@ update_parquet_manifest <- function(ManifestPath, Database, TableName, DuckDBTab
     })
     return(invisible(row))
   }
-  old <- if (file.exists(ManifestPath)) read_parquet_manifest(ManifestPath) else data.table::data.table()
+  old <- if (file.exists(ManifestPath)) {
+    .retry_io(function() read_parquet_manifest(ManifestPath), label = paste("manifest read", basename(ManifestPath)))
+  } else data.table::data.table()
   if (nrow(old) > 0L) {
     slot_of <- function(dt) {
       pv <- if ("PartitionValue" %in% names(dt)) as.character(dt$PartitionValue) else rep(NA_character_, nrow(dt))
@@ -8437,6 +9083,11 @@ validate_duckdb_table <- function(con, table_name, schema_registry = NULL, stric
   payload <- readRDS(payload_path)
   previous_run <- begin_repository_run(LogPath = payload$LogPath, RunId = payload$RunId)
   on.exit(restore_repository_run(previous_run), add = TRUE)
+  if (!is.null(payload$io_retry)) {
+    previous_io <- options(repoquet.io_retry_attempts = payload$io_retry$attempts,
+                           repoquet.io_retry_pause_seconds = payload$io_retry$pause)
+    on.exit(options(previous_io), add = TRUE)
+  }
   tryCatch({
     if (.uses_delimited_logical_stream(payload$reader_options)) {
       stop("Hardened direct mode is unavailable for MalformedRowPolicy='append_previous'; using the logical-record chunked reader preserves its repair semantics.")
@@ -8448,6 +9099,7 @@ validate_duckdb_table <- function(con, table_name, schema_registry = NULL, stric
                       reader_options = payload$reader_options,
                       col_classes = payload$col_classes)
     if (!is.data.frame(df)) stop("Direct worker reader did not return a data frame.")
+    .check_read_row_count(nrow(df), payload$expected_rows, payload$path)
     read_elapsed <- as.numeric(difftime(Sys.time(), read_started, units = "secs"))
     log_msg(sprintf("[FAIL PROBE] Worker direct read complete for %s: %s rows in %.1f seconds; routing and writing.",
                     basename(payload$path), formatC(nrow(df), format = "d", big.mark = ","), read_elapsed))
@@ -8484,7 +9136,7 @@ validate_duckdb_table <- function(con, table_name, schema_registry = NULL, stric
                                      DuckDBTable, SourcePath, SchemaHash,
                                      MaxFileStemTruncate, reader, reader_options,
                                      chunk_size, timeout_seconds = 7200,
-                                     source_path = NULL) {
+                                     source_path = NULL, expected_rows = NA_real_) {
   if (!requireNamespace("processx", quietly = TRUE)) {
     return(list(ok = FALSE, error = "Hardened FAIL mode requires the processx package."))
   }
@@ -8507,6 +9159,7 @@ validate_duckdb_table <- function(con, table_name, schema_registry = NULL, stric
     SourcePath = SourcePath, SchemaHash = SchemaHash,
     MaxFileStemTruncate = MaxFileStemTruncate, reader = reader,
     reader_options = reader_options, chunk_size = chunk_size,
+    expected_rows = expected_rows, io_retry = .io_retry_settings(),
     LogPath = resolve_log_path(), RunId = resolve_run_id())
   saveRDS(payload, payload_path)
   worker_script <- c(
@@ -8785,7 +9438,11 @@ read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL, tab
   } else {
     file.path(MasterDBPath, path)
   }
-  if(!file.exists(full_path)){
+  source_root <- if (startsWith(normalizePath(full_path, winslash = "/", mustWork = FALSE),
+                                normalizePath(MasterDBPath, winslash = "/", mustWork = FALSE))) {
+    MasterDBPath
+  } else dirname(full_path)
+  if(!.wait_for_source(full_path, source_root)){
     log_msg(sprintf("[ERROR] Check file path. File not found: %s", full_path))
     return(data.frame())
   }
@@ -8809,8 +9466,9 @@ read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL, tab
   }
   #### Formats without a chunked implementation are a single full read.     ####
   if (!isTRUE(rd$chunkable)) {
-    df <- tryCatch(call_reader(rd, "read_full", full_path, reader_options = reader_options,
-                               col_classes = col_classes), error = function(e) {
+    df <- tryCatch(.retry_io(function() call_reader(rd, "read_full", full_path, reader_options = reader_options,
+                                                    col_classes = col_classes),
+                             label = paste("read", basename(full_path))), error = function(e) {
       log_msg(sprintf("[ERROR] %s read failed for %s: %s", reader, basename(full_path), conditionMessage(e)))
       structure(data.frame(), repoquet_read_error = conditionMessage(e))
     })
@@ -8858,7 +9516,7 @@ read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL, tab
   }
   if(PartitionBy == "FAIL"){
     if (delimited_reader && FailProbeMode == "subprocess") {
-      probe <- .run_hardened_fail_probe(
+      probe <- .retry_fail_probe(function() .run_hardened_fail_probe(
         path = full_path, year_dir = year_dir, table_dir = table_dir,
         all_cols = all_cols, col_classes = col_classes, year_val = year_val,
         TerminalHivePartition = TerminalHivePartition,
@@ -8869,7 +9527,8 @@ read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL, tab
         DuckDBTable = DuckDBTable, SourcePath = SourcePath %||% path,
         SchemaHash = SchemaHash, MaxFileStemTruncate = MaxFileStemTruncate,
         reader = reader, reader_options = reader_options, chunk_size = SAV_CHUNK_SIZE,
-        timeout_seconds = FailProbeTimeoutSeconds, source_path = FailProbeSourcePath)
+        timeout_seconds = FailProbeTimeoutSeconds, source_path = FailProbeSourcePath,
+        expected_rows = ncases), basename(full_path))
       if (isTRUE(probe$ok)) return(probe$result)
       log_msg(sprintf("[FAIL PROBE] Isolated direct worker did not complete for %s: %s -- using adaptive chunked reader in the main process.",
                       basename(full_path), probe$error %||% "unknown worker failure"))
@@ -8882,8 +9541,12 @@ read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL, tab
     } else {
       if(PrintStatus){ print("Performing test read") }
       DFTemp <- tryCatch({
-        df <- call_reader(rd, "read_full", full_path, reader_options = reader_options,
-                          col_classes = col_classes)
+        df <- .retry_io(function() {
+          out <- call_reader(rd, "read_full", full_path, reader_options = reader_options,
+                             col_classes = col_classes)
+          if (is.data.frame(out)) .check_read_row_count(nrow(out), ncases, full_path)
+          out
+        }, label = paste("direct read", basename(full_path)))
         df <- align_columns(df, all_cols, col_classes, max_coerce_na_pct = max_coerce_na_pct)
         list(data = df, error = FALSE, pre_aligned = TRUE)
       }, error = function(e){
@@ -8959,8 +9622,12 @@ read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL, tab
       rm(DFTemp); gc(verbose = FALSE)
       list(data = df_out, pre_aligned = pre_aligned, written = FALSE)
     } else {
-      tryCatch(call_reader(rd, "read_full", full_path, reader_options = reader_options,
-                           col_classes = col_classes), error = function(e) {
+      tryCatch(.retry_io(function() {
+        out <- call_reader(rd, "read_full", full_path, reader_options = reader_options,
+                           col_classes = col_classes)
+        if (is.data.frame(out)) .check_read_row_count(nrow(out), ncases, full_path)
+        out
+      }, label = paste("direct read", basename(full_path))), error = function(e) {
         log_msg(sprintf("[ERROR] %s read failed for %s: %s", reader, basename(full_path), conditionMessage(e)))
         structure(data.frame(), repoquet_read_error = conditionMessage(e))
       })
@@ -10050,6 +10717,12 @@ discover_schema_relationships <- function(table_schema, include_candidates = TRU
 #'   rather than an installed package. Defaults to
 #'   \code{REPOQUET_SOURCE}, then the current working directory. An
 #'   installed package loads its namespace instead.
+#' @param IORetryAttempts Integer. Attempts, counting the first, for an
+#'   operation that fails with a transient input or output error. Passed
+#'   to \code{ParquetBackEndCreate}. Defaults to \code{3}.
+#' @param IORetryPauseSeconds Numeric scalar. Seconds before the first
+#'   retry; later retries wait three times as long as the one before.
+#'   Passed to \code{ParquetBackEndCreate}. Defaults to \code{10}.
 #' @param SAV_ROW_THRESHOLD Integer. Row count above which a SAV file
 #'   streams in chunks. Accepts \code{NULL}, which keeps the
 #'   configuration file's value, or the default of \code{1000000}.
@@ -10137,6 +10810,8 @@ load_repository_config <- function(
     FailProbeMode = NULL,
     FailProbeTimeoutSeconds = NULL,
     FailProbeSourcePath = NULL,
+    IORetryAttempts = NULL,
+    IORetryPauseSeconds = NULL,
     SAV_ROW_THRESHOLD = NULL,
     RAMThreshold = NULL,
     PartitionBy = NULL,
@@ -10176,6 +10851,8 @@ load_repository_config <- function(
     FailProbeMode = "subprocess",
     FailProbeTimeoutSeconds = 7200,
     FailProbeSourcePath = NULL,
+    IORetryAttempts = 3L,
+    IORetryPauseSeconds = 10,
     SAV_ROW_THRESHOLD = 1000000L,
     RAMThreshold = 30,
     PartitionBy = "NRows",
@@ -10221,6 +10898,8 @@ load_repository_config <- function(
     FailProbeMode = FailProbeMode,
     FailProbeTimeoutSeconds = FailProbeTimeoutSeconds,
     FailProbeSourcePath = FailProbeSourcePath,
+    IORetryAttempts = IORetryAttempts,
+    IORetryPauseSeconds = IORetryPauseSeconds,
     SAV_ROW_THRESHOLD = SAV_ROW_THRESHOLD,
     RAMThreshold = RAMThreshold,
     PartitionBy = PartitionBy,
@@ -10280,6 +10959,14 @@ load_repository_config <- function(
   if (length(cfg$FailProbeTimeoutSeconds) != 1L || is.na(cfg$FailProbeTimeoutSeconds) ||
       cfg$FailProbeTimeoutSeconds < 1) {
     stop("repository_config FailProbeTimeoutSeconds must be a positive number.")
+  }
+  cfg$IORetryAttempts <- suppressWarnings(as.integer(cfg$IORetryAttempts[1]))
+  if (length(cfg$IORetryAttempts) != 1L || is.na(cfg$IORetryAttempts) || cfg$IORetryAttempts < 1L) {
+    stop("repository_config IORetryAttempts must be a positive integer.")
+  }
+  cfg$IORetryPauseSeconds <- suppressWarnings(as.numeric(cfg$IORetryPauseSeconds[1]))
+  if (length(cfg$IORetryPauseSeconds) != 1L || is.na(cfg$IORetryPauseSeconds) || cfg$IORetryPauseSeconds < 0) {
+    stop("repository_config IORetryPauseSeconds must be a non-negative number.")
   }
   if (!is.null(cfg$FailProbeSourcePath)) {
     cfg$FailProbeSourcePath <- as.character(cfg$FailProbeSourcePath[1])
@@ -10476,6 +11163,8 @@ create_repository_project <- function(dir, MasterDBPath = file.path(dir, "source
     "                                  DelimitedPartitionMaxMB = cfg$DelimitedPartitionMaxMB,",
     "                                  FailProbeMode = cfg$FailProbeMode,",
     "                                  FailProbeTimeoutSeconds = cfg$FailProbeTimeoutSeconds,",
+    "                                  IORetryAttempts = cfg$IORetryAttempts,",
+    "                                  IORetryPauseSeconds = cfg$IORetryPauseSeconds,",
     "                                  FailProbeSourcePath = cfg$FailProbeSourcePath,",
     "                                  MaxFileStemTruncate = TRUE, TerminalHivePartition = FALSE,",
     "                                  SchemaRegistryPath = paths$SchemaRegistryPath,",
@@ -15807,8 +16496,37 @@ generic_db_loader <- function(files, base_path, db_prefix, completed_checkpoint,
                     RepositoryLock = RepositoryLock)
       gc(verbose = FALSE)
       if (is.list(df) && isTRUE(df$written)) {
-        if (identical(df$n_rows, 0L)) empty_ok <- TRUE
+        if (isTRUE(suppressWarnings(as.numeric(df$n_rows) == 0))) empty_ok <- TRUE
         if (!is.null(df$partitions) && nrow(df$partitions) > 0L) loaded_partitions <- df$partitions
+        if (!empty_ok) {
+          output_dirs <- if (!is.null(loaded_partitions) && "Directory" %in% names(loaded_partitions)) {
+            as.character(loaded_partitions$Directory)
+          } else year_dir
+          verification <- tryCatch(
+            .verify_source_parquet_output(
+              ManifestPath = ManifestPath, Database = db_prefix, TableName = suffix,
+              SourcePath = source_path, expected_rows = df$n_rows,
+              expected_directories = output_dirs,
+              MaxFileStemTruncate = MaxFileStemTruncate
+            ),
+            error = function(e) e
+          )
+          if (inherits(verification, "error")) {
+            cleanup <- try(.cleanup_source_parquet_output(
+              ManifestPath = ManifestPath, Database = db_prefix, TableName = suffix,
+              SourcePath = source_path, expected_directories = output_dirs,
+              MaxFileStemTruncate = MaxFileStemTruncate
+            ), silent = TRUE)
+            if (inherits(cleanup, "try-error")) {
+              log_msg(sprintf("[CLEANUP WARN] Could not fully remove failed output for %s: %s",
+                              source_path, as.character(cleanup)))
+            }
+            stop(conditionMessage(verification))
+          }
+          log_msg(sprintf("[POST-WRITE VERIFY] %s: %d Parquet file(s), %s row(s).",
+                          source_path, length(verification$files),
+                          format(verification$n_rows, scientific = FALSE)))
+        }
         completion_status <- as.character(df$status %||% if (empty_ok) "empty" else "completed")
         partition_label <- if (!is.null(loaded_partitions) && nrow(loaded_partitions) > 1L) {
           sprintf("%d source-defined partitions: %s", nrow(loaded_partitions),
@@ -15859,6 +16577,30 @@ generic_db_loader <- function(files, base_path, db_prefix, completed_checkpoint,
                                 RunId = RunId, RepositoryKey = repository_key,
                                 SourceSize = source_meta$size, SourceMTimeUTC = source_meta$mtime_utc,
                                 SourceSHA256 = source_meta$sha256, SourceFingerprint = source_meta$fingerprint)
+        verification <- tryCatch(
+          .verify_source_parquet_output(
+            ManifestPath = ManifestPath, Database = db_prefix, TableName = suffix,
+            SourcePath = source_path, expected_rows = n_rows_written,
+            expected_directories = dirname(out_file),
+            MaxFileStemTruncate = MaxFileStemTruncate
+          ),
+          error = function(e) e
+        )
+        if (inherits(verification, "error")) {
+          cleanup <- try(.cleanup_source_parquet_output(
+            ManifestPath = ManifestPath, Database = db_prefix, TableName = suffix,
+            SourcePath = source_path, expected_directories = dirname(out_file),
+            MaxFileStemTruncate = MaxFileStemTruncate
+          ), silent = TRUE)
+          if (inherits(cleanup, "try-error")) {
+            log_msg(sprintf("[CLEANUP WARN] Could not fully remove failed output for %s: %s",
+                            source_path, as.character(cleanup)))
+          }
+          stop(conditionMessage(verification))
+        }
+        log_msg(sprintf("[POST-WRITE VERIFY] %s: %d Parquet file(s), %s row(s).",
+                        source_path, length(verification$files),
+                        format(verification$n_rows, scientific = FALSE)))
         rm(df); gc(verbose = FALSE)
         log_msg(sprintf("[OK] %d/%d  %s -> %s (%s)", a, nrow(pending_meta), source_path, table_name, pspec$dir))
         completion_status <- "completed"
@@ -16046,6 +16788,21 @@ print.RepositoryRunResult <- function(x, ...) {
 #' @param FailProbeSourcePath Character scalar. Path to the repoquet
 #'   source the probe subprocess should \code{source()}. See
 #'   \code{\link{read_fn}}. Defaults to \code{NULL}.
+#' @param IORetryAttempts Integer. Number of attempts, counting the
+#'   first, for an operation that fails with a transient input or output
+#'   error, such as a network drive dropping out. Applies to the Parquet
+#'   writes, the checkpoint and manifest saves, a direct whole file read,
+#'   each batch of a chunked delimited or fixed width read, which restarts
+#'   from its own byte offset when a record is cut off or the file ends
+#'   too early, and the isolated direct worker, which is relaunched. A deterministic
+#'   failure, such as a memory allocation error, a result over 2^31-1
+#'   bytes, or a layout file error, is never retried. A direct read whose
+#'   row count differs from the independent count is retried once. Defaults
+#'   to \code{3}.
+#' @param IORetryPauseSeconds Numeric scalar. Seconds to wait before the
+#'   first retry. Each later retry waits three times as long as the one
+#'   before, so the defaults wait 10 seconds and then 30 seconds. Defaults
+#'   to \code{10}.
 #' @param LogPath Character scalar. Log file for this run. Starts a
 #'   run scoped logging context through
 #'   \code{\link{begin_repository_run}}, restored on exit, so that a
@@ -16250,6 +17007,7 @@ ParquetBackEndCreate <- function(MDT, DBLoad, MasterDBPath, completed_checkpoint
                                  DelimitedPartitionMaxMB = NULL,
                                  FailProbeMode = c("subprocess", "in_process", "disabled"),
                                  FailProbeTimeoutSeconds = 7200, FailProbeSourcePath = NULL,
+                                 IORetryAttempts = 3L, IORetryPauseSeconds = 10,
                                  LogPath, n_workers = 1, PrintStatus = FALSE,
                                  TerminalHivePartition = FALSE, MaxFileStemTruncate = TRUE,
                                  chunk_size_decrement = NULL, min_chunk_size = NULL,
@@ -16287,6 +17045,13 @@ ParquetBackEndCreate <- function(MDT, DBLoad, MasterDBPath, completed_checkpoint
       stop("DelimitedPartitionMaxMB must be a positive number when supplied.")
     }
   }
+  IORetryAttempts <- suppressWarnings(as.integer(IORetryAttempts[1]))
+  if (is.na(IORetryAttempts) || IORetryAttempts < 1L) stop("IORetryAttempts must be a positive integer.")
+  IORetryPauseSeconds <- suppressWarnings(as.numeric(IORetryPauseSeconds[1]))
+  if (is.na(IORetryPauseSeconds) || IORetryPauseSeconds < 0) stop("IORetryPauseSeconds must be a non-negative number.")
+  previous_io_options <- options(repoquet.io_retry_attempts = IORetryAttempts,
+                                 repoquet.io_retry_pause_seconds = IORetryPauseSeconds)
+  on.exit(options(previous_io_options), add = TRUE)
   previous_run <- begin_repository_run(LogPath = LogPath, RunId = RunId)
   on.exit(restore_repository_run(previous_run), add = TRUE)
   RunId <- resolve_run_id()
