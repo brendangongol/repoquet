@@ -3668,7 +3668,7 @@ read_delimited_full <- function(path, col_classes = NULL, reader_options = list(
 }
 
 .read_delimited_chunk <- function(path, offset, n_max, header, col_classes = NULL,
-                                  reader_options = list()) {
+                                  reader_options = list(), batch_rows = 50000L, batch_bytes = 5e8) {
   reader_options <- .resolve_delimited_reader_options(path, reader_options)
   header <- unname(as.character(header))
   if (!is.null(.sectioned_delimited_text(path, reader_options))) {
@@ -3679,22 +3679,36 @@ read_delimited_full <- function(path, col_classes = NULL, reader_options = list(
   #### Records are positioned by reading lines, never by fread(skip =): fread's skip ####
   #### miscounts lines in files whose terminators are not a clean LF or CRLF (for     ####
   #### example CR CR LF from a doubled Windows text-mode conversion).               ####
-  chunk <- .delimited_chunk_records(path, offset, n_max, reader_options)
+  #### The chunk is parsed in batches whose text stays well under R's 2^31-1 byte string ####
+  #### limit; a 4,000,000-row chunk of a wide table is many gigabytes of text.        ####
   args <- delimited_fread_args(reader_options)
   args$header <- NULL
   args$col.names <- NULL
-  args$sep <- chunk$Delimiter
   args$colClasses <- .layout_positional_classes(
     .layout_for_options(reader_options), fread_col_classes_positional(col_classes, header), header)
-  if (length(chunk$Records) == 0L) {
+  parts <- list()
+  got <- 0
+  repeat {
+    if (got >= n_max) break
+    batch <- .delimited_chunk_records(path, offset + got, n_max - got, reader_options,
+                                      batch_rows = batch_rows, batch_bytes = batch_bytes)
+    if (length(batch$Records) == 0L) break
+    batch_args <- args
+    batch_args$sep <- batch$Delimiter
+    df <- .fread_with_structural_errors(
+      c(list(text = paste0(paste(batch$Records, collapse = "\n"), "\n"),
+             header = FALSE, col.names = header), batch_args), path)
+    got <- got + length(batch$Records)
+    rm(batch)
+    df <- normalize_character_encoding(df, "UTF-8")
+    parts[[length(parts) + 1L]] <- .apply_layout_missing(df, reader_options)
+  }
+  if (length(parts) == 0L) {
     return(canonicalize_dataframe_names(data.table::as.data.table(
       stats::setNames(replicate(length(header), character(), simplify = FALSE), header))))
   }
-  df <- .fread_with_structural_errors(
-    c(list(text = paste0(paste(chunk$Records, collapse = "\n"), "\n"),
-           header = FALSE, col.names = header), args), path)
-  df <- normalize_character_encoding(df, "UTF-8")
-  df <- .apply_layout_missing(df, reader_options)
+  df <- if (length(parts) == 1L) parts[[1L]] else data.table::rbindlist(parts, use.names = TRUE)
+  rm(parts)
   canonicalize_dataframe_names(df)
 }
 
@@ -3719,7 +3733,8 @@ read_delimited_full <- function(path, col_classes = NULL, reader_options = list(
 # Reads the n_max records (non-blank lines) that follow record `offset`, after the header.
 # Consecutive calls on one file reuse one open connection, so reading a file front to back
 # in chunks is a single pass; a request for any other offset reopens the file.
-.delimited_chunk_records <- function(path, offset, n_max, reader_options = list()) {
+.delimited_chunk_records <- function(path, offset, n_max, reader_options = list(),
+                                     batch_rows = 50000L, batch_bytes = 5e8) {
   key <- normalizePath(path, winslash = "/", mustWork = TRUE)
   size <- file.size(path)
   encoding <- reader_options$.EncodingInfo$EncodingUsed %||% "UTF-8"
@@ -3756,8 +3771,12 @@ read_delimited_full <- function(path, col_classes = NULL, reader_options = list(
   }
   finished <- FALSE
   on.exit(if (!finished) .close_delimited_cursor(key), add = TRUE)
-  .delimited_cursor_fill(cursor, n_max)
-  take <- min(length(cursor$buffer), n_max)
+  #### At most batch_rows records and batch_bytes of text are returned per call; the caller ####
+  #### asks again from the new offset, which continues on the same open cursor.        ####
+  .delimited_cursor_fill(cursor, min(n_max, batch_rows))
+  available <- min(length(cursor$buffer), n_max, batch_rows)
+  take <- if (available == 0) 0 else
+    max(1, sum(cumsum(nchar(cursor$buffer[seq_len(available)], type = "bytes") + 1) <= batch_bytes))
   records <- cursor$buffer[seq_len(take)]
   cursor$buffer <- cursor$buffer[-seq_len(take)]
   cursor$next_offset <- cursor$next_offset + take
@@ -5811,7 +5830,23 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
     } else {
       file.path(target_dir, sprintf("%s_%05d.parquet", file_stem, chunk_num))
     }
-    write_arrow_table_safely(arrow_tbl, chunk_file)
+    #### A network share can fail a large write transiently (errno 22); retry like the SAV writer.
+    write_attempts <- 3L
+    write_wait_s <- c(0L, 10L, 30L)
+    for (write_attempt in seq_len(write_attempts)) {
+      write_err <- tryCatch({
+        if (write_attempt > 1L) {
+          log_msg(sprintf("[CHUNKED WRITE RETRY] Attempt %d/%d after %ds: %s",
+                          write_attempt, write_attempts, write_wait_s[write_attempt], basename(chunk_file)))
+          Sys.sleep(write_wait_s[write_attempt])
+        }
+        write_arrow_table_safely(arrow_tbl, chunk_file)
+        NULL
+      }, error = function(e) e)
+      if (is.null(write_err)) break
+      if (write_attempt == write_attempts) stop(write_err)
+      log_msg(sprintf("[CHUNKED WRITE RETRY] Chunk write attempt %d failed: %s", write_attempt, write_err$message))
+    }
     written_files <<- unique(c(written_files, chunk_file))
     n_written <- arrow_tbl$num_rows
     rm(arrow_tbl)

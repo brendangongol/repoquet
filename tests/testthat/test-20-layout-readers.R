@@ -694,3 +694,25 @@ test_that("the audit treats one piece per partition as unaffected and explains a
   expect_identical(short$MaxChunksPerPartition, 2L)
   expect_match(short$Verdict, "could not replay any chunk start: no record found at offset 50")
 })
+
+test_that("a large chunk is parsed in bounded batches that match a single read", {
+  root <- new_layout_dir(); on.exit(unlink(root, recursive = TRUE))
+  n <- 40L
+  records <- sprintf("%d,%s,%.2f", seq_len(n), strrep("x", seq_len(n) %% 7L + 1L), seq_len(n) / 8)
+  col_names <- c("ID", "TAG", "VALUE")
+  for (ending in c("\n", "\r\r\n")) {
+    csv <- write_text_file(file.path(root, "t.csv"), c(paste(col_names, collapse = ","), records), eol = ending)
+    options <- list(Delimiter = ",")
+    whole <- read_delimited_full(csv, reader_options = options)
+    for (settings in list(c(4L, 1e9), c(1000L, 60), c(7L, 1))) {   # row-limited, byte-limited, below one record
+      got <- .read_delimited_chunk(csv, 3L, 30L, col_names, reader_options = options,
+                                   batch_rows = settings[1], batch_bytes = settings[2])
+      expect_equal(got, whole[4:33], ignore_attr = TRUE, info = paste(settings, collapse = "/"))
+      .close_chunk_cursors(csv)   # the loader does this on exit; a read that stops short leaves the cursor open
+      expect_length(ls(.delimited_cursors), 0L)
+    }
+    #### A request larger than the file returns what remains.
+    tail_rows <- .read_delimited_chunk(csv, 35L, 100L, col_names, reader_options = options, batch_rows = 2L)
+    expect_equal(tail_rows, whole[36:40], ignore_attr = TRUE)
+  }
+})
