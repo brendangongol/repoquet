@@ -3546,12 +3546,17 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
 .stream_delimited_logical_records <- function(path, reader_options = list(),
                                                chunk_size = 1000000L,
                                                max_rows = Inf, col_classes = NULL,
+                                               max_buffer_bytes = 32 * 1024^2,
                                                callback) {
   if (!is.function(callback)) stop("Logical-record streaming requires a callback function.")
   header_info <- .delimited_header_info(path, reader_options)
   options <- header_info$ReaderOptions
   repair <- .delimited_repair_settings(options)
   chunk_size <- max(1L, as.integer(chunk_size))
+  max_buffer_bytes <- suppressWarnings(as.numeric(max_buffer_bytes[1]))
+  if (!is.finite(max_buffer_bytes) || max_buffer_bytes < 1) {
+    stop("max_buffer_bytes must be a positive number.")
+  }
   max_rows <- if (is.infinite(max_rows)) Inf else max(0, as.numeric(max_rows))
   expected_fields <- length(header_info$Header)
   quote_char <- options$Quote %||% "\""
@@ -3560,6 +3565,7 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
 
   records <- character(0)
   continuations <- list()
+  records_bytes <- 0
   pending_record <- NULL
   pending_continuations <- character(0)
   pending_line <- NA_integer_
@@ -3586,9 +3592,12 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
     if (remaining < length(records)) {
       records <<- records[-selected]
       continuations <<- continuations[-selected]
+      records_bytes <<- sum(nchar(records, type = "bytes"), na.rm = TRUE) +
+        sum(vapply(continuations, function(x) sum(nchar(x, type = "bytes"), na.rm = TRUE), numeric(1)))
     } else {
       records <<- character(0)
       continuations <<- list()
+      records_bytes <<- 0
     }
     if (!is.infinite(max_rows) && logical_rows >= max_rows) done <<- TRUE
     invisible(NULL)
@@ -3598,10 +3607,12 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
     if (is.null(pending_record) || done) return(invisible(NULL))
     records <<- c(records, pending_record)
     continuations[[length(records)]] <<- pending_continuations
+    records_bytes <<- records_bytes + nchar(pending_record, type = "bytes") +
+      sum(nchar(pending_continuations, type = "bytes"), na.rm = TRUE)
     pending_record <<- NULL
     pending_continuations <<- character(0)
     pending_line <<- NA_integer_
-    if (length(records) >= chunk_size) flush_records()
+    if (length(records) >= chunk_size || records_bytes >= max_buffer_bytes) flush_records()
     invisible(NULL)
   }
 
@@ -6024,12 +6035,20 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
                                    adaptive_chunking = FALSE, preloaded_data = NULL,
                                    reader = "csv", reader_options = list(), RepositoryLock = NULL) {
   partition_keys <- canonical_colnames(partition_keys)
+  if (is.null(partition_values)) partition_values <- as.character(year_val)
+  if (length(partition_values) != length(partition_keys)) {
+    stop("partition_values must contain one value for each partition key.")
+  }
   if (!is.null(col_classes)) names(col_classes) <- canonical_colnames(names(col_classes))
   if (!is.null(all_cols)) all_cols <- unique(canonical_colnames(all_cols))
   rd <- get_file_reader(reader)
   if (is.null(rd$read_chunk)) stop(sprintf("Reader '%s' has no read_chunk callback.", reader))
   on.exit(.close_chunk_cursors(path), add = TRUE)
-  logical_stream <- .uses_delimited_logical_stream(reader_options)
+  #### FAIL-mode delimited fallback is a record stream. It avoids a second full-file ####
+  #### count after the isolated direct-read probe has already failed, and keeps the    ####
+  #### buffered record text below a fixed bound before each Arrow write.               ####
+  logical_stream <- .uses_delimited_logical_stream(reader_options) ||
+    (isTRUE(adaptive_chunking) && !identical(tolower(reader), "asc") && is.null(preloaded_data))
   fixed_width <- identical(tolower(reader), "asc") && is.null(preloaded_data)
   if (!is.null(preloaded_data) && !is.data.frame(preloaded_data)) {
     stop("preloaded_data must be a data frame when supplied.")
@@ -6114,9 +6133,15 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
                     } else ""))
   } else if (adaptive_chunking) {
     chunk_size <- current_chunk_size
-    log_msg(sprintf(
-      "[CHUNKED-DELIM] %s: FAIL-mode fallback starts at chunk_size=%d; no calculated memory cap will be applied. Recoverable memory errors reduce by %d rows to a floor of %d.",
-      basename(path), current_chunk_size, chunk_decrement, chunk_floor))
+    if (logical_stream) {
+      log_msg(sprintf(
+        "[CHUNKED-DELIM] %s: FAIL-mode fallback streams logical records (up to %d rows and 32 MB of record text per piece); no second full-file row count is performed.",
+        basename(path), current_chunk_size))
+    } else {
+      log_msg(sprintf(
+        "[CHUNKED-DELIM] %s: FAIL-mode fallback starts at chunk_size=%d; no calculated memory cap will be applied. Recoverable memory errors reduce by %d rows to a floor of %d.",
+        basename(path), current_chunk_size, chunk_decrement, chunk_floor))
+    }
   }
   #### A fixed-width source is always read front to back in one pass: its records have ####
   #### no header or logical-record repair, and a stream avoids re-reading skipped lines. ####
@@ -9476,8 +9501,15 @@ read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL, tab
     df <- align_columns(df, all_cols, col_classes, max_coerce_na_pct = max_coerce_na_pct)
     return(list(data = df, pre_aligned = TRUE, written = FALSE))
   }
-  ncases <- tryCatch(as.numeric(call_reader(rd, "count_rows", full_path,
-                                            reader_options = reader_options)), error = function(e) NA_real_)
+  defer_delimited_count <- identical(PartitionBy, "FAIL") && delimited_reader
+  ncases <- if (defer_delimited_count) {
+    log_msg(sprintf("[FAIL PROBE] %s: deferring full-file row counting until bounded chunk streaming; this avoids a duplicate full-file scan after a failed direct probe.",
+                    basename(full_path)))
+    NA_real_
+  } else {
+    tryCatch(as.numeric(call_reader(rd, "count_rows", full_path,
+                                    reader_options = reader_options)), error = function(e) NA_real_)
+  }
   DFTemp <- NULL; use_chunked <- FALSE
   if(PartitionBy == "NRows"){
     use_chunked <- is.na(ncases) || ncases > SAV_ROW_THRESHOLD

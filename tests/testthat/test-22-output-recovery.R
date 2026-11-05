@@ -52,6 +52,28 @@ test_that("the loader does not checkpoint a source whose output vanishes after w
   expect_identical(nrow(read_parquet_manifest(fx$mf)), 0L)
 })
 
+test_that("FAIL-mode CSV fallback streams without a second whole-file row count", {
+  fx <- new_repo_fixture()
+  on.exit(unlink(fx$root, recursive = TRUE), add = TRUE)
+  data.table::fwrite(data.table::data.table(ID = 1:50, VALUE = sprintf("value_%d", 1:50)),
+                     file.path(fx$src, "stream.csv"))
+  MDT <- data.frame(Database = "REG", MDBDir = "REG", Path = "stream.csv",
+                    TableName = "Stream", FileType = "csv", PartitionKey = "year",
+                    PartitionValue = "2020", stringsAsFactors = FALSE)
+  result <- read_fn(
+    path = "stream.csv", year_dir = file.path(fx$pq, "REG_Stream", "year=2020"),
+    table_dir = file.path(fx$pq, "REG_Stream"), all_cols = c("ID", "VALUE"),
+    col_classes = c(ID = "integer", VALUE = "character"), year_val = 2020,
+    MDTSelect = MDT, MasterDBPath = fx$root, reader = "csv", PartitionBy = "FAIL",
+    SAV_ROW_THRESHOLD = 10L, RAMThreshold = 1, SAV_CHUNK_SIZE = 1000000L,
+    FailProbeMode = "disabled", ManifestPath = fx$mf, Database = "REG", TableName = "Stream",
+    DuckDBTable = "REG_Stream", SourcePath = "stream.csv"
+  )
+  expect_true(isTRUE(result$written))
+  expect_equal(result$n_rows, 50)
+  expect_length(list.files(fx$pq, pattern = "\\.parquet$", recursive = TRUE), 1L)
+})
+
 test_that("source reset removes only the requested source and partition reset delegates safely", {
   fx <- new_repo_fixture()
   on.exit(unlink(fx$root, recursive = TRUE), add = TRUE)
