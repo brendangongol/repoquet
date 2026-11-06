@@ -28,6 +28,32 @@ test_that("post-write verification reads Parquet metadata and rejects missing ou
   )
 })
 
+test_that("failed-worker cleanup removes both completed chunks and Arrow temporary files", {
+  fx <- new_repo_fixture()
+  on.exit(unlink(fx$root, recursive = TRUE), add = TRUE)
+  year_dir <- file.path(fx$pq, "REG_Core", "year=2020")
+  dir.create(year_dir, recursive = TRUE)
+  final <- file.path(year_dir, "source_00001.parquet")
+  temporary <- file.path(year_dir, "source_00001.parquet.tmp_interrupted")
+  arrow::write_parquet(arrow::Table$create(data.frame(ID = 1L)), final)
+  file.create(temporary)
+  update_parquet_manifest(
+    ManifestPath = fx$mf, Database = "REG", TableName = "Core", DuckDBTable = "REG_Core",
+    Year = 2020, SourcePath = "source.csv", ParquetPath = final, NRows = 1,
+    PartitionKey = "YEAR", PartitionValue = "2020", Status = "written"
+  )
+
+  removed <- .cleanup_delimited_chunk_outputs(
+    path = "source.csv", year_dir = year_dir, table_dir = dirname(year_dir),
+    route_source_partitions = FALSE, TerminalHivePartition = FALSE,
+    MaxFileStemTruncate = FALSE, ManifestPath = fx$mf, SourcePath = "source.csv"
+  )
+  expect_identical(removed, 2L)
+  expect_false(file.exists(final))
+  expect_false(file.exists(temporary))
+  expect_identical(nrow(read_parquet_manifest(fx$mf)), 0L)
+})
+
 test_that("the loader does not checkpoint a source whose output vanishes after write", {
   fx <- new_repo_fixture()
   on.exit(unlink(fx$root, recursive = TRUE), add = TRUE)

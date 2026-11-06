@@ -55,20 +55,39 @@ stored_ids <- function(fx) {
   sort(unlist(lapply(pieces, function(p) arrow::read_parquet(p)$ID)))
 }
 
-test_that("the classifier retries I/O failures and never retries memory, size, layout or timeout failures", {
+test_that("the classifier retries I/O failures and never retries deterministic failures", {
   transient <- c("IOError: Error writing bytes to file. Detail: [errno 22] Invalid argument",
                  "cannot open the connection",
                  "IO Error: Could not set lock on file",
                  "Checkpoint verification failed after replacement.",
                  "NIS_2019.ASC line 3,700,003 has 888 character(s), but layout x.SPS defines 1026-character records.",
                  "Hardened FAIL worker exited with status -1073741818 without a result",
-                 "row count mismatch: read 5 row(s) from a.csv but the independent count is 8.",
-                 "Delimited structure error in a.csv: Stopped early on line 4")
+                 "row count mismatch: read 5 row(s) from a.csv but the independent count is 8.")
   deterministic <- c("cannot allocate vector of size 152.2 Mb", "result would exceed 2^31-1 bytes",
                      "Layout file not found: x.SPS", "Hardened FAIL worker did not complete: timed out",
-                     "std::bad_alloc", NA_character_, "")
+                     "std::bad_alloc", "Delimited structure error in a.csv: Stopped early on line 4",
+                     "Can't assign 544 names to a 248-column data.table", NA_character_, "")
   for (m in transient) expect_true(.is_transient_io_error(m), info = m)
   for (m in deterministic) expect_false(.is_transient_io_error(m), info = as.character(m))
+})
+
+test_that("byte-positioned delimited chunks preserve newlines inside quoted fields", {
+  csv <- tempfile(fileext = ".csv")
+  on.exit(unlink(csv), add = TRUE)
+  writeLines(c("ID,DESC,CODE", "1,\"first line", "second line\",A",
+               "2,plain,B", "3,\"quoted, comma\",C"), csv, useBytes = TRUE)
+  opts <- .resolve_delimited_reader_options(csv, list())
+  header <- .read_delimited_header(csv, opts)
+
+  first <- .read_delimited_chunk(csv, offset = 0L, n_max = 2L, header = header,
+                                 reader_options = opts, exact_rows = TRUE)
+  second <- .read_delimited_chunk(csv, offset = 2L, n_max = 2L, header = header,
+                                  reader_options = opts, exact_rows = FALSE)
+
+  expect_identical(first$ID, 1:2)
+  expect_identical(gsub("\r\n", "\n", first$DESC), c("first line\nsecond line", "plain"))
+  expect_identical(second$ID, 3L)
+  expect_identical(second$DESC, "quoted, comma")
 })
 
 test_that(".retry_io retries a transient failure once, and stops at the first deterministic one", {

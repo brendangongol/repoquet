@@ -1172,7 +1172,9 @@ write_arrow_table_safely <- function(arrow_tbl, path) {
   if (is.na(message) || !nzchar(message)) return(FALSE)
   deterministic <- paste(
     "cannot allocate|bad_alloc|out of memory|memory exhausted|vector memory|cannot reserve",
-    "exceed 2\\^31|Layout file|timed out|timeout|must be|Unknown |Unsupported", sep = "|")
+    "exceed 2\\^31|Layout file|timed out|timeout|must be|Unknown |Unsupported",
+    "Delimited structure error|Malformed delimited record|Can't assign [0-9]+ names to a [0-9]+-column data\\.table",
+    sep = "|")
   if (grepl(deterministic, message, ignore.case = TRUE)) return(FALSE)
   transient <- paste(
     "IOError|IO Error|I/O error|input/output|errno|Invalid argument",
@@ -1182,7 +1184,7 @@ write_arrow_table_safely <- function(arrow_tbl, path) {
     "Could not set lock|Could not (replace|move existing) file|Could not preserve previous",
     "Checkpoint verification failed|unexpected end of file|premature end|truncated|embedded nul",
     "has [0-9,]+ character\\(s\\), but layout|row count mismatch",
-    "did not contain the expected number of rows|Delimited structure error|Malformed delimited record",
+    "did not contain the expected number of rows",
     "exited with status -1073741818", sep = "|")
   grepl(transient, message, ignore.case = TRUE)
 }
@@ -3241,14 +3243,25 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
 
 .fread_with_structural_errors <- function(args, path) {
   structural_warning <- NULL
-  out <- withCallingHandlers(
-    do.call(data.table::fread, args),
-    warning = function(w) {
-      message <- conditionMessage(w)
-      if (grepl("Stopped early on line [0-9]+\\. Expected [0-9]+ fields|Discarded single-line footer|Detected [0-9]+ column names but the data has [0-9]+ columns\\. Filling rows automatically", message, perl = TRUE)) {
-        structural_warning <<- message
-        invokeRestart("muffleWarning")
+  out <- tryCatch(
+    withCallingHandlers(
+      do.call(data.table::fread, args),
+      warning = function(w) {
+        message <- conditionMessage(w)
+        if (grepl("Stopped early on line [0-9]+\\. Expected [0-9]+ fields|Discarded single-line footer|Detected [0-9]+ column names but the data has [0-9]+ columns\\. Filling rows automatically", message, perl = TRUE)) {
+          structural_warning <<- message
+          invokeRestart("muffleWarning")
+        }
       }
+    ),
+    error = function(e) {
+      message <- conditionMessage(e)
+      if (grepl("Can't assign [0-9]+ names to a [0-9]+-column data\\.table|Detected [0-9]+ column names but the data has [0-9]+ columns", message, perl = TRUE)) {
+        stop(sprintf(paste0("Delimited structure error in %s: %s. The source was not modified. ",
+                            "The configured header does not match this record; inspect the source layout or use an explicit reader repair policy when the continuation semantics are known."),
+                     basename(path), message), call. = FALSE)
+      }
+      stop(e)
     }
   )
   if (!is.null(structural_warning)) {
@@ -3923,6 +3936,55 @@ read_delimited_full <- function(path, col_classes = NULL, reader_options = list(
   found[found <= upto]
 }
 
+# Newlines within a quoted delimited field are data, not record boundaries.
+# The cursor uses this only for delimited sources; fixed-width sources retain
+# their physical-line framing.
+.raw_delimited_record_ends <- function(buf, upto, quote = "\"") {
+  upto <- as.integer(upto)
+  if (upto <= 0L) return(integer(0))
+  quote <- as.character(quote %||% "")[1]
+  if (is.na(quote) || !nzchar(quote)) return(.raw_newlines(buf, upto))
+  quote_byte <- as.integer(charToRaw(substr(quote, 1L, 1L)))[1]
+  newlines <- .raw_newlines(buf, upto)
+  quote_positions <- grepRaw(as.raw(quote_byte), buf, fixed = TRUE, all = TRUE)
+  quote_positions <- quote_positions[quote_positions <= min(length(buf), upto + 1L)]
+  if (length(quote_positions) == 0L) return(newlines)
+
+  #### Build quoted byte intervals from quote positions only. This retains the ####
+  #### fast path for normal CSV data and avoids an R-level loop over every byte. ####
+  starts <- integer(0)
+  stops <- integer(0)
+  in_quote <- FALSE
+  opening <- NA_integer_
+  i <- 1L
+  while (i <= length(quote_positions)) {
+    pos <- quote_positions[i]
+    if (in_quote && i < length(quote_positions) && quote_positions[i + 1L] == pos + 1L) {
+      i <- i + 2L
+      next
+    }
+    if (in_quote) {
+      starts <- c(starts, opening)
+      stops <- c(stops, pos)
+      opening <- NA_integer_
+    } else {
+      opening <- pos
+    }
+    in_quote <- !in_quote
+    i <- i + 1L
+  }
+  if (in_quote) {
+    starts <- c(starts, opening)
+    stops <- c(stops, Inf)
+  }
+  if (length(starts) == 0L || length(newlines) == 0L) return(newlines)
+  interval <- findInterval(newlines, starts)
+  inside <- rep(FALSE, length(newlines))
+  hit <- interval > 0L
+  inside[hit] <- newlines[hit] < stops[interval[hit]]
+  newlines[!inside]
+}
+
 .cursor_fill <- function(cursor, want_bytes) {
   while (!cursor$eof && length(cursor$buf) < want_bytes) {
     #### One read for everything still needed (at least a block), so the buffer is not rebuilt by repeated c().
@@ -3937,12 +3999,14 @@ read_delimited_full <- function(path, col_classes = NULL, reader_options = list(
   invisible(NULL)
 }
 
-.cursor_new <- function(path, key, encoding, delimiter, skip_lines = 0L, register = TRUE) {
+.cursor_new <- function(path, key, encoding, delimiter, skip_lines = 0L, register = TRUE,
+                        quote = NA_character_) {
   cursor <- new.env(parent = emptyenv())
   cursor$path <- path
   cursor$key <- key
   cursor$encoding <- encoding
   cursor$delimiter <- delimiter
+  cursor$quote <- quote
   cursor$size <- file.size(path)
   cursor$con <- .binary_open(path)
   cursor$buf <- raw(0)
@@ -4008,7 +4072,11 @@ read_delimited_full <- function(path, col_classes = NULL, reader_options = list(
     n <- length(cursor$buf)
     if (n == 0L) return(list(Text = "", Rows = 0L))
     scan_to <- min(n, window)
-    nl <- .raw_newlines(cursor$buf, scan_to)
+    nl <- if (!is.na(cursor$quote) && nzchar(cursor$quote)) {
+      .raw_delimited_record_ends(cursor$buf, scan_to, cursor$quote)
+    } else {
+      .raw_newlines(cursor$buf, scan_to)
+    }
     if (length(nl) > 0L || (cursor$eof && scan_to == n)) break
     window <- window + .cursor_block_bytes   # a line longer than the window: look further
   }
@@ -4018,8 +4086,7 @@ read_delimited_full <- function(path, col_classes = NULL, reader_options = list(
     end <- n
     k <- k + 1L
   }
-  #### Fast path: when no line is blank (every complete line is longer than a bare line ending), the ####
-  #### records are exactly the lines, so skipping needs no text at all and a UTF-8 batch can go   ####
+  #### Fast path: when no record is blank, skipping needs no text at all and a UTF-8 batch can go ####
   #### to fread as raw bytes without ever becoming an R string.                                  ####
   utf8 <- toupper(cursor$encoding) %in% c("UTF-8", "UTF8", "ASCII", "US-ASCII")
   complete <- nl[seq_len(min(k, length(nl)))]
@@ -4103,7 +4170,8 @@ read_delimited_full <- function(path, col_classes = NULL, reader_options = list(
   }
   if (is.null(cursor)) {
     info <- .delimited_header_info(path, reader_options)
-    cursor <- .cursor_new(path, key, encoding, info$Delimiter, info$SkipLines)
+    cursor <- .cursor_new(path, key, encoding, info$Delimiter, info$SkipLines,
+                          quote = info$ReaderOptions$Quote %||% "\"")
   }
   if (isTRUE(reopen) || cursor$next_offset != offset) {
     .cursor_move(cursor, offset, force_reopen = isTRUE(reopen))
@@ -6148,7 +6216,7 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
       d <- list.dirs(stale_root, recursive = route_source_partitions, full.names = TRUE)
       d[grepl(paste0("^batch_id=", regex_escape(file_stem), "_[0-9]{5}$"), basename(d), ignore.case = TRUE)]
     } else {
-      list.files(stale_root, pattern = paste0("^", regex_escape(file_stem), "_[0-9]{5}\\.parquet$"),
+      list.files(stale_root, pattern = paste0("^", regex_escape(file_stem), "_[0-9]{5}\\.parquet(\\.tmp_.*)?$"),
                  recursive = route_source_partitions, full.names = TRUE)
     }
     if (length(stale) > 0L) {
@@ -6161,6 +6229,12 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
   written_files <- character(0)
   cleanup_outputs <- function() {
     paths <- unique(written_files[nzchar(written_files)])
+    tmp_paths <- if (!is.null(stale_root) && dir.exists(stale_root)) {
+      list.files(stale_root,
+                 pattern = paste0("^", regex_escape(file_stem), "_[0-9]{5}\\.parquet\\.tmp_.*$"),
+                 recursive = route_source_partitions, full.names = TRUE)
+    } else character(0)
+    paths <- unique(c(paths, tmp_paths))
     if (length(paths) == 0L) return(invisible(0L))
     remove_parquet_manifest_rows(ManifestPath = ManifestPath, SourcePath = SourcePath %||% path, ParquetPath = paths)
     targets <- if (TerminalHivePartition) unique(dirname(paths)) else paths
@@ -9245,7 +9319,7 @@ validate_duckdb_table <- function(con, table_name, schema_registry = NULL, stric
                basename(dirs), ignore.case = TRUE)]
   } else {
     list.files(output_root,
-               pattern = paste0("^", regex_escape(file_stem), "_[0-9]{5}\\.parquet$"),
+               pattern = paste0("^", regex_escape(file_stem), "_[0-9]{5}\\.parquet(\\.tmp_.*)?$"),
                recursive = isTRUE(route_source_partitions), full.names = TRUE)
   }
   if (length(targets) == 0L) return(invisible(0L))
