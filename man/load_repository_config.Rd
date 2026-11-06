@@ -10,6 +10,7 @@ load_repository_config(
   DelimitedChunkMaxMB = NULL,
   DelimitedPartitionMaxMB = NULL,
   DelimitedWriteMode = NULL,
+  StreamingWriteRecovery = NULL,
   FailProbeMode = NULL,
   FailProbeTimeoutSeconds = NULL,
   FailProbeSourcePath = NULL,
@@ -69,6 +70,10 @@ of the conservative source route cap derived from
 \item{DelimitedWriteMode}{Character scalar. \code{"chunk_table"} retains
 the established writer. \code{"streaming"} appends bounded CSV/TSV
 batches while retaining \code{SAV_CHUNK_SIZE} as the output-file target.}
+
+\item{StreamingWriteRecovery}{Character scalar. \code{"restart_piece"}
+rebuilds a streaming output piece after a transient network write error;
+\code{"fail"} stops immediately.}
 
 \item{FailProbeMode}{Character scalar. For a delimited source under
 \code{PartitionBy = "FAIL"}. Accepts \code{"subprocess"}, which

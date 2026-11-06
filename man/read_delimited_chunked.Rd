@@ -34,7 +34,8 @@ read_delimited_chunked(
   reader = "csv",
   reader_options = list(),
   RepositoryLock = NULL,
-  DelimitedWriteMode = c("chunk_table", "streaming")
+  DelimitedWriteMode = c("chunk_table", "streaming"),
+  StreamingWriteRecovery = c("restart_piece", "fail")
 )
 }
 \arguments{
@@ -180,7 +181,14 @@ chunk and one Arrow table per output file. \code{"streaming"} reads,
 normalizes, and appends bounded batches into the same final Parquet file
 until \code{chunk_size} rows have been written. It is available for
 ordinary CSV/TSV-style chunked sources, including source-defined Hive
-partitions, and keeps \code{chunk_size} as the output-file target.
+partitions, and keeps \code{chunk_size} as the output-file target.}
+
+\item{StreamingWriteRecovery}{Character scalar. \code{"restart_piece"}
+discards and replays an incomplete streaming Parquet piece after a
+transient output error. A source that routes to multiple partitions is
+restarted from its beginning, because its partition rows are not
+necessarily contiguous. \code{"fail"} stops immediately. Uses the
+retry count and pause configured by \code{ParquetBackEndCreate}.
 Fixed-width, logical-record-repair, and preloaded paths report that they
 retain \code{"chunk_table"} behavior.}
 }

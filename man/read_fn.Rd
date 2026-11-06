@@ -24,6 +24,7 @@ read_fn(
   DelimitedChunkMaxMB = 256L,
   DelimitedPartitionMaxMB = NULL,
   DelimitedWriteMode = c("chunk_table", "streaming"),
+  StreamingWriteRecovery = c("restart_piece", "fail"),
   FailProbeMode = c("subprocess", "in_process", "disabled"),
   FailProbeTimeoutSeconds = 7200,
   FailProbeSourcePath = NULL,
@@ -122,6 +123,9 @@ Defaults to \code{NULL}, which lets
 \item{DelimitedWriteMode}{Character scalar. \code{"chunk_table"} retains
 the current writer. \code{"streaming"} appends bounded CSV/TSV batches
 to each \code{SAV_CHUNK_SIZE} output file.}
+
+\item{StreamingWriteRecovery}{Character scalar. Passed through to
+\code{\link{read_delimited_chunked}}. Defaults to \code{"restart_piece"}.}
 
 \item{FailProbeMode}{Character scalar. Accepts one of three values.
 \code{"subprocess"} attempts the direct read and write in an

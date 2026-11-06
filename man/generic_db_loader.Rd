@@ -23,6 +23,7 @@ generic_db_loader(
   DelimitedChunkMaxMB = 256L,
   DelimitedPartitionMaxMB = NULL,
   DelimitedWriteMode = c("chunk_table", "streaming"),
+  StreamingWriteRecovery = c("restart_piece", "fail"),
   FailProbeMode = c("subprocess", "in_process", "disabled"),
   FailProbeTimeoutSeconds = 7200,
   FailProbeSourcePath = NULL,
@@ -116,6 +117,9 @@ scoped log path set by \code{\link{begin_repository_run}}, or
 
 \item{DelimitedWriteMode}{Character scalar. Passed through to
 \code{\link{read_fn}}. Defaults to \code{"chunk_table"}.}
+
+\item{StreamingWriteRecovery}{Character scalar. Passed through to
+\code{\link{read_fn}}. Defaults to \code{"restart_piece"}.}
 
 \item{FailProbeMode}{Character scalar. Accepts one of three
 values: \code{"subprocess"}, \code{"in_process"}, or

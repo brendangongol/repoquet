@@ -18,6 +18,7 @@ ParquetBackEndCreate(
   DelimitedChunkMaxMB = 256L,
   DelimitedPartitionMaxMB = NULL,
   DelimitedWriteMode = c("chunk_table", "streaming"),
+  StreamingWriteRecovery = c("restart_piece", "fail"),
   FailProbeMode = c("subprocess", "in_process", "disabled"),
   FailProbeTimeoutSeconds = 7200,
   FailProbeSourcePath = NULL,
@@ -120,6 +121,10 @@ shot read fits this machine.}
 default, keeps the existing full-table-per-output-file writer.
 \code{"streaming"} appends bounded CSV/TSV batches to each
 \code{SAV_CHUNK_SIZE} Parquet file.}
+
+\item{StreamingWriteRecovery}{Character scalar. \code{"restart_piece"}
+rebuilds the interrupted streaming output after a transient network write
+error. \code{"fail"} stops immediately. Defaults to \code{"restart_piece"}.}
 
 \item{FailProbeMode}{Character scalar. Accepts one of three
 values: \code{"subprocess"}, \code{"in_process"}, or
