@@ -2,7 +2,7 @@
 % Please edit documentation in R/repoquet.R
 \name{snapshot_repository_state}
 \alias{snapshot_repository_state}
-\title{Copies the repository's bookkeeping files into a timestamped snapshot before a run}
+\title{Copies the repository's bookkeeping files into a pre-run snapshot}
 \usage{
 snapshot_repository_state(
   CheckpointPath = NULL,
@@ -10,6 +10,7 @@ snapshot_repository_state(
   TableSchemaPath = NULL,
   SchemaRegistryPath = NULL,
   BackupDir,
+  SnapshotMode = c("latest", "timestamped"),
   keep_last = 20L
 )
 }
@@ -19,8 +20,12 @@ snapshot_repository_state(
 \item{BackupDir}{Character scalar. Snapshot root, for example
 \code{<FormattedDBPath>/StateBackups}.}
 
+\item{SnapshotMode}{Character scalar. \code{"latest"}, the default,
+stores one replaceable pre-run state generation in \code{latest}.
+\code{"timestamped"} retains dated history.}
+
 \item{keep_last}{Integer. Number of snapshots to retain. Defaults to
-\code{20}.}
+\code{20}; used only for \code{SnapshotMode = "timestamped"}.}
 }
 \value{
 Invisibly, the snapshot directory path, or \code{NULL} when
@@ -30,9 +35,10 @@ Invisibly, the snapshot directory path, or \code{NULL} when
 Copies the small state files that record everything the loader knows,
 the checkpoint, as \code{.rds}, the manifest, as \code{.csv}, the
 schema catalog, together with its Labels sibling when the catalog is
-a CSV file, and the schema registry, into a timestamped subfolder of
-\code{BackupDir}. Retention keeps the newest \code{keep_last}
-snapshots and removes an older one.
+a CSV file, and the schema registry. \code{SnapshotMode = "latest"},
+the default, atomically replaces \code{<BackupDir>/latest} after every
+file has been staged successfully. \code{SnapshotMode = "timestamped"}
+writes a dated subfolder and retains the newest \code{keep_last} snapshots.
 }
 \examples{
 tmp_checkpoint <- tempfile(fileext = ".rds")

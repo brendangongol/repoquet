@@ -15,6 +15,10 @@ load_repository_config(
   FailProbeSourcePath = NULL,
   IORetryAttempts = NULL,
   IORetryPauseSeconds = NULL,
+  SnapshotState = NULL,
+  SnapshotMode = NULL,
+  StateBackupDir = NULL,
+  SnapshotKeep = NULL,
   SAV_ROW_THRESHOLD = NULL,
   RAMThreshold = NULL,
   PartitionBy = NULL,
@@ -89,6 +93,19 @@ to \code{ParquetBackEndCreate}. Defaults to \code{3}.}
 \item{IORetryPauseSeconds}{Numeric scalar. Seconds before the first
 retry; later retries wait three times as long as the one before.
 Passed to \code{ParquetBackEndCreate}. Defaults to \code{10}.}
+
+\item{SnapshotState}{Logical. Whether to create a pre-run state snapshot.
+Defaults to \code{TRUE}.}
+
+\item{SnapshotMode}{Character scalar. \code{"latest"}, the default,
+replaces one \code{StateBackups/latest} generation per run.
+\code{"timestamped"} retains dated generations.}
+
+\item{StateBackupDir}{Character scalar or \code{NULL}. Optional snapshot
+root; \code{NULL} uses \code{<FormattedDBPath>/StateBackups}.}
+
+\item{SnapshotKeep}{Integer. Retention count for timestamped snapshots.
+Defaults to \code{20}; ignored for \code{SnapshotMode = "latest"}.}
 
 \item{SAV_ROW_THRESHOLD}{Integer. Row count above which a SAV file
 streams in chunks. Accepts \code{NULL}, which keeps the

@@ -23,9 +23,25 @@ test_that("state snapshots are taken at loader start and retention prunes old on
   bdir <- file.path(fx$root, "StateBackups")
   for (i in 1:25) dir.create(file.path(bdir, sprintf("20200101_%06d", i)), showWarnings = FALSE)
   out <- utils::capture.output(
-    snapshot_repository_state(CheckpointPath = fx$cp, BackupDir = bdir, keep_last = 3L))
+    snapshot_repository_state(CheckpointPath = fx$cp, BackupDir = bdir,
+                              SnapshotMode = "timestamped", keep_last = 3L))
   remaining <- list.dirs(bdir, recursive = FALSE)
-  expect_lte(length(remaining), 3L)
+  dated <- remaining[grepl("^[0-9]{8}_[0-9]{6}$", basename(remaining))]
+  expect_lte(length(dated), 3L)
+})
+
+test_that("latest state snapshots replace one complete pre-run generation", {
+  fx <- new_repo_fixture(); on.exit(unlink(fx$root, recursive = TRUE))
+  backups <- file.path(fx$root, "StateBackups")
+  saveRDS("first", fx$cp)
+  first <- snapshot_repository_state(CheckpointPath = fx$cp, BackupDir = backups)
+  saveRDS("second", fx$cp)
+  second <- snapshot_repository_state(CheckpointPath = fx$cp, BackupDir = backups)
+
+  expect_identical(first, file.path(backups, "latest"))
+  expect_identical(second, file.path(backups, "latest"))
+  expect_identical(readRDS(file.path(backups, "latest", basename(fx$cp))), "second")
+  expect_identical(basename(list.dirs(backups, recursive = FALSE)), "latest")
 })
 
 test_that("BuildRepositoryCatalog refuses to run while the writer lock is held", {

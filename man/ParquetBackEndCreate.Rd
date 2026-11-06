@@ -41,6 +41,7 @@ ParquetBackEndCreate(
   LockStaleMinutes = 720,
   RunPreflight = TRUE,
   SnapshotState = TRUE,
+  SnapshotMode = c("latest", "timestamped"),
   StateBackupDir = NULL,
   SnapshotKeep = 20L,
   StopOnDatabaseError = TRUE,
@@ -233,12 +234,16 @@ which snapshots checkpoint, manifest, and schema state to
 \code{\link{snapshot_repository_state}}. Accepts \code{FALSE},
 which does not.}
 
+\item{SnapshotMode}{Character scalar. \code{"latest"}, the default,
+replaces one pre-run snapshot at \code{StateBackups/latest}.
+\code{"timestamped"} retains dated snapshot generations.}
+
 \item{StateBackupDir}{Character scalar. Snapshot destination,
 defaulting to
 \code{file.path(dirname(ParquetBasePath), "StateBackups")}.}
 
-\item{SnapshotKeep}{Integer. Number of state snapshot generations
-retained.}
+\item{SnapshotKeep}{Integer. Number of timestamped state snapshot
+generations retained; ignored for \code{SnapshotMode = "latest"}.}
 
 \item{StopOnDatabaseError}{Logical. Accepts \code{TRUE}, the
 default, which raises an error at the end of the run if any

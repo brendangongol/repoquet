@@ -96,6 +96,8 @@ if (command == "validate") {
     RAMThreshold = cfg$RAMThreshold, SAV_ROW_THRESHOLD = cfg$SAV_ROW_THRESHOLD,
     SAV_CHUNK_SIZE = cfg$SAV_CHUNK_SIZE, DelimitedChunkMaxMB = cfg$DelimitedChunkMaxMB,
     DelimitedWriteMode = cfg$DelimitedWriteMode, SchemaRegistryPath = paths$SchemaRegistryPath,
+    SnapshotState = cfg$SnapshotState, SnapshotMode = cfg$SnapshotMode,
+    StateBackupDir = cfg$StateBackupDir, SnapshotKeep = cfg$SnapshotKeep,
     TableSchemaPath = paths$TableSchemaPath, ManifestPath = paths$ManifestPath,
     MetadataWorkbookPath = paths$ManifestWorkbookPath,
     UseSchemaCatalog = TRUE,

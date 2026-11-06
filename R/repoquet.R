@@ -7100,20 +7100,24 @@ release_repository_lock <- function(lock, force = FALSE, LogPath = NULL) {
 #### Repository state snapshots ################################################
 ################################################################################
 
-#' Copies the repository's bookkeeping files into a timestamped snapshot before a run
+#' Copies the repository's bookkeeping files into a pre-run snapshot
 #'
 #' Copies the small state files that record everything the loader knows,
 #' the checkpoint, as \code{.rds}, the manifest, as \code{.csv}, the
 #' schema catalog, together with its Labels sibling when the catalog is
-#' a CSV file, and the schema registry, into a timestamped subfolder of
-#' \code{BackupDir}. Retention keeps the newest \code{keep_last}
-#' snapshots and removes an older one.
+#' a CSV file, and the schema registry. \code{SnapshotMode = "latest"},
+#' the default, atomically replaces \code{<BackupDir>/latest} after every
+#' file has been staged successfully. \code{SnapshotMode = "timestamped"}
+#' writes a dated subfolder and retains the newest \code{keep_last} snapshots.
 #' @param CheckpointPath,ManifestPath,TableSchemaPath,SchemaRegistryPath
 #'   State file paths. A \code{NULL} or missing file is skipped silently.
 #' @param BackupDir Character scalar. Snapshot root, for example
 #'   \code{<FormattedDBPath>/StateBackups}.
+#' @param SnapshotMode Character scalar. \code{"latest"}, the default,
+#'   stores one replaceable pre-run state generation in \code{latest}.
+#'   \code{"timestamped"} retains dated history.
 #' @param keep_last Integer. Number of snapshots to retain. Defaults to
-#'   \code{20}.
+#'   \code{20}; used only for \code{SnapshotMode = "timestamped"}.
 #' @return Invisibly, the snapshot directory path, or \code{NULL} when
 #'   there was nothing to copy.
 #' @seealso \code{\link{audit_repository}}
@@ -7128,7 +7132,9 @@ release_repository_lock <- function(lock, force = FALSE, LogPath = NULL) {
 #' @export
 snapshot_repository_state <- function(CheckpointPath = NULL, ManifestPath = NULL,
                                       TableSchemaPath = NULL, SchemaRegistryPath = NULL,
-                                      BackupDir, keep_last = 20L) {
+                                      BackupDir, SnapshotMode = c("latest", "timestamped"),
+                                      keep_last = 20L) {
+  SnapshotMode <- match.arg(SnapshotMode)
   candidates <- c(CheckpointPath, ManifestPath, TableSchemaPath, SchemaRegistryPath)
   if (!is.null(TableSchemaPath) && nzchar(TableSchemaPath) && !is_excel_workbook_path(TableSchemaPath)) {
     candidates <- c(candidates, label_catalog_path(TableSchemaPath))
@@ -7139,11 +7145,48 @@ snapshot_repository_state <- function(CheckpointPath = NULL, ManifestPath = NULL
     log_msg("[SNAPSHOT] No state files exist yet -- nothing to snapshot.")
     return(invisible(NULL))
   }
-  stamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
-  snap_dir <- file.path(BackupDir, stamp)
+  dir.create(BackupDir, recursive = TRUE, showWarnings = FALSE)
+  snap_dir <- if (identical(SnapshotMode, "latest")) {
+    tempfile(".latest_pending_", tmpdir = BackupDir)
+  } else {
+    file.path(BackupDir, format(Sys.time(), "%Y%m%d_%H%M%S"))
+  }
   dir.create(snap_dir, recursive = TRUE, showWarnings = FALSE)
   ok <- file.copy(candidates, snap_dir, overwrite = TRUE, copy.date = TRUE)
-  log_msg(sprintf("[SNAPSHOT] Saved %d/%d state file(s) to %s", sum(ok), length(candidates), snap_dir))
+  if (!all(ok)) {
+    unlink(snap_dir, recursive = TRUE, force = TRUE)
+    stop(sprintf("[SNAPSHOT] Could not stage all state files (%d/%d copied); existing snapshot was retained.",
+                 sum(ok), length(candidates)))
+  }
+  if (identical(SnapshotMode, "latest")) {
+    latest_dir <- file.path(BackupDir, "latest")
+    previous_dir <- tempfile(".latest_previous_", tmpdir = BackupDir)
+    moved_previous <- FALSE
+    published <- FALSE
+    tryCatch({
+      if (dir.exists(latest_dir)) {
+        if (!file.rename(latest_dir, previous_dir)) {
+          stop(sprintf("Could not move the previous latest snapshot aside: %s", latest_dir))
+        }
+        moved_previous <- TRUE
+      }
+      if (!file.rename(snap_dir, latest_dir)) {
+        stop(sprintf("Could not publish the staged latest snapshot: %s", latest_dir))
+      }
+      published <- TRUE
+      if (moved_previous && dir.exists(previous_dir)) unlink(previous_dir, recursive = TRUE, force = TRUE)
+      snap_dir <- latest_dir
+    }, error = function(e) {
+      if (!published && moved_previous && !dir.exists(latest_dir) && dir.exists(previous_dir)) {
+        file.rename(previous_dir, latest_dir)
+      }
+      if (dir.exists(snap_dir)) unlink(snap_dir, recursive = TRUE, force = TRUE)
+      stop(e)
+    })
+  }
+  log_msg(sprintf("[SNAPSHOT] Saved %d/%d state file(s) to %s (%s mode).",
+                  sum(ok), length(candidates), snap_dir, SnapshotMode))
+  if (identical(SnapshotMode, "latest")) return(invisible(snap_dir))
   snaps <- list.dirs(BackupDir, recursive = FALSE, full.names = TRUE)
   snaps <- snaps[grepl("^[0-9]{8}_[0-9]{6}$", basename(snaps))]
   if (length(snaps) > keep_last) {
@@ -11270,6 +11313,15 @@ discover_schema_relationships <- function(table_schema, include_candidates = TRU
 #' @param IORetryPauseSeconds Numeric scalar. Seconds before the first
 #'   retry; later retries wait three times as long as the one before.
 #'   Passed to \code{ParquetBackEndCreate}. Defaults to \code{10}.
+#' @param SnapshotState Logical. Whether to create a pre-run state snapshot.
+#'   Defaults to \code{TRUE}.
+#' @param SnapshotMode Character scalar. \code{"latest"}, the default,
+#'   replaces one \code{StateBackups/latest} generation per run.
+#'   \code{"timestamped"} retains dated generations.
+#' @param StateBackupDir Character scalar or \code{NULL}. Optional snapshot
+#'   root; \code{NULL} uses \code{<FormattedDBPath>/StateBackups}.
+#' @param SnapshotKeep Integer. Retention count for timestamped snapshots.
+#'   Defaults to \code{20}; ignored for \code{SnapshotMode = "latest"}.
 #' @param SAV_ROW_THRESHOLD Integer. Row count above which a SAV file
 #'   streams in chunks. Accepts \code{NULL}, which keeps the
 #'   configuration file's value, or the default of \code{1000000}.
@@ -11360,6 +11412,10 @@ load_repository_config <- function(
     FailProbeSourcePath = NULL,
     IORetryAttempts = NULL,
     IORetryPauseSeconds = NULL,
+    SnapshotState = NULL,
+    SnapshotMode = NULL,
+    StateBackupDir = NULL,
+    SnapshotKeep = NULL,
     SAV_ROW_THRESHOLD = NULL,
     RAMThreshold = NULL,
     PartitionBy = NULL,
@@ -11402,6 +11458,10 @@ load_repository_config <- function(
     FailProbeSourcePath = NULL,
     IORetryAttempts = 3L,
     IORetryPauseSeconds = 10,
+    SnapshotState = TRUE,
+    SnapshotMode = "latest",
+    StateBackupDir = NULL,
+    SnapshotKeep = 20L,
     SAV_ROW_THRESHOLD = 1000000L,
     RAMThreshold = 30,
     PartitionBy = "NRows",
@@ -11450,6 +11510,10 @@ load_repository_config <- function(
     FailProbeSourcePath = FailProbeSourcePath,
     IORetryAttempts = IORetryAttempts,
     IORetryPauseSeconds = IORetryPauseSeconds,
+    SnapshotState = SnapshotState,
+    SnapshotMode = SnapshotMode,
+    StateBackupDir = StateBackupDir,
+    SnapshotKeep = SnapshotKeep,
     SAV_ROW_THRESHOLD = SAV_ROW_THRESHOLD,
     RAMThreshold = RAMThreshold,
     PartitionBy = PartitionBy,
@@ -11519,6 +11583,18 @@ load_repository_config <- function(
   cfg$IORetryPauseSeconds <- suppressWarnings(as.numeric(cfg$IORetryPauseSeconds[1]))
   if (length(cfg$IORetryPauseSeconds) != 1L || is.na(cfg$IORetryPauseSeconds) || cfg$IORetryPauseSeconds < 0) {
     stop("repository_config IORetryPauseSeconds must be a non-negative number.")
+  }
+  if (length(cfg$SnapshotState) != 1L || is.na(cfg$SnapshotState) || !is.logical(cfg$SnapshotState)) {
+    stop("repository_config SnapshotState must be TRUE or FALSE.")
+  }
+  cfg$SnapshotMode <- match.arg(as.character(cfg$SnapshotMode[1]), c("latest", "timestamped"))
+  if (!is.null(cfg$StateBackupDir)) {
+    cfg$StateBackupDir <- as.character(cfg$StateBackupDir[1])
+    if (is.na(cfg$StateBackupDir) || !nzchar(trimws(cfg$StateBackupDir))) cfg$StateBackupDir <- NULL
+  }
+  cfg$SnapshotKeep <- suppressWarnings(as.integer(cfg$SnapshotKeep[1]))
+  if (length(cfg$SnapshotKeep) != 1L || is.na(cfg$SnapshotKeep) || cfg$SnapshotKeep < 1L) {
+    stop("repository_config SnapshotKeep must be a positive integer.")
   }
   if (!is.null(cfg$FailProbeSourcePath)) {
     cfg$FailProbeSourcePath <- as.character(cfg$FailProbeSourcePath[1])
@@ -11606,6 +11682,10 @@ create_repository_project <- function(dir, MasterDBPath = file.path(dir, "source
     "  DelimitedWriteMode = \"chunk_table\", # chunk_table | streaming; streaming appends bounded batches to each output file",
     "  DelimitedPartitionMaxMB = NULL,  # optional cap for one source-defined partition;",
     "                                   # NULL uses a conservative bounded route budget",
+    "  SnapshotState = TRUE,            # save repository bookkeeping before each load",
+    "  SnapshotMode = \"latest\",       # latest | timestamped; latest replaces one compact snapshot",
+    "  StateBackupDir = NULL,           # NULL uses <FormattedDBPath>/StateBackups",
+    "  SnapshotKeep = 20L,              # retained generations when SnapshotMode = \"timestamped\"",
     "  RAMThreshold      = 30,          # GB, for PartitionBy = \"RAMEstimate\"",
     "  MaxCoerceNAPct    = 25,          # fail a file when coercion destroys more than this % of a column",
     "  SourceFingerprintMode = \"metadata\", # metadata | sha256 | none",
@@ -11721,6 +11801,8 @@ create_repository_project <- function(dir, MasterDBPath = file.path(dir, "source
     "                                  IORetryPauseSeconds = cfg$IORetryPauseSeconds,",
     "                                  FailProbeSourcePath = cfg$FailProbeSourcePath,",
     "                                  MaxFileStemTruncate = TRUE, TerminalHivePartition = FALSE,",
+    "                                  SnapshotState = cfg$SnapshotState, SnapshotMode = cfg$SnapshotMode,",
+    "                                  StateBackupDir = cfg$StateBackupDir, SnapshotKeep = cfg$SnapshotKeep,",
     "                                  SchemaRegistryPath = paths$SchemaRegistryPath,",
     "                                  TableSchemaPath = paths$TableSchemaPath,",
     "                                  ManifestPath = paths$ManifestPath,",
@@ -17438,11 +17520,14 @@ print.RepositoryRunResult <- function(x, ...) {
 #'   \code{StateBackupDir} before loading. See
 #'   \code{\link{snapshot_repository_state}}. Accepts \code{FALSE},
 #'   which does not.
+#' @param SnapshotMode Character scalar. \code{"latest"}, the default,
+#'   replaces one pre-run snapshot at \code{StateBackups/latest}.
+#'   \code{"timestamped"} retains dated snapshot generations.
 #' @param StateBackupDir Character scalar. Snapshot destination,
 #'   defaulting to
 #'   \code{file.path(dirname(ParquetBasePath), "StateBackups")}.
-#' @param SnapshotKeep Integer. Number of state snapshot generations
-#'   retained.
+#' @param SnapshotKeep Integer. Number of timestamped state snapshot
+#'   generations retained; ignored for \code{SnapshotMode = "latest"}.
 #' @param StopOnDatabaseError Logical. Accepts \code{TRUE}, the
 #'   default, which raises an error at the end of the run if any
 #'   database's schema inference or loading phase failed, after the
@@ -17586,7 +17671,8 @@ ParquetBackEndCreate <- function(MDT, DBLoad, MasterDBPath, completed_checkpoint
                                  UseSchemaCatalog = TRUE,
                                  LockRepository = TRUE, LockPath = NULL, LockStaleMinutes = 720,
                                  RunPreflight = TRUE,
-                                 SnapshotState = TRUE, StateBackupDir = NULL, SnapshotKeep = 20L,
+                                 SnapshotState = TRUE, SnapshotMode = c("latest", "timestamped"),
+                                 StateBackupDir = NULL, SnapshotKeep = 20L,
                                  StopOnDatabaseError = TRUE, StopOnFileError = TRUE,
                                  MaxCoerceNAPct = NULL,
                                  SourceFingerprintMode = c("metadata", "sha256", "none"),
@@ -17602,6 +17688,7 @@ ParquetBackEndCreate <- function(MDT, DBLoad, MasterDBPath, completed_checkpoint
                                  RemoteDownloadFunction = NULL) {
   PartitionBy <- match.arg(PartitionBy, c("NRows", "RAMEstimate", "FAIL"))
   DelimitedWriteMode <- match.arg(DelimitedWriteMode)
+  SnapshotMode <- match.arg(SnapshotMode)
   SourceFingerprintMode <- match.arg(SourceFingerprintMode)
   FailProbeMode <- match.arg(FailProbeMode)
   CleanupAfterPhase <- match.arg(CleanupAfterPhase, c("all", "database", "none"))
@@ -17706,7 +17793,8 @@ ParquetBackEndCreate <- function(MDT, DBLoad, MasterDBPath, completed_checkpoint
     if (is.null(StateBackupDir)) StateBackupDir <- file.path(dirname(ParquetBasePath), "StateBackups")
     snapshot_repository_state(CheckpointPath = CheckpointPath, ManifestPath = ManifestPath,
                               TableSchemaPath = TableSchemaPath, SchemaRegistryPath = SchemaRegistryPath,
-                              BackupDir = StateBackupDir, keep_last = SnapshotKeep)
+                              BackupDir = StateBackupDir, SnapshotMode = SnapshotMode,
+                              keep_last = SnapshotKeep)
   }
   schema_registry <- load_schema_registry(SchemaRegistryPath, create_if_missing = TRUE)
   catalog <- if (isTRUE(UseSchemaCatalog)) load_table_schema_catalog(TableSchemaPath, strict = TRUE) else NULL
