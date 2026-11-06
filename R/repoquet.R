@@ -6287,6 +6287,7 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
                                   TerminalHivePartition = TerminalHivePartition,
                                   MaxFileStemTruncate = MaxFileStemTruncate)
   stale_root <- if (route_source_partitions) table_dir else year_dir
+  preserved_stream_files <- character(0)
   if (!is.null(stale_root) && dir.exists(stale_root)) {
     stale <- if (TerminalHivePartition) {
       d <- list.dirs(stale_root, recursive = route_source_partitions, full.names = TRUE)
@@ -6296,10 +6297,25 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
                  recursive = route_source_partitions, full.names = TRUE)
     }
     if (length(stale) > 0L) {
-      remove_parquet_manifest_rows(ManifestPath = ManifestPath, SourcePath = SourcePath %||% path,
-                                   ParquetPath = if (TerminalHivePartition) file.path(stale, "data.parquet") else stale)
-      unlink(stale, recursive = TRUE)
-      log_msg(sprintf("[CHUNKED-DELIM] Removed %d stale chunk output(s) before retrying %s", length(stale), basename(path)))
+      if (streaming_writer) {
+        final_paths <- if (TerminalHivePartition) file.path(stale, "data.parquet") else
+          stale[!grepl("\\.tmp_", basename(stale), fixed = FALSE)]
+        temp_paths <- if (TerminalHivePartition) character(0) else
+          stale[grepl("\\.tmp_", basename(stale), fixed = FALSE)]
+        if (length(temp_paths) > 0L) unlink(temp_paths, recursive = TRUE, force = TRUE)
+        preserved_stream_files <- final_paths[file.exists(final_paths)]
+        if (length(preserved_stream_files) > 0L) {
+          log_msg(sprintf(paste0("[PARQUET STREAM RESUME] Preserving %d completed piece(s) from an interrupted ",
+                                 "source attempt for %s. They remain unavailable for checkpointing until the ",
+                                 "source completes and will be replaced in order during this retry."),
+                          length(preserved_stream_files), basename(path)))
+        }
+      } else {
+        remove_parquet_manifest_rows(ManifestPath = ManifestPath, SourcePath = SourcePath %||% path,
+                                     ParquetPath = if (TerminalHivePartition) file.path(stale, "data.parquet") else stale)
+        unlink(stale, recursive = TRUE)
+        log_msg(sprintf("[CHUNKED-DELIM] Removed %d stale chunk output(s) before retrying %s", length(stale), basename(path)))
+      }
     }
   }
   written_files <- character(0)
@@ -6310,7 +6326,7 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
                  pattern = paste0("^", regex_escape(file_stem), "_[0-9]{5}\\.parquet\\.tmp_.*$"),
                  recursive = route_source_partitions, full.names = TRUE)
     } else character(0)
-    paths <- unique(c(paths, tmp_paths))
+    paths <- if (streaming_writer) tmp_paths else unique(c(paths, tmp_paths))
     if (length(paths) == 0L) return(invisible(0L))
     remove_parquet_manifest_rows(ManifestPath = ManifestPath, SourcePath = SourcePath %||% path, ParquetPath = paths)
     targets <- if (TerminalHivePartition) unique(dirname(paths)) else paths
@@ -6323,6 +6339,47 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
   chunk_counters <- new.env(parent = emptyenv())
   partition_records <- list()
   stream_successes <- 0L
+  #### A terminated isolated worker may leave fully published, manifest-backed pieces. ####
+  #### For a fixed partition those pieces are a contiguous source prefix, so resume past ####
+  #### them rather than re-reading and re-writing hours of verified work. Source-routed ####
+  #### partitions are deliberately excluded because their rows can be interleaved.       ####
+  if (streaming_writer && !route_source_partitions && !TerminalHivePartition &&
+      length(preserved_stream_files) > 0L && !is.null(ManifestPath) && nzchar(ManifestPath)) {
+    existing <- tryCatch(read_parquet_manifest(ManifestPath), error = function(e) NULL)
+    source_id <- SourcePath %||% path
+    if (!is.null(existing) && nrow(existing) > 0L &&
+        all(c("SourcePath", "ParquetPath", "NRows", "Status") %in% names(existing))) {
+      prior <- existing[SourcePath == source_id & ParquetPath %in% preserved_stream_files &
+                          tolower(Status) == "written"]
+      if (nrow(prior) > 0L) {
+        prior[, .Piece := suppressWarnings(as.integer(sub(".*_([0-9]{5})\\.parquet$", "\\1", ParquetPath)))]
+        data.table::setorder(prior, .Piece)
+        prior_rows <- suppressWarnings(as.numeric(prior$NRows))
+        contiguous <- identical(prior$.Piece, seq_len(nrow(prior))) &&
+          length(unique(prior$ParquetPath)) == nrow(prior) &&
+          all(is.finite(prior_rows) & prior_rows == requested_chunk_size)
+        if (isTRUE(contiguous)) {
+          signature <- paste(sanitize_partition_value(partition_values), collapse = "\034")
+          offset <- sum(prior_rows)
+          total_written <- offset
+          written_files <- as.character(prior$ParquetPath)
+          chunk_counters[[signature]] <- nrow(prior) + 1L
+          stream_successes <- nrow(prior)
+          partition_records[[1L]] <- data.table::data.table(
+            PartitionKey = paste(partition_keys, collapse = ";"),
+            PartitionValue = paste(partition_values, collapse = ";"),
+            Year = as.character(if ("YEAR" %in% partition_keys) {
+              partition_values[[match("YEAR", partition_keys)]]
+            } else year_val),
+            Directory = year_dir)
+          log_msg(sprintf(paste0("[PARQUET STREAM RESUME] Verified %d contiguous manifest-backed piece(s) ",
+                                 "(%s rows) for %s; resuming at source row %s."),
+                          nrow(prior), formatC(offset, format = "d", big.mark = ","), basename(path),
+                          formatC(offset + 1L, format = "d", big.mark = ",")))
+        }
+      }
+    }
+  }
   stream_restart_error <- function(state, error) {
     mode <- if (route_source_partitions) "source" else "piece"
     structure(list(
@@ -6417,6 +6474,9 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
       .close_parquet_stream_writer(state, publish = FALSE)
       return(invisible(NULL))
     }
+    partition_label <- paste(paste0(tolower(partition_keys), "=", state$actual_values), collapse = "/")
+    log_msg(sprintf("[PARQUET STREAM FINALIZE] %s: partition %s, piece %d: closing and publishing %d rows.",
+                    basename(path), partition_label, state$chunk_num, state$rows))
     close_error <- tryCatch({
       .close_parquet_stream_writer(state, publish = TRUE)
       NULL
@@ -6444,7 +6504,6 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
       PartitionKey = paste(partition_keys, collapse = ";"),
       PartitionValue = paste(state$actual_values, collapse = ";"),
       Year = as.character(actual_year), Directory = state$target_dir)
-    partition_label <- paste(paste0(tolower(partition_keys), "=", state$actual_values), collapse = "/")
     log_msg(sprintf("[PARQUET STREAM WRITE] %s: partition %s, piece %d: %d rows -> %s",
                     basename(path), partition_label, state$chunk_num, state$rows, basename(state$path)))
     stream_successes <<- stream_successes + 1L
@@ -6497,13 +6556,21 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
         next
       }
       piece <- if (n_take == nrow(df_piece)) df_piece else df_piece[seq_len(n_take)]
+      log_msg(sprintf("[PARQUET STREAM ARROW] %s: preparing rows %s-%s for piece %d.",
+                      basename(path), formatC(source_offset + source_rows_consumed + 1L, format = "d", big.mark = ","),
+                      formatC(source_offset + source_rows_consumed + n_take, format = "d", big.mark = ","),
+                      if (is.null(state)) chunk_counters[[partition_signature]] %||% 1L else state$chunk_num))
       arrow_tbl <- prepare_arrow_piece(piece)
       if (is.null(state)) {
         state <- stream_open_state(actual_values, target_dir, partition_signature, arrow_tbl$schema,
                                    source_offset_start = source_offset + source_rows_consumed)
       }
       write_error <- tryCatch({
+        log_msg(sprintf("[PARQUET STREAM APPEND] %s: appending %d rows to piece %d.",
+                        basename(path), arrow_tbl$num_rows, state$chunk_num))
         state$writer$WriteTable(arrow_tbl, chunk_size = max(1L, as.integer(arrow_tbl$num_rows)))
+        log_msg(sprintf("[PARQUET STREAM APPENDED] %s: appended %d rows to piece %d.",
+                        basename(path), arrow_tbl$num_rows, state$chunk_num))
         NULL
       }, error = function(e) e)
       n_appended <- arrow_tbl$num_rows
@@ -6612,6 +6679,9 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
             break
           }
           n_read <- nrow(df_chunk)
+          log_msg(sprintf("[PARQUET STREAM READ COMPLETE] %s: read %d row(s) beginning at row %s.",
+                          basename(path), n_read,
+                          formatC(offset + 1L, format = "d", big.mark = ",")))
           process_chunk(df_chunk, source_offset = offset)
           rm(df_chunk)
           gc(verbose = FALSE)
@@ -6645,7 +6715,7 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
           chunk_counters <- new.env(parent = emptyenv())
           total_written <- 0L
           offset <- 0L
-          log_msg(sprintf("[PARQUET STREAM RECOVERY] Removed %d output(s) and restarted %s from its first row because source-defined partitions can be interleaved.",
+          log_msg(sprintf("[PARQUET STREAM RECOVERY] Closed %d temporary output(s) and restarted %s from its first row because source-defined partitions can be interleaved.",
                           n_cleaned, basename(path)))
         } else {
           total_written <- restart$total_written
@@ -6777,6 +6847,18 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
     if (total_written != total_rows) {
       stop(sprintf("file=%s | issue=row_count_mismatch | counted=%d | rows_written=%d",
                    basename(path), total_rows, total_written))
+    }
+    if (streaming_writer && length(preserved_stream_files) > 0L) {
+      obsolete <- setdiff(preserved_stream_files, written_files)
+      if (length(obsolete) > 0L) {
+        remove_parquet_manifest_rows(ManifestPath = ManifestPath,
+                                     SourcePath = SourcePath %||% path,
+                                     ParquetPath = obsolete)
+        unlink(if (TerminalHivePartition) dirname(obsolete) else obsolete,
+               recursive = TRUE, force = TRUE)
+        log_msg(sprintf("[PARQUET STREAM RESUME] Removed %d superseded piece(s) after %s completed successfully.",
+                        length(obsolete), basename(path)))
+      }
     }
     partitions <- if (length(partition_records) > 0L) {
       unique(data.table::rbindlist(partition_records, fill = TRUE))
@@ -9816,7 +9898,16 @@ validate_duckdb_table <- function(con, table_name, schema_registry = NULL, stric
       response <- list(ok = FALSE, crashed = TRUE,
                        error = sprintf("Hardened chunk worker did not complete: %s", conditionMessage(proc)))
     } else if (!file.exists(result_path)) {
-      detail <- trimws(paste(c(proc$stdout %||% "", proc$stderr %||% ""), collapse = " "))
+      output_lines <- unlist(strsplit(paste(c(proc$stdout %||% "", proc$stderr %||% ""),
+                                           collapse = "\n"), "\r?\n", perl = TRUE),
+                             use.names = FALSE)
+      output_lines <- trimws(output_lines[nzchar(trimws(output_lines))])
+      detail_lines <- utils::tail(output_lines, 12L)
+      detail <- paste(detail_lines, collapse = " | ")
+      if (length(detail_lines) > 0L) {
+        log_msg(sprintf("[FAIL CHUNK DIAGNOSTIC] Last isolated-worker output for %s: %s",
+                        basename(path), detail))
+      }
       response <- list(ok = FALSE, crashed = TRUE,
         error = sprintf("Hardened chunk worker exited with status %s without a result%s.",
           proc$status %||% "unknown", if (nzchar(detail)) paste0(": ", detail) else ""))
@@ -9831,24 +9922,30 @@ validate_duckdb_table <- function(con, table_name, schema_registry = NULL, stric
                       basename(path), current_chunk_size))
       return(list(ok = TRUE, result = response$result))
     }
-    #### A worker that returned a normal memory error has already applied its full ####
-    #### in-worker SAV_CHUNK_SIZE decrement schedule. Only a terminated worker lacks ####
-    #### that opportunity, so only that case restarts the source in a new worker.    ####
-    recoverable <- isTRUE(response$crashed)
+    #### A terminated child does not identify its cause. It can be a native Arrow ####
+    #### failure or a dropped network drive, not an out-of-memory condition. Keep  ####
+    #### completed manifest-backed pieces and retry the same source/chunk setting. ####
+    if (isTRUE(response$crashed)) {
+      retry <- .io_retry_settings()
+      if (attempt >= retry$attempts) {
+        return(list(ok = FALSE, error = paste0(
+          response$error %||% "Hardened adaptive chunk worker terminated.",
+          " Completed pieces were preserved; retry the source after connectivity is stable.")))
+      }
+      wait <- .io_retry_wait(attempt + 1L, retry$pause)
+      log_msg(sprintf(paste0("[FAIL CHUNK RETRY] %s worker ended without a result at SAV_CHUNK_SIZE=%d. ",
+                             "Preserving completed pieces and retrying the same source (attempt %d/%d) after %gs."),
+                      basename(path), current_chunk_size, attempt + 1L, retry$attempts, wait))
+      if (wait > 0) Sys.sleep(wait)
+      next
+    }
     .cleanup_delimited_chunk_outputs(path, year_dir, table_dir, route_source_partitions,
       TerminalHivePartition, MaxFileStemTruncate, ManifestPath, SourcePath)
-    if (!recoverable && .is_recoverable_memory_error(response$error)) {
+    if (.is_recoverable_memory_error(response$error)) {
       log_msg(sprintf("[FAIL CHUNK] %s exhausted its configured in-worker chunk retry schedule: %s",
                       basename(path), response$error %||% "memory allocation error"))
     }
-    if (!recoverable || current_chunk_size <= floor) {
-      return(list(ok = FALSE, error = response$error %||% "Hardened adaptive chunk worker failed without a diagnostic."))
-    }
-    next_chunk_size <- max(floor, current_chunk_size - decrement)
-    log_msg(sprintf("[FAIL CHUNK] %s ended before a successful result at SAV_CHUNK_SIZE=%d (%s). Retrying the source from the beginning at %d rows.",
-                    basename(path), current_chunk_size,
-                    response$error %||% "unknown error", next_chunk_size))
-    current_chunk_size <- next_chunk_size
+    return(list(ok = FALSE, error = response$error %||% "Hardened adaptive chunk worker failed without a diagnostic."))
   }
 }
 #' Dispatches a single source file to the appropriate reader and writer
