@@ -3546,17 +3546,12 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
 .stream_delimited_logical_records <- function(path, reader_options = list(),
                                                chunk_size = 1000000L,
                                                max_rows = Inf, col_classes = NULL,
-                                               max_buffer_bytes = 32 * 1024^2,
                                                callback) {
   if (!is.function(callback)) stop("Logical-record streaming requires a callback function.")
   header_info <- .delimited_header_info(path, reader_options)
   options <- header_info$ReaderOptions
   repair <- .delimited_repair_settings(options)
   chunk_size <- max(1L, as.integer(chunk_size))
-  max_buffer_bytes <- suppressWarnings(as.numeric(max_buffer_bytes[1]))
-  if (!is.finite(max_buffer_bytes) || max_buffer_bytes < 1) {
-    stop("max_buffer_bytes must be a positive number.")
-  }
   max_rows <- if (is.infinite(max_rows)) Inf else max(0, as.numeric(max_rows))
   expected_fields <- length(header_info$Header)
   quote_char <- options$Quote %||% "\""
@@ -3565,7 +3560,6 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
 
   records <- character(0)
   continuations <- list()
-  records_bytes <- 0
   pending_record <- NULL
   pending_continuations <- character(0)
   pending_line <- NA_integer_
@@ -3592,12 +3586,9 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
     if (remaining < length(records)) {
       records <<- records[-selected]
       continuations <<- continuations[-selected]
-      records_bytes <<- sum(nchar(records, type = "bytes"), na.rm = TRUE) +
-        sum(vapply(continuations, function(x) sum(nchar(x, type = "bytes"), na.rm = TRUE), numeric(1)))
     } else {
       records <<- character(0)
       continuations <<- list()
-      records_bytes <<- 0
     }
     if (!is.infinite(max_rows) && logical_rows >= max_rows) done <<- TRUE
     invisible(NULL)
@@ -3607,12 +3598,10 @@ delimited_fread_args <- function(reader_options = list(), col_classes = NULL, he
     if (is.null(pending_record) || done) return(invisible(NULL))
     records <<- c(records, pending_record)
     continuations[[length(records)]] <<- pending_continuations
-    records_bytes <<- records_bytes + nchar(pending_record, type = "bytes") +
-      sum(nchar(pending_continuations, type = "bytes"), na.rm = TRUE)
     pending_record <<- NULL
     pending_continuations <<- character(0)
     pending_line <<- NA_integer_
-    if (length(records) >= chunk_size || records_bytes >= max_buffer_bytes) flush_records()
+    if (length(records) >= chunk_size) flush_records()
     invisible(NULL)
   }
 
@@ -6044,11 +6033,7 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
   rd <- get_file_reader(reader)
   if (is.null(rd$read_chunk)) stop(sprintf("Reader '%s' has no read_chunk callback.", reader))
   on.exit(.close_chunk_cursors(path), add = TRUE)
-  #### FAIL-mode delimited fallback is a record stream. It avoids a second full-file ####
-  #### count after the isolated direct-read probe has already failed, and keeps the    ####
-  #### buffered record text below a fixed bound before each Arrow write.               ####
-  logical_stream <- .uses_delimited_logical_stream(reader_options) ||
-    (isTRUE(adaptive_chunking) && !identical(tolower(reader), "asc") && is.null(preloaded_data))
+  logical_stream <- .uses_delimited_logical_stream(reader_options)
   fixed_width <- identical(tolower(reader), "asc") && is.null(preloaded_data)
   if (!is.null(preloaded_data) && !is.data.frame(preloaded_data)) {
     stop("preloaded_data must be a data frame when supplied.")
@@ -6067,7 +6052,7 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
   }
   total_rows <- if (!is.null(preloaded_data)) {
     as.numeric(nrow(preloaded_data))
-  } else if (logical_stream) {
+  } else if (logical_stream || isTRUE(adaptive_chunking)) {
     NA_real_
   } else {
     as.numeric(call_reader(rd, "count_rows", path, reader_options = reader_options))
@@ -6133,15 +6118,9 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
                     } else ""))
   } else if (adaptive_chunking) {
     chunk_size <- current_chunk_size
-    if (logical_stream) {
-      log_msg(sprintf(
-        "[CHUNKED-DELIM] %s: FAIL-mode fallback streams logical records (up to %d rows and 32 MB of record text per piece); no second full-file row count is performed.",
-        basename(path), current_chunk_size))
-    } else {
-      log_msg(sprintf(
-        "[CHUNKED-DELIM] %s: FAIL-mode fallback starts at chunk_size=%d; no calculated memory cap will be applied. Recoverable memory errors reduce by %d rows to a floor of %d.",
-        basename(path), current_chunk_size, chunk_decrement, chunk_floor))
-    }
+    log_msg(sprintf(
+      "[CHUNKED-DELIM] %s: FAIL-mode fallback starts at chunk_size=%d; no calculated memory cap will be applied. Recoverable memory errors reduce by %d rows to a floor of %d.",
+      basename(path), current_chunk_size, chunk_decrement, chunk_floor))
   }
   #### A fixed-width source is always read front to back in one pass: its records have ####
   #### no header or logical-record repair, and a stream avoids re-reading skipped lines. ####
@@ -6366,13 +6345,15 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
         offset <- offset + n_this
       }
     } else {
-      while (offset < total_rows) {
+      while (is.na(total_rows) || offset < total_rows) {
         touch_repository_lock(RepositoryLock)
-        n_this <- min(as.integer(current_chunk_size), total_rows - offset)
+        n_this <- if (is.na(total_rows)) as.integer(current_chunk_size) else
+          min(as.integer(current_chunk_size), total_rows - offset)
         log_msg(sprintf("[CHUNKED-DELIM] %s: reading rows %s-%s of %s", basename(path),
                         formatC(offset + 1L, format = "d", big.mark = ","),
                         formatC(offset + n_this, format = "d", big.mark = ","),
-                        formatC(total_rows, format = "d", big.mark = ",")))
+                        if (is.na(total_rows)) "end of file" else
+                          formatC(total_rows, format = "d", big.mark = ",")))
         df_chunk <- tryCatch(
           call_reader(rd, "read_chunk", path, reader_options = reader_options,
                       offset = offset, n_max = n_this, header = header, exact_rows = TRUE,
@@ -6397,12 +6378,20 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
           gc(verbose = FALSE)
           next
         }
+        if (nrow(df_chunk) == 0L) {
+          total_rows <- offset
+          rm(df_chunk)
+          gc(verbose = FALSE)
+          break
+        }
+        n_read <- nrow(df_chunk)
         process_chunk(df_chunk)
         rm(df_chunk)
         gc(verbose = FALSE)
-        offset <- offset + n_this
+        offset <- offset + n_read
       }
     }
+    if (is.na(total_rows)) total_rows <- total_written
     if (total_written != total_rows) {
       stop(sprintf("file=%s | issue=row_count_mismatch | counted=%d | rows_written=%d",
                    basename(path), total_rows, total_written))
@@ -9234,6 +9223,200 @@ validate_duckdb_table <- function(con, table_name, schema_registry = NULL, stric
                   basename(path), worker_elapsed))
   list(ok = TRUE, result = response$result)
 }
+
+.is_recoverable_memory_error <- function(message) {
+  grepl("cannot allocate|vector memory|memory exhausted|out of memory|std::bad_alloc|cannot reserve",
+        as.character(message %||% ""), ignore.case = TRUE, perl = TRUE)
+}
+
+.cleanup_delimited_chunk_outputs <- function(path, year_dir, table_dir,
+                                             route_source_partitions,
+                                             TerminalHivePartition,
+                                             MaxFileStemTruncate,
+                                             ManifestPath, SourcePath) {
+  output_root <- if (isTRUE(route_source_partitions)) table_dir else year_dir
+  if (is.null(output_root) || !dir.exists(output_root)) return(invisible(0L))
+  file_stem <- parquet_chunk_stem(path, partition_dir = year_dir,
+                                  TerminalHivePartition = TerminalHivePartition,
+                                  MaxFileStemTruncate = MaxFileStemTruncate)
+  targets <- if (isTRUE(TerminalHivePartition)) {
+    dirs <- list.dirs(output_root, recursive = isTRUE(route_source_partitions), full.names = TRUE)
+    dirs[grepl(paste0("^batch_id=", regex_escape(file_stem), "_[0-9]{5}$"),
+               basename(dirs), ignore.case = TRUE)]
+  } else {
+    list.files(output_root,
+               pattern = paste0("^", regex_escape(file_stem), "_[0-9]{5}\\.parquet$"),
+               recursive = isTRUE(route_source_partitions), full.names = TRUE)
+  }
+  if (length(targets) == 0L) return(invisible(0L))
+  parquet_paths <- if (isTRUE(TerminalHivePartition)) file.path(targets, "data.parquet") else targets
+  remove_parquet_manifest_rows(ManifestPath = ManifestPath,
+                               SourcePath = SourcePath %||% path,
+                               ParquetPath = parquet_paths)
+  unlink(targets, recursive = TRUE, force = TRUE)
+  .prune_empty_output_directories(output_root)
+  log_msg(sprintf("[FAIL CHUNK] Removed %d partial chunk output(s) for %s before retrying.",
+                  length(targets), basename(path)))
+  invisible(length(targets))
+}
+
+.hardened_chunk_fallback_worker <- function(payload_path) {
+  payload <- readRDS(payload_path)
+  previous_run <- begin_repository_run(LogPath = payload$LogPath, RunId = payload$RunId)
+  on.exit(restore_repository_run(previous_run), add = TRUE)
+  if (!is.null(payload$io_retry)) {
+    previous_io <- options(repoquet.io_retry_attempts = payload$io_retry$attempts,
+                           repoquet.io_retry_pause_seconds = payload$io_retry$pause)
+    on.exit(options(previous_io), add = TRUE)
+  }
+  worker_lock <- if (!is.null(payload$RepositoryLockPath) &&
+                     dir.exists(payload$RepositoryLockPath)) {
+    structure(list(path = payload$RepositoryLockPath), class = "repository_lock")
+  } else NULL
+  tryCatch({
+    log_msg(sprintf("[FAIL CHUNK] Isolated adaptive fallback for %s begins at SAV_CHUNK_SIZE=%d; decrement=%d; floor=%d.",
+                    basename(payload$path), payload$chunk_size,
+                    payload$chunk_size_decrement, payload$min_chunk_size))
+    result <- read_delimited_chunked(
+      path = payload$path, chunk_size = payload$chunk_size,
+      year_dir = payload$year_dir, table_dir = payload$table_dir,
+      all_cols = payload$all_cols, col_classes = payload$col_classes,
+      year_val = payload$year_val, TerminalHivePartition = payload$TerminalHivePartition,
+      partition_keys = payload$partition_keys, partition_values = payload$partition_values,
+      route_source_partitions = payload$route_source_partitions,
+      max_coerce_na_pct = payload$max_coerce_na_pct,
+      ManifestPath = payload$ManifestPath, Database = payload$Database,
+      TableName = payload$TableName, DuckDBTable = payload$DuckDBTable,
+      SourcePath = payload$SourcePath, SchemaHash = payload$SchemaHash,
+      MaxFileStemTruncate = payload$MaxFileStemTruncate,
+      MaxChunkMemoryMB = payload$MaxChunkMemoryMB,
+      MaxWholeFileMemoryMB = payload$MaxWholeFileMemoryMB,
+      MaxPartitionMemoryMB = payload$MaxPartitionMemoryMB,
+      chunk_size_decrement = payload$chunk_size_decrement,
+      min_chunk_size = payload$min_chunk_size,
+      adaptive_chunking = TRUE, reader = payload$reader,
+      reader_options = payload$reader_options, RepositoryLock = worker_lock)
+    list(ok = TRUE, result = result, error = NA_character_)
+  }, error = function(e) list(ok = FALSE, result = NULL, error = conditionMessage(e)))
+}
+
+.run_hardened_chunk_fallback <- function(path, year_dir, table_dir, all_cols, col_classes,
+                                         year_val, TerminalHivePartition, partition_keys,
+                                         partition_values, route_source_partitions,
+                                         max_coerce_na_pct, ManifestPath, Database, TableName,
+                                         DuckDBTable, SourcePath, SchemaHash,
+                                         MaxFileStemTruncate, reader, reader_options,
+                                         chunk_size, chunk_size_decrement = NULL,
+                                         min_chunk_size = NULL, MaxChunkMemoryMB = 256L,
+                                         MaxWholeFileMemoryMB = NULL,
+                                         MaxPartitionMemoryMB = NULL,
+                                         timeout_seconds = 7200, source_path = NULL,
+                                         RepositoryLock = NULL) {
+  if (!requireNamespace("processx", quietly = TRUE)) {
+    return(list(ok = FALSE, error = "Hardened FAIL mode requires the processx package."))
+  }
+  timeout_seconds <- suppressWarnings(as.numeric(timeout_seconds[1]))
+  if (!is.finite(timeout_seconds) || timeout_seconds <= 0) {
+    return(list(ok = FALSE, error = "FailProbeTimeoutSeconds must be a positive number."))
+  }
+  current_chunk_size <- suppressWarnings(as.integer(chunk_size[1]))
+  if (!is.finite(current_chunk_size) || current_chunk_size < 1L) {
+    return(list(ok = FALSE, error = "SAV_CHUNK_SIZE must be a positive integer."))
+  }
+  decrement <- if (is.null(chunk_size_decrement)) {
+    max(1L, as.integer(current_chunk_size * 0.1))
+  } else {
+    max(1L, as.integer(chunk_size_decrement[1]))
+  }
+  floor <- if (is.null(min_chunk_size)) decrement else max(1L, as.integer(min_chunk_size[1]))
+  if (floor > current_chunk_size) floor <- current_chunk_size
+  workflow_source <- .resolve_fail_probe_source(source_path)
+  rscript <- file.path(R.home("bin"), if (.Platform$OS.type == "windows") "Rscript.exe" else "Rscript")
+  if (!file.exists(rscript)) rscript <- Sys.which("Rscript")
+  if (!nzchar(rscript) || !file.exists(rscript)) {
+    return(list(ok = FALSE, error = "Rscript is unavailable for hardened FAIL mode."))
+  }
+  attempt <- 0L
+  repeat {
+    attempt <- attempt + 1L
+    payload_path <- tempfile("repoquet_fail_chunk_payload_", fileext = ".rds")
+    result_path <- tempfile("repoquet_fail_chunk_result_", fileext = ".rds")
+    script_path <- tempfile("repoquet_fail_chunk_worker_", fileext = ".R")
+    on.exit(unlink(c(payload_path, result_path, script_path), force = TRUE), add = TRUE)
+    payload <- list(
+      path = path, year_dir = year_dir, table_dir = table_dir, all_cols = all_cols,
+      col_classes = col_classes, year_val = year_val, TerminalHivePartition = TerminalHivePartition,
+      partition_keys = partition_keys, partition_values = partition_values,
+      route_source_partitions = route_source_partitions, max_coerce_na_pct = max_coerce_na_pct,
+      ManifestPath = ManifestPath, Database = Database, TableName = TableName,
+      DuckDBTable = DuckDBTable, SourcePath = SourcePath, SchemaHash = SchemaHash,
+      MaxFileStemTruncate = MaxFileStemTruncate, reader = reader, reader_options = reader_options,
+      chunk_size = current_chunk_size, chunk_size_decrement = decrement, min_chunk_size = floor,
+      MaxChunkMemoryMB = MaxChunkMemoryMB, MaxWholeFileMemoryMB = MaxWholeFileMemoryMB,
+      MaxPartitionMemoryMB = MaxPartitionMemoryMB, io_retry = .io_retry_settings(),
+      RepositoryLockPath = if (inherits(RepositoryLock, "repository_lock")) RepositoryLock$path else NULL,
+      LogPath = resolve_log_path(), RunId = resolve_run_id())
+    saveRDS(payload, payload_path)
+    worker_script <- c(
+      "args <- commandArgs(trailingOnly = TRUE)",
+      "source_path <- args[1]; payload_path <- args[2]; result_path <- args[3]",
+      "from_source <- !is.na(source_path) && nzchar(source_path) && file.exists(source_path)",
+      "if (from_source) source(source_path) else if (requireNamespace('repoquet', quietly = TRUE)) loadNamespace('repoquet') else stop('Cannot load repoquet worker code. Set REPOQUET_SOURCE or install repoquet.')",
+      "worker <- if (from_source) .hardened_chunk_fallback_worker else getFromNamespace('.hardened_chunk_fallback_worker', 'repoquet')",
+      "response <- tryCatch(worker(payload_path), error = function(e) list(ok = FALSE, result = NULL, error = conditionMessage(e)))",
+      "tmp <- paste0(result_path, '.tmp')",
+      "saveRDS(response, tmp)",
+      "if (!file.rename(tmp, result_path)) stop('Could not publish hardened FAIL chunk worker result.')",
+      "quit(save = 'no', status = if (isTRUE(response$ok)) 0L else 1L)")
+    writeLines(worker_script, script_path, useBytes = TRUE)
+    log_msg(sprintf("[FAIL CHUNK] Launching isolated adaptive chunk worker for %s (attempt %d, SAV_CHUNK_SIZE=%d, timeout=%ss).",
+                    basename(path), attempt, current_chunk_size, format(timeout_seconds, trim = TRUE)))
+    proc <- tryCatch(processx::run(
+      rscript, args = c("--vanilla", script_path,
+                         ifelse(is.na(workflow_source), "", workflow_source),
+                         payload_path, result_path),
+      error_on_status = FALSE,
+      timeout = as.integer(min(.Machine$integer.max, max(1, ceiling(timeout_seconds)))),
+      echo = FALSE), error = function(e) e)
+    if (inherits(proc, "error")) {
+      response <- list(ok = FALSE, crashed = TRUE,
+                       error = sprintf("Hardened chunk worker did not complete: %s", conditionMessage(proc)))
+    } else if (!file.exists(result_path)) {
+      detail <- trimws(paste(c(proc$stdout %||% "", proc$stderr %||% ""), collapse = " "))
+      response <- list(ok = FALSE, crashed = TRUE,
+        error = sprintf("Hardened chunk worker exited with status %s without a result%s.",
+          proc$status %||% "unknown", if (nzchar(detail)) paste0(": ", detail) else ""))
+    } else {
+      response <- tryCatch(readRDS(result_path), error = function(e) {
+        list(ok = FALSE, crashed = TRUE, error = conditionMessage(e))
+      })
+      response$crashed <- FALSE
+    }
+    if (isTRUE(response$ok)) {
+      log_msg(sprintf("[FAIL CHUNK] Isolated adaptive chunk worker completed %s at SAV_CHUNK_SIZE=%d.",
+                      basename(path), current_chunk_size))
+      return(list(ok = TRUE, result = response$result))
+    }
+    #### A worker that returned a normal memory error has already applied its full ####
+    #### in-worker SAV_CHUNK_SIZE decrement schedule. Only a terminated worker lacks ####
+    #### that opportunity, so only that case restarts the source in a new worker.    ####
+    recoverable <- isTRUE(response$crashed)
+    .cleanup_delimited_chunk_outputs(path, year_dir, table_dir, route_source_partitions,
+      TerminalHivePartition, MaxFileStemTruncate, ManifestPath, SourcePath)
+    if (!recoverable && .is_recoverable_memory_error(response$error)) {
+      log_msg(sprintf("[FAIL CHUNK] %s exhausted its configured in-worker chunk retry schedule: %s",
+                      basename(path), response$error %||% "memory allocation error"))
+    }
+    if (!recoverable || current_chunk_size <= floor) {
+      return(list(ok = FALSE, error = response$error %||% "Hardened adaptive chunk worker failed without a diagnostic."))
+    }
+    next_chunk_size <- max(floor, current_chunk_size - decrement)
+    log_msg(sprintf("[FAIL CHUNK] %s ended before a successful result at SAV_CHUNK_SIZE=%d (%s). Retrying the source from the beginning at %d rows.",
+                    basename(path), current_chunk_size,
+                    response$error %||% "unknown error", next_chunk_size))
+    current_chunk_size <- next_chunk_size
+  }
+}
 #' Dispatches a single source file to the appropriate reader and writer
 #'
 #' For each source file, \code{read_fn} determines the row count, applies
@@ -9265,8 +9448,8 @@ validate_duckdb_table <- function(con, table_name, schema_registry = NULL, stric
 #'     \code{RAMThreshold}, in gigabytes, to decide whether to chunk.}
 #'   \item{\code{"FAIL"}}{For a delimited file, an isolated subprocess,
 #'     see \code{FailProbeMode}, attempts a full direct read and write.
-#'     When it fails or times out, the adaptive chunked reader takes
-#'     over in the main process. For a SAV file, a full direct read,
+#'     When it fails or times out, the adaptive chunked reader also runs
+#'     in an isolated subprocess. For a SAV file, a full direct read,
 #'     with stripping, sanitizing, aligning, and assigning the year, is
 #'     attempted inside a \code{tryCatch}, falling back to chunked
 #'     reading on an error, most commonly running out of memory during
@@ -9504,14 +9687,14 @@ read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL, tab
   }
   defer_delimited_count <- identical(PartitionBy, "FAIL") && delimited_reader
   ncases <- if (defer_delimited_count) {
-    log_msg(sprintf("[FAIL PROBE] %s: deferring full-file row counting until bounded chunk streaming; this avoids a duplicate full-file scan after a failed direct probe.",
+    log_msg(sprintf("[FAIL PROBE] %s: deferring full-file row counting to the isolated adaptive chunk worker; no parent-process row-count scan will occur after a failed direct probe.",
                     basename(full_path)))
     NA_real_
   } else {
     tryCatch(as.numeric(call_reader(rd, "count_rows", full_path,
                                     reader_options = reader_options)), error = function(e) NA_real_)
   }
-  DFTemp <- NULL; use_chunked <- FALSE
+  DFTemp <- NULL; use_chunked <- FALSE; failed_delimited_probe <- FALSE
   if(PartitionBy == "NRows"){
     use_chunked <- is.na(ncases) || ncases > SAV_ROW_THRESHOLD
     log_msg(sprintf("[NRows] %s: %s rows -> %s reader", basename(full_path),
@@ -9563,10 +9746,11 @@ read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL, tab
         timeout_seconds = FailProbeTimeoutSeconds, source_path = FailProbeSourcePath,
         expected_rows = ncases), basename(full_path))
       if (isTRUE(probe$ok)) return(probe$result)
-      log_msg(sprintf("[FAIL PROBE] Isolated direct worker did not complete for %s: %s -- using adaptive chunked reader in the main process.",
+      log_msg(sprintf("[FAIL PROBE] Isolated direct worker did not complete for %s: %s -- using the isolated adaptive chunk worker.",
                       basename(full_path), probe$error %||% "unknown worker failure"))
       DFTemp <- list(data = NULL, error = TRUE)
       use_chunked <- TRUE
+      failed_delimited_probe <- TRUE
     } else if (delimited_reader && FailProbeMode == "disabled") {
       log_msg(sprintf("[FAIL PROBE] Direct probe disabled for %s -- using adaptive chunked reader.", basename(full_path)))
       DFTemp <- list(data = NULL, error = TRUE)
@@ -9595,6 +9779,36 @@ read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL, tab
       log_msg(sprintf("[LOAD CHECK COMPLETE] %s -> %s reader",
                       basename(full_path), ifelse(use_chunked, "chunked", "direct")))
     }
+  }
+  if (failed_delimited_probe && delimited_reader && FailProbeMode == "subprocess") {
+    chunk_result <- .run_hardened_chunk_fallback(
+      path = full_path, year_dir = year_dir, table_dir = table_dir,
+      all_cols = all_cols, col_classes = col_classes, year_val = year_val,
+      TerminalHivePartition = TerminalHivePartition,
+      partition_keys = partition_keys, partition_values = partition_values,
+      route_source_partitions = route_source_partitions,
+      max_coerce_na_pct = max_coerce_na_pct,
+      ManifestPath = ManifestPath, Database = Database, TableName = TableName,
+      DuckDBTable = DuckDBTable, SourcePath = SourcePath %||% path,
+      SchemaHash = SchemaHash, MaxFileStemTruncate = MaxFileStemTruncate,
+      reader = reader, reader_options = reader_options, chunk_size = SAV_CHUNK_SIZE,
+      chunk_size_decrement = chunk_size_decrement, min_chunk_size = min_chunk_size,
+      MaxChunkMemoryMB = DelimitedChunkMaxMB,
+      MaxPartitionMemoryMB = {
+        part_mb <- if (is.null(DelimitedPartitionMaxMB)) NA_real_ else
+          suppressWarnings(as.numeric(DelimitedPartitionMaxMB[1]))
+        if (is.finite(part_mb) && part_mb > 0) part_mb else NULL
+      },
+      MaxWholeFileMemoryMB = {
+        ram_mb <- suppressWarnings(as.numeric(RAMThreshold[1])) * 1024
+        route_cap_mb <- DelimitedChunkMaxMB * 4
+        if (is.finite(ram_mb) && ram_mb > 0) min(route_cap_mb, ram_mb / 4) else route_cap_mb
+      },
+      timeout_seconds = FailProbeTimeoutSeconds, source_path = FailProbeSourcePath,
+      RepositoryLock = RepositoryLock)
+    if (isTRUE(chunk_result$ok)) return(chunk_result$result)
+    stop(sprintf("Isolated adaptive chunk fallback failed for %s: %s",
+                 basename(full_path), chunk_result$error %||% "unknown error"))
   }
   if (route_source_partitions && PartitionBy != "FAIL") use_chunked <- TRUE
   log_msg(sprintf("[READ] %s: %s rows -> %s reader (PartitionBy=%s)", basename(full_path),

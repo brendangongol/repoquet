@@ -229,8 +229,8 @@ the row count, regardless of how wide the file is.
     \code{RAMThreshold}, in gigabytes, to decide whether to chunk.}
   \item{\code{"FAIL"}}{For a delimited file, an isolated subprocess,
     see \code{FailProbeMode}, attempts a full direct read and write.
-    When it fails or times out, the adaptive chunked reader takes
-    over in the main process. For a SAV file, a full direct read,
+    When it fails or times out, the adaptive chunked reader also runs
+    in an isolated subprocess. For a SAV file, a full direct read,
     with stripping, sanitizing, aligning, and assigning the year, is
     attempted inside a \code{tryCatch}, falling back to chunked
     reading on an error, most commonly running out of memory during
