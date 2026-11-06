@@ -23,6 +23,7 @@ read_fn(
   SAV_CHUNK_SIZE,
   DelimitedChunkMaxMB = 256L,
   DelimitedPartitionMaxMB = NULL,
+  DelimitedWriteMode = c("chunk_table", "streaming"),
   FailProbeMode = c("subprocess", "in_process", "disabled"),
   FailProbeTimeoutSeconds = 7200,
   FailProbeSourcePath = NULL,
@@ -117,6 +118,10 @@ megabytes, passed to \code{\link{read_delimited_chunked}} as
 partition, in megabytes, for source defined partition routing.
 Defaults to \code{NULL}, which lets
 \code{\link{read_delimited_chunked}} derive a conservative default.}
+
+\item{DelimitedWriteMode}{Character scalar. \code{"chunk_table"} retains
+the current writer. \code{"streaming"} appends bounded CSV/TSV batches
+to each \code{SAV_CHUNK_SIZE} output file.}
 
 \item{FailProbeMode}{Character scalar. Accepts one of three values.
 \code{"subprocess"} attempts the direct read and write in an

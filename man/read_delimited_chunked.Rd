@@ -33,7 +33,8 @@ read_delimited_chunked(
   preloaded_data = NULL,
   reader = "csv",
   reader_options = list(),
-  RepositoryLock = NULL
+  RepositoryLock = NULL,
+  DelimitedWriteMode = c("chunk_table", "streaming")
 )
 }
 \arguments{
@@ -172,6 +173,16 @@ registered with \code{\link{get_file_reader}}, for example
 \code{\link{touch_repository_lock}} periodically during a long
 read, so the lock does not expire partway through the file.
 Defaults to \code{NULL}.}
+
+\item{DelimitedWriteMode}{Character scalar. \code{"chunk_table"}, the
+default, retains the established behavior of building one R/data.table
+chunk and one Arrow table per output file. \code{"streaming"} reads,
+normalizes, and appends bounded batches into the same final Parquet file
+until \code{chunk_size} rows have been written. It is available for
+ordinary CSV/TSV-style chunked sources, including source-defined Hive
+partitions, and keeps \code{chunk_size} as the output-file target.
+Fixed-width, logical-record-repair, and preloaded paths report that they
+retain \code{"chunk_table"} behavior.}
 }
 \value{
 A list with \code{written = TRUE}, \code{n_rows}, the total

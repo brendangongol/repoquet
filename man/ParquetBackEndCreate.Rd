@@ -17,6 +17,7 @@ ParquetBackEndCreate(
   SAV_CHUNK_SIZE = 1000000L,
   DelimitedChunkMaxMB = 256L,
   DelimitedPartitionMaxMB = NULL,
+  DelimitedWriteMode = c("chunk_table", "streaming"),
   FailProbeMode = c("subprocess", "in_process", "disabled"),
   FailProbeTimeoutSeconds = 7200,
   FailProbeSourcePath = NULL,
@@ -113,6 +114,11 @@ route cap: the smaller of four times \code{DelimitedChunkMaxMB}
 and one quarter of \code{RAMThreshold * 1024}. Supply an
 explicit value only after confirming that the resulting one
 shot read fits this machine.}
+
+\item{DelimitedWriteMode}{Character scalar. \code{"chunk_table"}, the
+default, keeps the existing full-table-per-output-file writer.
+\code{"streaming"} appends bounded CSV/TSV batches to each
+\code{SAV_CHUNK_SIZE} Parquet file.}
 
 \item{FailProbeMode}{Character scalar. Accepts one of three
 values: \code{"subprocess"}, \code{"in_process"}, or

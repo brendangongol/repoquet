@@ -1143,6 +1143,41 @@ write_arrow_table_safely <- function(arrow_tbl, path) {
   invisible(path)
 }
 
+#### Opens an atomic, appendable Parquet destination.  The caller must close it
+#### through .close_parquet_stream_writer(), which publishes the completed file.
+.open_parquet_stream_writer <- function(schema, path) {
+  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  tmp <- tempfile(pattern = paste0(basename(path), ".tmp_"), tmpdir = dirname(path),
+                  fileext = ".parquet")
+  tryCatch({
+    sink <- arrow::FileOutputStream$create(tmp)
+    properties <- arrow::ParquetWriterProperties$create(column_names = schema$names)
+    writer <- arrow::ParquetFileWriter$create(schema, sink, properties = properties)
+    list(writer = writer, sink = sink, tmp = tmp, path = path)
+  }, error = function(e) {
+    if (file.exists(tmp)) unlink(tmp)
+    stop(e)
+  })
+}
+
+.close_parquet_stream_writer <- function(state, publish = TRUE) {
+  close_error <- NULL
+  if (!is.null(state$writer)) {
+    close_error <- tryCatch({ state$writer$Close(); NULL }, error = function(e) e)
+  }
+  if (!is.null(state$sink)) {
+    sink_error <- tryCatch({ state$sink$close(); NULL }, error = function(e) e)
+    if (is.null(close_error)) close_error <- sink_error
+  }
+  if (isTRUE(publish) && is.null(close_error)) {
+    replace_file_safely(state$tmp, state$path)
+  } else if (file.exists(state$tmp)) {
+    unlink(state$tmp)
+  }
+  if (!is.null(close_error)) stop(close_error)
+  invisible(state$path)
+}
+
 ################################################################################
 #### Retrying transient I/O failures (for example a network drive dropping out) ##
 ################################################################################
@@ -6026,6 +6061,15 @@ safe_read_sav_chunked <- function(path, chunk_size = 1000000L, TerminalHiveParti
 #'   actually fails with a recoverable memory allocation error, the
 #'   fallback behavior for \code{PartitionBy = "FAIL"}. Accepts
 #'   \code{FALSE}, which does not. Defaults to \code{FALSE}.
+#' @param DelimitedWriteMode Character scalar. \code{"chunk_table"}, the
+#'   default, retains the established behavior of building one R/data.table
+#'   chunk and one Arrow table per output file. \code{"streaming"} reads,
+#'   normalizes, and appends bounded batches into the same final Parquet file
+#'   until \code{chunk_size} rows have been written. It is available for
+#'   ordinary CSV/TSV-style chunked sources, including source-defined Hive
+#'   partitions, and keeps \code{chunk_size} as the output-file target.
+#'   Fixed-width, logical-record-repair, and preloaded paths report that they
+#'   retain \code{"chunk_table"} behavior.
 #' @param preloaded_data Data frame. A whole file read already performed
 #'   by the caller, for example the isolated subprocess direct read
 #'   probe under \code{FailProbeMode = "subprocess"}. Accepts such a
@@ -6090,7 +6134,9 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
                                    MaxPartitionMemoryMB = NULL,
                                    chunk_size_decrement = NULL, min_chunk_size = NULL,
                                    adaptive_chunking = FALSE, preloaded_data = NULL,
-                                   reader = "csv", reader_options = list(), RepositoryLock = NULL) {
+                                   reader = "csv", reader_options = list(), RepositoryLock = NULL,
+                                   DelimitedWriteMode = c("chunk_table", "streaming")) {
+  DelimitedWriteMode <- match.arg(DelimitedWriteMode)
   partition_keys <- canonical_colnames(partition_keys)
   if (is.null(partition_values)) partition_values <- as.character(year_val)
   if (length(partition_values) != length(partition_keys)) {
@@ -6103,6 +6149,13 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
   on.exit(.close_chunk_cursors(path), add = TRUE)
   logical_stream <- .uses_delimited_logical_stream(reader_options)
   fixed_width <- identical(tolower(reader), "asc") && is.null(preloaded_data)
+  streaming_writer <- identical(DelimitedWriteMode, "streaming")
+  if (streaming_writer && (logical_stream || fixed_width || !is.null(preloaded_data))) {
+    streaming_writer <- FALSE
+    log_msg(paste0("[PARQUET STREAM] ", basename(path),
+                   ": DelimitedWriteMode='streaming' applies only to ordinary CSV/TSV-style chunked reads; ",
+                   "this fixed-width, logical-record-repair, or preloaded path retains 'chunk_table' behavior."))
+  }
   if (!is.null(preloaded_data) && !is.data.frame(preloaded_data)) {
     stop("preloaded_data must be a data frame when supplied.")
   }
@@ -6171,7 +6224,21 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
     log_msg(plan$message)
     gc(verbose = FALSE)
   }
-  if (identical(read_strategy, "chunked") && !adaptive_chunking) {
+  stream_batch_size <- NA_integer_
+  if (streaming_writer) {
+    #### The public chunk size remains the output-file target.  Streaming reads
+    #### independently use a memory-bounded batch, so large output files never
+    #### require a comparably large data.table or Arrow table in memory.
+    read_strategy <- "chunked"
+    chunk_row_plan <- NULL
+    stream_batch_size <- .effective_delimited_chunk_size(
+      path, requested_rows = min(requested_chunk_size, 250000L), total_rows = total_rows,
+      MaxChunkMemoryMB = MaxChunkMemoryMB)
+    log_msg(sprintf(paste0("[PARQUET STREAM] %s: output target SAV_CHUNK_SIZE=%d rows; ",
+                           "bounded read/cast batches=%d rows (DelimitedChunkMaxMB=%s)."),
+                    basename(path), requested_chunk_size, stream_batch_size,
+                    format(MaxChunkMemoryMB, trim = TRUE)))
+  } else if (identical(read_strategy, "chunked") && !adaptive_chunking) {
     chunk_size <- .effective_delimited_chunk_size(
       path, requested_rows = requested_chunk_size, total_rows = total_rows,
       MaxChunkMemoryMB = MaxChunkMemoryMB)
@@ -6194,7 +6261,7 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
   #### no header or logical-record repair, and a stream avoids re-reading skipped lines. ####
   one_pass_stream <- logical_stream || fixed_width ||
     (route_source_partitions && identical(read_strategy, "chunked") && !adaptive_chunking)
-  if (one_pass_stream && !logical_stream) {
+  if (one_pass_stream && !logical_stream && !streaming_writer) {
     log_msg(sprintf("[CHUNKED-DELIM] %s: using a one-pass record stream for memory-capped chunks.",
                     basename(path)))
   }
@@ -6247,7 +6314,7 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
   chunk_counters <- new.env(parent = emptyenv())
   partition_records <- list()
   normalize_partition_vector <- .normalize_partition_value_vector
-  write_piece <- function(df_piece, actual_values, target_dir, partition_signature) {
+  prepare_arrow_piece <- function(df_piece) {
     for (pk in intersect(partition_keys, names(df_piece))) df_piece[, (pk) := NULL]
     if (!is.null(all_cols)) df_piece <- align_columns(df_piece, all_cols, col_classes,
                                                       max_coerce_na_pct = max_coerce_na_pct)
@@ -6267,6 +6334,10 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
       }
     }
     arrow_tbl <- arrow_tbl$cast(ref_schema)
+    arrow_tbl
+  }
+  write_piece <- function(df_piece, actual_values, target_dir, partition_signature) {
+    arrow_tbl <- prepare_arrow_piece(df_piece)
     chunk_num <- chunk_counters[[partition_signature]] %||% 1L
     dir.create(target_dir, recursive = TRUE, showWarnings = FALSE)
     chunk_file <- if (TerminalHivePartition) {
@@ -6316,6 +6387,101 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
     gc(verbose = FALSE)
     invisible(NULL)
   }
+  stream_states <- new.env(parent = emptyenv())
+  stream_close_state <- function(partition_signature, publish = TRUE) {
+    state <- stream_states[[partition_signature]]
+    if (is.null(state)) return(invisible(NULL))
+    stream_states[[partition_signature]] <- NULL
+    .close_parquet_stream_writer(state, publish = publish)
+    if (!isTRUE(publish)) return(invisible(NULL))
+    written_files <<- unique(c(written_files, state$path))
+    actual_year <- if ("YEAR" %in% partition_keys) {
+      state$actual_values[match("YEAR", partition_keys)]
+    } else year_val
+    update_parquet_manifest(ManifestPath = ManifestPath, Database = Database, TableName = TableName,
+                            DuckDBTable = DuckDBTable, Year = actual_year, SourcePath = SourcePath %||% path,
+                            ParquetPath = state$path, NRows = state$rows,
+                            SchemaHash = SchemaHash, Status = "written",
+                            Notes = sprintf("chunk_%05d", state$chunk_num),
+                            PartitionKey = partition_keys, PartitionValue = state$actual_values)
+    chunk_counters[[partition_signature]] <<- state$chunk_num + 1L
+    partition_records[[length(partition_records) + 1L]] <<- data.table::data.table(
+      PartitionKey = paste(partition_keys, collapse = ";"),
+      PartitionValue = paste(state$actual_values, collapse = ";"),
+      Year = as.character(actual_year), Directory = state$target_dir)
+    partition_label <- paste(paste0(tolower(partition_keys), "=", state$actual_values), collapse = "/")
+    log_msg(sprintf("[PARQUET STREAM WRITE] %s: partition %s, piece %d: %d rows -> %s",
+                    basename(path), partition_label, state$chunk_num, state$rows, basename(state$path)))
+    touch_repository_lock(RepositoryLock)
+    gc(verbose = FALSE)
+    invisible(NULL)
+  }
+  stream_open_state <- function(actual_values, target_dir, partition_signature, schema) {
+    chunk_num <- chunk_counters[[partition_signature]] %||% 1L
+    dir.create(target_dir, recursive = TRUE, showWarnings = FALSE)
+    chunk_file <- if (TerminalHivePartition) {
+      bd <- file.path(target_dir, sprintf("batch_id=%s_%05d", file_stem, chunk_num))
+      dir.create(bd, recursive = TRUE, showWarnings = FALSE)
+      file.path(bd, "data.parquet")
+    } else {
+      file.path(target_dir, sprintf("%s_%05d.parquet", file_stem, chunk_num))
+    }
+    state <- new.env(parent = emptyenv())
+    state$writer_info <- .open_parquet_stream_writer(schema, chunk_file)
+    state$writer <- state$writer_info$writer
+    state$sink <- state$writer_info$sink
+    state$tmp <- state$writer_info$tmp
+    state$path <- state$writer_info$path
+    state$actual_values <- actual_values
+    state$target_dir <- target_dir
+    state$chunk_num <- chunk_num
+    state$rows <- 0L
+    state$next_progress <- max(100000L, as.integer(ceiling(requested_chunk_size / 10)))
+    state$progress_step <- state$next_progress
+    stream_states[[partition_signature]] <- state
+    partition_label <- paste(paste0(tolower(partition_keys), "=", actual_values), collapse = "/")
+    log_msg(sprintf("[PARQUET STREAM START] %s: partition %s, piece %d; target %d rows; writing bounded batches to %s",
+                    basename(path), partition_label, chunk_num, requested_chunk_size, basename(chunk_file)))
+    state
+  }
+  stream_append_piece <- function(df_piece, actual_values, target_dir, partition_signature) {
+    while (nrow(df_piece) > 0L) {
+      state <- stream_states[[partition_signature]]
+      n_take <- if (is.null(state)) min(nrow(df_piece), requested_chunk_size) else
+        min(nrow(df_piece), requested_chunk_size - state$rows)
+      if (n_take < 1L) {
+        stream_close_state(partition_signature)
+        next
+      }
+      piece <- if (n_take == nrow(df_piece)) df_piece else df_piece[seq_len(n_take)]
+      arrow_tbl <- prepare_arrow_piece(piece)
+      if (is.null(state)) state <- stream_open_state(actual_values, target_dir, partition_signature, arrow_tbl$schema)
+      write_error <- tryCatch({
+        state$writer$WriteTable(arrow_tbl, chunk_size = max(1L, as.integer(arrow_tbl$num_rows)))
+        NULL
+      }, error = function(e) e)
+      n_appended <- arrow_tbl$num_rows
+      rm(arrow_tbl)
+      if (!is.null(write_error)) stop(write_error)
+      state$rows <- state$rows + n_appended
+      total_written <<- total_written + n_appended
+      if (state$rows >= state$next_progress && state$rows < requested_chunk_size) {
+        log_msg(sprintf("[PARQUET STREAM PROGRESS] %s: piece %d is %d/%d rows (%.0f%%).",
+                        basename(path), state$chunk_num, state$rows, requested_chunk_size,
+                        100 * state$rows / requested_chunk_size))
+        state$next_progress <- state$next_progress + state$progress_step
+      }
+      if (state$rows >= requested_chunk_size) stream_close_state(partition_signature)
+      if (n_take == nrow(df_piece)) break
+      df_piece <- df_piece[(n_take + 1L):nrow(df_piece)]
+    }
+    invisible(NULL)
+  }
+  stream_close_all <- function(publish = TRUE) {
+    keys <- ls(stream_states, all.names = TRUE)
+    for (key in keys) stream_close_state(key, publish = publish)
+    invisible(NULL)
+  }
   process_chunk <- function(df_chunk) {
     if (!is.data.frame(df_chunk)) stop(sprintf("Reader '%s' did not return a data frame chunk.", reader))
     data.table::setDT(df_chunk)
@@ -6335,19 +6501,64 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
         target_dir <- file.path(table_dir,
                                 paste(paste0(tolower(partition_keys), "=", actual_values), collapse = "/"))
         piece <- if (length(groups) == 1L) df_chunk else df_chunk[idx]
-        write_piece(piece, actual_values, target_dir, signature)
+        if (streaming_writer) stream_append_piece(piece, actual_values, target_dir, signature)
+        else write_piece(piece, actual_values, target_dir, signature)
         if (length(groups) > 1L) rm(piece)
       }
     } else {
       validate_partition_column_values(df_chunk, partition_keys, partition_values,
                                        source_label = basename(path))
       signature <- paste(sanitize_partition_value(partition_values), collapse = "\034")
-      write_piece(df_chunk, partition_values, year_dir, signature)
+      if (streaming_writer) stream_append_piece(df_chunk, partition_values, year_dir, signature)
+      else write_piece(df_chunk, partition_values, year_dir, signature)
     }
     invisible(NULL)
   }
   tryCatch({
-    if (one_pass_stream) {
+    if (streaming_writer) {
+      stream_floor <- 1000L
+      while (is.na(total_rows) || offset < total_rows) {
+        touch_repository_lock(RepositoryLock)
+        n_this <- if (is.na(total_rows)) stream_batch_size else
+          min(stream_batch_size, total_rows - offset)
+        log_msg(sprintf("[PARQUET STREAM READ] %s: rows %s-%s of %s", basename(path),
+                        formatC(offset + 1L, format = "d", big.mark = ","),
+                        formatC(offset + n_this, format = "d", big.mark = ","),
+                        if (is.na(total_rows)) "end of file" else
+                          formatC(total_rows, format = "d", big.mark = ",")))
+        df_chunk <- tryCatch(
+          call_reader(rd, "read_chunk", path, reader_options = reader_options,
+                      offset = offset, n_max = n_this, header = header,
+                      exact_rows = !is.na(total_rows), col_classes = col_classes),
+          error = function(e) e)
+        if (inherits(df_chunk, "error")) {
+          message <- conditionMessage(df_chunk)
+          if (!.is_recoverable_memory_error(message) || stream_batch_size <= stream_floor) stop(message)
+          next_batch_size <- max(stream_floor, as.integer(floor(stream_batch_size / 2)))
+          log_msg(sprintf(paste0("[PARQUET STREAM] %s: bounded batch at rows %s-%s failed for memory ",
+                                 "(%s); reducing only the read batch from %d to %d rows. ",
+                                 "SAV_CHUNK_SIZE remains %d."),
+                          basename(path), formatC(offset + 1L, format = "d", big.mark = ","),
+                          formatC(offset + n_this, format = "d", big.mark = ","), message,
+                          stream_batch_size, next_batch_size, requested_chunk_size))
+          stream_batch_size <- next_batch_size
+          gc(verbose = FALSE)
+          next
+        }
+        if (nrow(df_chunk) == 0L) {
+          total_rows <- offset
+          rm(df_chunk)
+          gc(verbose = FALSE)
+          break
+        }
+        n_read <- nrow(df_chunk)
+        process_chunk(df_chunk)
+        rm(df_chunk)
+        gc(verbose = FALSE)
+        offset <- offset + n_read
+      }
+      stream_close_all(publish = TRUE)
+    } else if (one_pass_stream) {
       diagnostics <- if (fixed_width) {
         .stream_asc_records(path, reader_options = reader_options, chunk_size = chunk_size,
                             col_classes = col_classes, callback = process_chunk,
@@ -6493,6 +6704,7 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
     }
     list(written = TRUE, n_rows = total_written, status = "completed", partitions = partitions)
   }, error = function(e) {
+    try(stream_close_all(publish = FALSE), silent = TRUE)
     n_cleaned <- cleanup_outputs()
     if (n_cleaned > 0L) log_msg(sprintf("[CHUNKED-DELIM] Removed %d partial output(s) after failure of %s",
                                         n_cleaned, basename(path)))
@@ -9369,7 +9581,8 @@ validate_duckdb_table <- function(con, table_name, schema_registry = NULL, stric
       chunk_size_decrement = payload$chunk_size_decrement,
       min_chunk_size = payload$min_chunk_size,
       adaptive_chunking = TRUE, reader = payload$reader,
-      reader_options = payload$reader_options, RepositoryLock = worker_lock)
+      reader_options = payload$reader_options, RepositoryLock = worker_lock,
+      DelimitedWriteMode = payload$DelimitedWriteMode)
     list(ok = TRUE, result = result, error = NA_character_)
   }, error = function(e) list(ok = FALSE, result = NULL, error = conditionMessage(e)))
 }
@@ -9384,8 +9597,10 @@ validate_duckdb_table <- function(con, table_name, schema_registry = NULL, stric
                                          min_chunk_size = NULL, MaxChunkMemoryMB = 256L,
                                          MaxWholeFileMemoryMB = NULL,
                                          MaxPartitionMemoryMB = NULL,
+                                         DelimitedWriteMode = c("chunk_table", "streaming"),
                                          timeout_seconds = 7200, source_path = NULL,
                                          RepositoryLock = NULL) {
+  DelimitedWriteMode <- match.arg(DelimitedWriteMode)
   if (!requireNamespace("processx", quietly = TRUE)) {
     return(list(ok = FALSE, error = "Hardened FAIL mode requires the processx package."))
   }
@@ -9427,7 +9642,8 @@ validate_duckdb_table <- function(con, table_name, schema_registry = NULL, stric
       MaxFileStemTruncate = MaxFileStemTruncate, reader = reader, reader_options = reader_options,
       chunk_size = current_chunk_size, chunk_size_decrement = decrement, min_chunk_size = floor,
       MaxChunkMemoryMB = MaxChunkMemoryMB, MaxWholeFileMemoryMB = MaxWholeFileMemoryMB,
-      MaxPartitionMemoryMB = MaxPartitionMemoryMB, io_retry = .io_retry_settings(),
+      MaxPartitionMemoryMB = MaxPartitionMemoryMB, DelimitedWriteMode = DelimitedWriteMode,
+      io_retry = .io_retry_settings(),
       RepositoryLockPath = if (inherits(RepositoryLock, "repository_lock")) RepositoryLock$path else NULL,
       LogPath = resolve_log_path(), RunId = resolve_run_id())
     saveRDS(payload, payload_path)
@@ -9596,6 +9812,9 @@ validate_duckdb_table <- function(con, table_name, schema_registry = NULL, stric
 #'   partition, in megabytes, for source defined partition routing.
 #'   Defaults to \code{NULL}, which lets
 #'   \code{\link{read_delimited_chunked}} derive a conservative default.
+#' @param DelimitedWriteMode Character scalar. \code{"chunk_table"} retains
+#'   the current writer. \code{"streaming"} appends bounded CSV/TSV batches
+#'   to each \code{SAV_CHUNK_SIZE} output file.
 #' @param FailProbeMode Character scalar. Accepts one of three values.
 #'   \code{"subprocess"} attempts the direct read and write in an
 #'   isolated \code{Rscript} subprocess, so that a crash or a hang only
@@ -9703,6 +9922,7 @@ read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL, tab
                     col_classes = NULL, year_val = NULL, PrintStatus = FALSE, TerminalHivePartition = FALSE,
                     MDTSelect, MasterDBPath, reader, PartitionBy, SAV_ROW_THRESHOLD, RAMThreshold, SAV_CHUNK_SIZE,
                     DelimitedChunkMaxMB = 256L, DelimitedPartitionMaxMB = NULL,
+                    DelimitedWriteMode = c("chunk_table", "streaming"),
                     FailProbeMode = c("subprocess", "in_process", "disabled"),
                     FailProbeTimeoutSeconds = 7200, FailProbeSourcePath = NULL,
                     chunk_size_decrement = NULL, min_chunk_size = NULL, partition_keys = "YEAR",
@@ -9712,6 +9932,7 @@ read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL, tab
                     MaxFileStemTruncate = FALSE, accept_partial = FALSE,
                     RepositoryLock = NULL) {
   PartitionBy <- match.arg(PartitionBy, c("NRows", "RAMEstimate", "FAIL"))
+  DelimitedWriteMode <- match.arg(DelimitedWriteMode)
   FailProbeMode <- match.arg(FailProbeMode)
   row_options <- MDTSelect[MDTSelect$Path == path, , drop = FALSE]
   reader_options <- if (nrow(row_options) > 0L) reader_options_for_row(row_options[1, , drop = FALSE]) else list()
@@ -9878,6 +10099,7 @@ read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL, tab
         route_cap_mb <- DelimitedChunkMaxMB * 4
         if (is.finite(ram_mb) && ram_mb > 0) min(route_cap_mb, ram_mb / 4) else route_cap_mb
       },
+      DelimitedWriteMode = DelimitedWriteMode,
       timeout_seconds = FailProbeTimeoutSeconds, source_path = FailProbeSourcePath,
       RepositoryLock = RepositoryLock)
     if (isTRUE(chunk_result$ok)) return(chunk_result$result)
@@ -9933,7 +10155,8 @@ read_fn <- function(path, out_path = NULL, all_cols = NULL, year_dir = NULL, tab
                                }
                              },
                              reader = reader, reader_options = reader_options,
-                             RepositoryLock = RepositoryLock)
+                             RepositoryLock = RepositoryLock,
+                             DelimitedWriteMode = DelimitedWriteMode)
     }
   } else {
     if(PrintStatus){ print("Reading Complete Table") }
@@ -11025,6 +11248,9 @@ discover_schema_relationships <- function(table_schema, include_candidates = TRU
 #'   Accepts \code{NULL}, which keeps the file's value, or uses half
 #'   of the conservative source route cap derived from
 #'   \code{DelimitedChunkMaxMB} and \code{RAMThreshold}.
+#' @param DelimitedWriteMode Character scalar. \code{"chunk_table"} retains
+#'   the established writer. \code{"streaming"} appends bounded CSV/TSV
+#'   batches while retaining \code{SAV_CHUNK_SIZE} as the output-file target.
 #' @param FailProbeMode Character scalar. For a delimited source under
 #'   \code{PartitionBy = "FAIL"}. Accepts \code{"subprocess"}, which
 #'   isolates the direct read and write. Accepts \code{"in_process"},
@@ -11128,6 +11354,7 @@ load_repository_config <- function(
     SAV_CHUNK_SIZE = NULL,
     DelimitedChunkMaxMB = NULL,
     DelimitedPartitionMaxMB = NULL,
+    DelimitedWriteMode = NULL,
     FailProbeMode = NULL,
     FailProbeTimeoutSeconds = NULL,
     FailProbeSourcePath = NULL,
@@ -11169,6 +11396,7 @@ load_repository_config <- function(
     SAV_CHUNK_SIZE = 1000000L,
     DelimitedChunkMaxMB = 256L,
     DelimitedPartitionMaxMB = NULL,
+    DelimitedWriteMode = "chunk_table",
     FailProbeMode = "subprocess",
     FailProbeTimeoutSeconds = 7200,
     FailProbeSourcePath = NULL,
@@ -11216,6 +11444,7 @@ load_repository_config <- function(
     SAV_CHUNK_SIZE = SAV_CHUNK_SIZE,
     DelimitedChunkMaxMB = DelimitedChunkMaxMB,
     DelimitedPartitionMaxMB = DelimitedPartitionMaxMB,
+    DelimitedWriteMode = DelimitedWriteMode,
     FailProbeMode = FailProbeMode,
     FailProbeTimeoutSeconds = FailProbeTimeoutSeconds,
     FailProbeSourcePath = FailProbeSourcePath,
@@ -11258,6 +11487,8 @@ load_repository_config <- function(
   }
   cfg$DownloadPolicy <- match.arg(tolower(as.character(cfg$DownloadPolicy)),
                                   c("if_missing", "if_changed", "always", "manual"))
+  cfg$DelimitedWriteMode <- match.arg(as.character(cfg$DelimitedWriteMode[1]),
+                                      c("chunk_table", "streaming"))
   cfg$SchemaSurveyMode <- match.arg(tolower(as.character(cfg$SchemaSurveyMode)),
                                     c("adaptive", "full", "sample"))
   for (field in c("SchemaChunkSize", "SchemaAdaptiveSampleRows",
@@ -11372,6 +11603,7 @@ create_repository_project <- function(dir, MasterDBPath = file.path(dir, "source
     "  SAV_ROW_THRESHOLD = 1000000L,    # rows above which files stream in chunks",
     "  SAV_CHUNK_SIZE    = 1000000L,    # requested rows per chunk for SAV files",
     "  DelimitedChunkMaxMB = 256L,      # cap each CSV/TSV chunk's estimated peak memory",
+    "  DelimitedWriteMode = \"chunk_table\", # chunk_table | streaming; streaming appends bounded batches to each output file",
     "  DelimitedPartitionMaxMB = NULL,  # optional cap for one source-defined partition;",
     "                                   # NULL uses a conservative bounded route budget",
     "  RAMThreshold      = 30,          # GB, for PartitionBy = \"RAMEstimate\"",
@@ -11418,7 +11650,7 @@ create_repository_project <- function(dir, MasterDBPath = file.path(dir, "source
     "",
     "source(\"<PATH TO REPOQUET CLONE>/R/repoquet.R\")   # development mode",
     "",
-    "#### Initialize paths, configuration, and one traceable run identifier #######",
+    "#### 1. Initialize paths, configuration, and one traceable run identifier ####",
     "#### Pass RunId through every stage so logs and validation records align. ####",
     sprintf("cfg <- load_repository_config(\"%s\")", norm(paths$ConfigPath)),
     "paths <- RepositoryInitialize(FormattedDBPath = cfg$FormattedDBPath)",
@@ -11426,7 +11658,7 @@ create_repository_project <- function(dir, MasterDBPath = file.path(dir, "source
     "MDT <- openxlsx::read.xlsx(cfg$MDTPath, sheet = \"Sheet1\")",
     "DBLoad <- sort(unique(MDT$Database))",
     "",
-    "#### Fail-fast inventory validation before any repository write ##############",
+    "#### 2. Fail-fast inventory validation before any repository write ###########",
     "#### Checks readers, remote declarations, partitions, names, and outputs. ####",
     "# scan_for_new_source_files(cfg$MasterDBPath, MDT)   # propose rows for new files",
     "ValidateMDTPreflight(MDT, strict = TRUE, ParquetBasePath = paths$ParquetBasePath,",
@@ -11441,7 +11673,7 @@ create_repository_project <- function(dir, MasterDBPath = file.path(dir, "source
     "                                LogPath = paths$LogPath, RunId = RunId)",
     "pending <- MDTCompleteStatus(MDT, paths$CheckpointPath, verbose = TRUE, logStatus = TRUE)",
     "",
-    "#### Survey source evidence and write the compact review workbook #############",
+    "#### 3. Survey source evidence and write the compact review workbook ##########",
     "#### Source files stay read-only; detailed observations remain in Parquet. ####",
     "PrepareSchemaRegistry(MDT, DBLoad = DBLoad, MasterDBPath = cfg$MasterDBPath,",
     "                      ObservationPath = paths$SchemaObservationPath,",
@@ -11463,13 +11695,13 @@ create_repository_project <- function(dir, MasterDBPath = file.path(dir, "source
     "schema_issues <- GetSchemaObservations(paths$SchemaObservationPath, IssuesOnly = TRUE, Limit = 100L)",
     "if (nrow(schema_issues) > 0L) print(schema_issues)",
     "",
-    "#### Review StartHere, resolve blocking decisions, and finalize ##############",
+    "#### 4. Review StartHere, resolve blocking decisions, and finalize ###########",
     "#### Accept keeps recommendations; Override supplies an approved value. ######",
     "#### Ignore separates unrelated compatibility fields or omits a label.  ######",
     "repository_catalog <- FinalizeSchemaRegistry(SchemaReviewPath = paths$SchemaReviewPath,",
     "                       TableSchemaPath = paths$TableSchemaPath, strict = TRUE)",
     "",
-    "#### Load reviewed schemas to Hive-partitioned, resumable Parquet ############",
+    "#### 5. Load reviewed schemas to Hive-partitioned, resumable Parquet #########",
     "#### State files are snapshotted; checkpoints advance only after success. ####",
     "run_result <- ParquetBackEndCreate(MDT = MDT, DBLoad = DBLoad,",
     "                                  MasterDBPath = cfg$MasterDBPath,",
@@ -11482,6 +11714,7 @@ create_repository_project <- function(dir, MasterDBPath = file.path(dir, "source
     "                                  SAV_CHUNK_SIZE = cfg$SAV_CHUNK_SIZE,",
     "                                  DelimitedChunkMaxMB = cfg$DelimitedChunkMaxMB,",
     "                                  DelimitedPartitionMaxMB = cfg$DelimitedPartitionMaxMB,",
+    "                                  DelimitedWriteMode = cfg$DelimitedWriteMode,",
     "                                  FailProbeMode = cfg$FailProbeMode,",
     "                                  FailProbeTimeoutSeconds = cfg$FailProbeTimeoutSeconds,",
     "                                  IORetryAttempts = cfg$IORetryAttempts,",
@@ -11506,7 +11739,7 @@ create_repository_project <- function(dir, MasterDBPath = file.path(dir, "source
     "                    RunId = RunId, MasterDBPath = cfg$MasterDBPath,",
     "                    SourceFingerprintMode = cfg$SourceFingerprintMode)",
     "",
-    "#### Register and strictly validate persistent DuckDB views ##################",
+    "#### 6. Register and strictly validate persistent DuckDB views ###############",
     "TempDirPath <- file.path(cfg$FormattedDBPath, \"duckdb_temp\")",
     "dir.create(TempDirPath, recursive = TRUE, showWarnings = FALSE)",
     "con <- open_duckdb(FormattedDBPath = cfg$FormattedDBPath, DBName = cfg$DBName,",
@@ -16640,6 +16873,8 @@ BuildRepositoryCatalog <- function(MDT, DBLoad = NULL, MasterDBPath, n_workers =
 #'   \code{\link{read_fn}}.
 #' @param DelimitedPartitionMaxMB Numeric scalar. Passed through to
 #'   \code{\link{read_fn}}. Defaults to \code{NULL}.
+#' @param DelimitedWriteMode Character scalar. Passed through to
+#'   \code{\link{read_fn}}. Defaults to \code{"chunk_table"}.
 #' @param FailProbeMode Character scalar. Accepts one of three
 #'   values: \code{"subprocess"}, \code{"in_process"}, or
 #'   \code{"disabled"}, passed through to \code{\link{read_fn}}.
@@ -16735,6 +16970,7 @@ generic_db_loader <- function(files, base_path, db_prefix, completed_checkpoint,
                               PartitionBy, RAMThreshold, SAV_ROW_THRESHOLD,
                               LogPath, SAV_CHUNK_SIZE, DelimitedChunkMaxMB = 256L,
                               DelimitedPartitionMaxMB = NULL,
+                              DelimitedWriteMode = c("chunk_table", "streaming"),
                               FailProbeMode = c("subprocess", "in_process", "disabled"),
                               FailProbeTimeoutSeconds = 7200, FailProbeSourcePath = NULL,
                               PrintStatus = FALSE,
@@ -16747,6 +16983,7 @@ generic_db_loader <- function(files, base_path, db_prefix, completed_checkpoint,
                               SourceFingerprintMode = c("metadata", "sha256", "none"),
                               RunId = NULL) {
   SourceFingerprintMode <- match.arg(SourceFingerprintMode)
+  DelimitedWriteMode <- match.arg(DelimitedWriteMode)
   FailProbeMode <- match.arg(FailProbeMode)
   MDTSelect <- data.table::as.data.table(MDTSelect)
   MDTSelect[, RepositoryKey := repository_checkpoint_key(
@@ -16810,6 +17047,7 @@ generic_db_loader <- function(files, base_path, db_prefix, completed_checkpoint,
                     MDTSelect = row_meta, MasterDBPath = base_path, reader = reader_file, PartitionBy = PartitionBy,
                     SAV_ROW_THRESHOLD = SAV_ROW_THRESHOLD, RAMThreshold = RAMThreshold, SAV_CHUNK_SIZE = SAV_CHUNK_SIZE,
                     DelimitedChunkMaxMB = DelimitedChunkMaxMB, DelimitedPartitionMaxMB = DelimitedPartitionMaxMB,
+                    DelimitedWriteMode = DelimitedWriteMode,
                     FailProbeMode = FailProbeMode, FailProbeTimeoutSeconds = FailProbeTimeoutSeconds,
                     FailProbeSourcePath = FailProbeSourcePath,
                     chunk_size_decrement = chunk_size_decrement, min_chunk_size = min_chunk_size,
@@ -17106,6 +17344,10 @@ print.RepositoryRunResult <- function(x, ...) {
 #'   and one quarter of \code{RAMThreshold * 1024}. Supply an
 #'   explicit value only after confirming that the resulting one
 #'   shot read fits this machine.
+#' @param DelimitedWriteMode Character scalar. \code{"chunk_table"}, the
+#'   default, keeps the existing full-table-per-output-file writer.
+#'   \code{"streaming"} appends bounded CSV/TSV batches to each
+#'   \code{SAV_CHUNK_SIZE} Parquet file.
 #' @param FailProbeMode Character scalar. Accepts one of three
 #'   values: \code{"subprocess"}, \code{"in_process"}, or
 #'   \code{"disabled"}. See \code{\link{read_fn}}. Defaults to
@@ -17332,6 +17574,7 @@ print.RepositoryRunResult <- function(x, ...) {
 ParquetBackEndCreate <- function(MDT, DBLoad, MasterDBPath, completed_checkpoint, CheckpointPath, ParquetBasePath, SAV_ROW_THRESHOLD = 1000000L,
                                  PartitionBy, RAMThreshold, SAV_CHUNK_SIZE = 1000000L, DelimitedChunkMaxMB = 256L,
                                  DelimitedPartitionMaxMB = NULL,
+                                 DelimitedWriteMode = c("chunk_table", "streaming"),
                                  FailProbeMode = c("subprocess", "in_process", "disabled"),
                                  FailProbeTimeoutSeconds = 7200, FailProbeSourcePath = NULL,
                                  IORetryAttempts = 3L, IORetryPauseSeconds = 10,
@@ -17358,6 +17601,7 @@ ParquetBackEndCreate <- function(MDT, DBLoad, MasterDBPath, completed_checkpoint
                                  RemoteDownloadMethod = "auto", RemoteDownloadTimeout = 10800,
                                  RemoteDownloadFunction = NULL) {
   PartitionBy <- match.arg(PartitionBy, c("NRows", "RAMEstimate", "FAIL"))
+  DelimitedWriteMode <- match.arg(DelimitedWriteMode)
   SourceFingerprintMode <- match.arg(SourceFingerprintMode)
   FailProbeMode <- match.arg(FailProbeMode)
   CleanupAfterPhase <- match.arg(CleanupAfterPhase, c("all", "database", "none"))
@@ -17535,6 +17779,7 @@ ParquetBackEndCreate <- function(MDT, DBLoad, MasterDBPath, completed_checkpoint
                                                 SAV_CHUNK_SIZE = SAV_CHUNK_SIZE,
                                                 DelimitedChunkMaxMB = DelimitedChunkMaxMB,
                                                 DelimitedPartitionMaxMB = DelimitedPartitionMaxMB,
+                                                DelimitedWriteMode = DelimitedWriteMode,
                                                 FailProbeMode = FailProbeMode, FailProbeTimeoutSeconds = FailProbeTimeoutSeconds,
                                                 FailProbeSourcePath = FailProbeSourcePath,
                                                 chunk_size_decrement = chunk_size_decrement,

@@ -22,6 +22,7 @@ generic_db_loader(
   SAV_CHUNK_SIZE,
   DelimitedChunkMaxMB = 256L,
   DelimitedPartitionMaxMB = NULL,
+  DelimitedWriteMode = c("chunk_table", "streaming"),
   FailProbeMode = c("subprocess", "in_process", "disabled"),
   FailProbeTimeoutSeconds = 7200,
   FailProbeSourcePath = NULL,
@@ -112,6 +113,9 @@ scoped log path set by \code{\link{begin_repository_run}}, or
 
 \item{DelimitedPartitionMaxMB}{Numeric scalar. Passed through to
 \code{\link{read_fn}}. Defaults to \code{NULL}.}
+
+\item{DelimitedWriteMode}{Character scalar. Passed through to
+\code{\link{read_fn}}. Defaults to \code{"chunk_table"}.}
 
 \item{FailProbeMode}{Character scalar. Accepts one of three
 values: \code{"subprocess"}, \code{"in_process"}, or

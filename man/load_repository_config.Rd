@@ -9,6 +9,7 @@ load_repository_config(
   SAV_CHUNK_SIZE = NULL,
   DelimitedChunkMaxMB = NULL,
   DelimitedPartitionMaxMB = NULL,
+  DelimitedWriteMode = NULL,
   FailProbeMode = NULL,
   FailProbeTimeoutSeconds = NULL,
   FailProbeSourcePath = NULL,
@@ -60,6 +61,10 @@ is read one partition at a time instead of in fixed size chunks.
 Accepts \code{NULL}, which keeps the file's value, or uses half
 of the conservative source route cap derived from
 \code{DelimitedChunkMaxMB} and \code{RAMThreshold}.}
+
+\item{DelimitedWriteMode}{Character scalar. \code{"chunk_table"} retains
+the established writer. \code{"streaming"} appends bounded CSV/TSV
+batches while retaining \code{SAV_CHUNK_SIZE} as the output-file target.}
 
 \item{FailProbeMode}{Character scalar. For a delimited source under
 \code{PartitionBy = "FAIL"}. Accepts \code{"subprocess"}, which

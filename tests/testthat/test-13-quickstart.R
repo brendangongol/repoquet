@@ -30,6 +30,7 @@ test_that("the scaffold creates a valid, parseable project", {
   expect_false(anyNA(call_positions))
   expect_true(all(diff(call_positions) > 0L))
   expect_true(any(grepl('DelimitedChunkMaxMB = cfg$DelimitedChunkMaxMB', runner_lines, fixed = TRUE)))
+  expect_true(any(grepl('DelimitedWriteMode = cfg$DelimitedWriteMode', runner_lines, fixed = TRUE)))
   cfg <- load_repository_config(paths$ConfigPath)
   expect_identical(cfg$MasterDBPath, gsub("\\\\", "/", paths$MasterDBPath))
   original_config <- readLines(paths$ConfigPath, warn = FALSE)
@@ -37,12 +38,14 @@ test_that("the scaffold creates a valid, parseable project", {
     paths$ConfigPath,
     n_workers = 1L,
     DelimitedChunkMaxMB = 64L,
+    DelimitedWriteMode = "streaming",
     PartitionBy = "FAIL",
     FormattedDBPath = file.path(dir, "runtime-formatted"),
     overrides = list(n_workers = 2L, RAMThreshold = 12)
   )
   expect_identical(overridden$n_workers, 1L)
 expect_identical(overridden$DelimitedChunkMaxMB, 64)
+expect_identical(overridden$DelimitedWriteMode, "streaming")
   expect_identical(overridden$RAMThreshold, 12)
   expect_identical(overridden$PartitionBy, "FAIL")
   expect_identical(overridden$FormattedDBPath, file.path(dir, "runtime-formatted"))
@@ -98,6 +101,7 @@ test_that("the HCUP profile's generated runner follows the canonical seven-stage
   expect_false(anyNA(call_positions))
   expect_true(all(diff(call_positions) > 0L))
   expect_true(any(grepl('DelimitedChunkMaxMB = cfg$DelimitedChunkMaxMB', reference_lines, fixed = TRUE)))
+  expect_true(any(grepl('DelimitedWriteMode = cfg$DelimitedWriteMode', reference_lines, fixed = TRUE)))
 })
 
 test_that("configuration defaults fill omitted file settings and paths can be supplied at runtime", {
@@ -113,6 +117,7 @@ test_that("configuration defaults fill omitted file settings and paths can be su
   cfg <- load_repository_config(config_path, MDTPath = "DBSetup.xlsx")
   expect_identical(cfg$SAV_CHUNK_SIZE, 1000000L)
   expect_identical(cfg$DelimitedChunkMaxMB, 256)
+  expect_identical(cfg$DelimitedWriteMode, "chunk_table")
   expect_identical(cfg$PartitionBy, "NRows")
   expect_identical(cfg$MDTPath, "DBSetup.xlsx")
 })
