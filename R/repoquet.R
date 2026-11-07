@@ -1206,6 +1206,10 @@ write_arrow_table_safely <- function(arrow_tbl, path) {
 .is_transient_io_error <- function(message) {
   message <- paste(as.character(message), collapse = " ")
   if (is.na(message) || !nzchar(message)) return(FALSE)
+  #### A fragment of a record left at the very end of a batch ("single-line footer") is what a read ####
+  #### cut off by a dropped connection leaves, so it is retried (a bounded number of times, see     ####
+  #### .retry_limit). A malformed record inside a batch is a structural error and stays fatal.      ####
+  if (grepl("Discarded single-line footer", message, fixed = TRUE)) return(TRUE)
   deterministic <- paste(
     "cannot allocate|bad_alloc|out of memory|memory exhausted|vector memory|cannot reserve",
     "exceed 2\\^31|Layout file|timed out|timeout|must be|Unknown |Unsupported",
@@ -1225,6 +1229,14 @@ write_arrow_table_safely <- function(arrow_tbl, path) {
   grepl(transient, message, ignore.case = TRUE)
 }
 
+# A row-count mismatch or a cut-off record repeats if it is real, and each try re-reads data, so
+# those are retried once at most; every other transient failure uses the configured attempts.
+.retry_limit <- function(message, attempts) {
+  if (grepl("row count mismatch|Discarded single-line footer", message, ignore.case = TRUE)) {
+    min(attempts, 2L)
+  } else attempts
+}
+
 # Runs operation(), retrying a transient failure up to the configured number of attempts.
 # A row-count mismatch is retried once only: a real mismatch repeats, and each try is a full read.
 .retry_io <- function(operation, label, retryable = .is_transient_io_error) {
@@ -1234,8 +1246,7 @@ write_arrow_table_safely <- function(arrow_tbl, path) {
     result <- tryCatch(list(value = operation()), error = function(e) e)
     if (!inherits(result, "error")) return(result$value)
     message <- conditionMessage(result)
-    limit <- if (grepl("row count mismatch", message, ignore.case = TRUE)) min(settings$attempts, 2L) else
-      settings$attempts
+    limit <- .retry_limit(message, settings$attempts)
     if (attempt >= limit || !isTRUE(retryable(message))) stop(result)
     attempt <- attempt + 1L
     wait <- .io_retry_wait(attempt, settings$pause)
@@ -1254,8 +1265,7 @@ write_arrow_table_safely <- function(arrow_tbl, path) {
     probe <- run_probe()
     if (isTRUE(probe$ok)) return(probe)
     error <- paste(as.character(probe$error %||% ""), collapse = " ")
-    limit <- if (grepl("row count mismatch", error, ignore.case = TRUE)) min(settings$attempts, 2L) else
-      settings$attempts
+    limit <- .retry_limit(error, settings$attempts)
     if (attempt >= limit || !.is_transient_io_error(error)) return(probe)
     attempt <- attempt + 1L
     wait <- .io_retry_wait(attempt, settings$pause)
@@ -3940,7 +3950,7 @@ read_delimited_full <- function(path, col_classes = NULL, reader_options = list(
 # are kept. Plain, .gz and .bz2 sources are all supported; a compressed source seeks by reading
 # forward from its start.
 
-.cursor_block_bytes <- 32 * 1024^2
+.cursor_block_bytes <- 16 * 1024^2
 
 .binary_open <- function(path) {
   if (grepl("\\.(gz|gzip|bz2)$", path, ignore.case = TRUE)) gzfile(path, open = "rb") else file(path, open = "rb")
@@ -4022,15 +4032,30 @@ read_delimited_full <- function(path, col_classes = NULL, reader_options = list(
 }
 
 .cursor_fill <- function(cursor, want_bytes) {
-  while (!cursor$eof && length(cursor$buf) < want_bytes) {
-    #### One read for everything still needed (at least a block), so the buffer is not rebuilt by repeated c().
-    n_read <- as.integer(min(max(want_bytes - length(cursor$buf), .cursor_block_bytes), 512 * 1024^2))
-    block <- readBin(cursor$con, what = "raw", n = n_read)
+  #### Reads are kept to modest blocks: a very large single read from a network share can fail or  ####
+  #### come back short on Windows. The blocks are joined once, so the buffer is not rebuilt by c(). ####
+  blocks <- list()
+  have <- length(cursor$buf)
+  while (!cursor$eof && have < want_bytes) {
+    block <- readBin(cursor$con, what = "raw", n = .cursor_block_bytes)
     if (length(block) == 0L) {
+      #### An end of file before the file's known size is a dropped connection, not the real end. ####
+      #### (A compressed source has no known decompressed size, so it cannot be checked.)         ####
+      seen <- cursor$pos + have
+      if (!grepl("\\.(gz|gzip|bz2)$", cursor$path, ignore.case = TRUE) &&
+          is.finite(cursor$size) && seen < cursor$size) {
+        stop(sprintf("premature end of file: %s ended after %s of %s bytes (a dropped connection or a short read).",
+                     basename(cursor$path), format(seen, big.mark = ",", scientific = FALSE),
+                     format(cursor$size, big.mark = ",", scientific = FALSE)), call. = FALSE)
+      }
       cursor$eof <- TRUE
     } else {
-      cursor$buf <- if (length(cursor$buf) == 0L) block else c(cursor$buf, block)
+      blocks[[length(blocks) + 1L]] <- block
+      have <- have + length(block)
     }
+  }
+  if (length(blocks) > 0L) {
+    cursor$buf <- unlist(c(list(cursor$buf), blocks), use.names = FALSE)
   }
   invisible(NULL)
 }
@@ -4051,22 +4076,29 @@ read_delimited_full <- function(path, col_classes = NULL, reader_options = list(
   cursor$next_offset <- 0
   cursor$po <- 0
   cursor$pp <- 0
+  #### A failure while the header is being skipped (for example a read that ends early) must not ####
+  #### leave a half-built cursor registered, or a retry would reuse it from the wrong position.  ####
+  tryCatch({
+    if (skip_lines > 0L) {
+      skipped <- 0L
+      while (skipped < skip_lines) {
+        taken <- .cursor_take(cursor, max_rows = skip_lines - skipped, max_bytes = .cursor_block_bytes,
+                              keep_blank = TRUE, discard = TRUE)
+        if (taken$Rows == 0L) break
+        skipped <- skipped + taken$Rows
+      }
+    } else if (toupper(encoding) %in% c("UTF-8", "UTF8")) {
+      .cursor_fill(cursor, 3)
+      if (length(cursor$buf) >= 3L && identical(cursor$buf[1:3], as.raw(c(0xEF, 0xBB, 0xBF)))) {
+        cursor$buf <- if (length(cursor$buf) > 3L) cursor$buf[4:length(cursor$buf)] else raw(0)
+        cursor$pos <- 3
+      }
+    }
+  }, error = function(e) {
+    try(close(cursor$con), silent = TRUE)
+    stop(e)
+  })
   if (isTRUE(register)) assign(key, cursor, envir = .delimited_cursors)
-  if (skip_lines > 0L) {
-    skipped <- 0L
-    while (skipped < skip_lines) {
-      taken <- .cursor_take(cursor, max_rows = skip_lines - skipped, max_bytes = .cursor_block_bytes,
-                            keep_blank = TRUE, discard = TRUE)
-      if (taken$Rows == 0L) break
-      skipped <- skipped + taken$Rows
-    }
-  } else if (toupper(encoding) %in% c("UTF-8", "UTF8")) {
-    .cursor_fill(cursor, 3)
-    if (length(cursor$buf) >= 3L && identical(cursor$buf[1:3], as.raw(c(0xEF, 0xBB, 0xBF)))) {
-      cursor$buf <- if (length(cursor$buf) > 3L) cursor$buf[4:length(cursor$buf)] else raw(0)
-      cursor$pos <- 3
-    }
-  }
   cursor$next_offset <- 0
   cursor$po <- 0
   cursor$pp <- cursor$pos
@@ -4680,8 +4712,10 @@ set_layout_root <- function(path = NULL) {
   chunk_size <- max(1L, as.integer(chunk_size[1]))
   encoding <- .canonical_encoding_name(reader_options$Encoding %||% NULL)
   if (identical(encoding, "auto")) encoding <- "ISO-8859-1"
-  cursor <- .cursor_new(path, normalizePath(path, winslash = "/", mustWork = TRUE), encoding,
-                        delimiter = NA_character_, skip_lines = 0L, register = FALSE)
+  cursor <- .retry_io(function() {
+    .cursor_new(path, normalizePath(path, winslash = "/", mustWork = TRUE), encoding,
+                delimiter = NA_character_, skip_lines = 0L, register = FALSE)
+  }, label = paste("open", basename(path)))
   on.exit(try(close(cursor$con), silent = TRUE), add = TRUE)
   line_no <- 0
   rows <- 0
@@ -9938,6 +9972,17 @@ validate_duckdb_table <- function(con, table_name, schema_registry = NULL, stric
                       basename(path), current_chunk_size, attempt + 1L, retry$attempts, wait))
       if (wait > 0) Sys.sleep(wait)
       next
+    }
+    #### A normal worker error can still occur after several streaming pieces were ####
+    #### published, for example when strict validation rejects the final record. Do  ####
+    #### not erase those manifest-backed pieces: the source remains uncheckpointed, ####
+    #### and a later corrected retry can resume only after the verified prefix.      ####
+    if (identical(DelimitedWriteMode, "streaming")) {
+      log_msg(sprintf(paste0("[FAIL CHUNK PRESERVE] %s stopped after a normal worker error. ",
+                             "Keeping completed streaming piece(s); the source is not checkpointed and ",
+                             "will remain unavailable until a successful retry: %s"),
+                      basename(path), response$error %||% "unknown error"))
+      return(list(ok = FALSE, error = response$error %||% "Hardened adaptive chunk worker failed without a diagnostic."))
     }
     .cleanup_delimited_chunk_outputs(path, year_dir, table_dir, route_source_partitions,
       TerminalHivePartition, MaxFileStemTruncate, ManifestPath, SourcePath)

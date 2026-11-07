@@ -119,6 +119,15 @@
   temporary file, which is also several times faster on a wide table, and
   `normalize_character_encoding` no longer copies a wide table to rewrite names
   that did not change.
+* An end of file that arrives before the file's known size is now a "premature
+  end of file" error that is retried from the batch's byte offset, instead of
+  being taken for the real end. Before, a read cut short by a dropped connection
+  could leave a fragment of a record that `fread` reported as a "single-line
+  footer", or, when the total row count was not known (the isolated chunk
+  worker), could end the file early without any error. A footer fragment is also
+  retried (once more, not three times), while a malformed record inside a batch
+  still fails at once. The source is read in 16 MB blocks, since very large reads
+  from a network share can come back short on Windows.
 * A source that is not visible when a file starts loading is waited for with the
   same retry settings, but only when its root folder is also missing, which is
   what a dropped network drive looks like. A file missing under a visible root

@@ -36,6 +36,7 @@ register_scripted_reader <- function(type, behavior) {
     count_rows  = function(p, ...) nrow(data.table::fread(p, select = 1L)),
     read_chunk  = function(p, offset, n_max, header, col_classes = NULL, ...) {
       d <- data.table::fread(p)
+      if (offset >= nrow(d)) return(d[0])   # past the end: an empty table, as a real reader returns
       d[seq.int(offset + 1L, min(nrow(d), offset + n_max))]
     },
     chunkable = TRUE)
@@ -62,10 +63,14 @@ test_that("the classifier retries I/O failures and never retries deterministic f
                  "Checkpoint verification failed after replacement.",
                  "NIS_2019.ASC line 3,700,003 has 888 character(s), but layout x.SPS defines 1026-character records.",
                  "Hardened FAIL worker exited with status -1073741818 without a result",
-                 "row count mismatch: read 5 row(s) from a.csv but the independent count is 8.")
+                 "row count mismatch: read 5 row(s) from a.csv but the independent count is 8.",
+                 "premature end of file: a.csv ended after 10 of 99 bytes (a dropped connection or a short read).",
+                 #### The fragment of a record a cut-off read leaves at the end of a batch.
+                 "Delimited structure error in a.csv: Discarded single-line footer: <<31108,3201805453832,0,0>>. The source was not modified.")
   deterministic <- c("cannot allocate vector of size 152.2 Mb", "result would exceed 2^31-1 bytes",
                      "Layout file not found: x.SPS", "Hardened FAIL worker did not complete: timed out",
                      "std::bad_alloc", "Delimited structure error in a.csv: Stopped early on line 4",
+                     "Delimited structure error in a.csv: Stopped early on line 4. First discarded non-empty line: <<15,t15>>.",
                      "Can't assign 544 names to a 248-column data.table", NA_character_, "")
   for (m in transient) expect_true(.is_transient_io_error(m), info = m)
   for (m in deterministic) expect_false(.is_transient_io_error(m), info = as.character(m))
@@ -409,7 +414,8 @@ test_that("a CSV that is genuinely malformed at a fixed line fails clearly once 
     .read_delimited_chunk(csv, 10L, 10L, header, reader_options = opts, exact_rows = TRUE),
     error = function(e) conditionMessage(e)))
   expect_match(err, "Delimited structure error|row count mismatch")
-  expect_gte(sum(grepl("[IO RETRY] Attempt ", out, fixed = TRUE)), 1L)
+  #### A malformed record inside a batch is a structural error: it fails at once, with no pause.
+  expect_identical(sum(grepl("[IO RETRY] Attempt ", out, fixed = TRUE)), 0L)
   expect_length(ls(.delimited_cursors), 0L)   # the failed read leaves no open cursor
 })
 
@@ -495,4 +501,48 @@ test_that("a retry reopens at the recorded batch offset instead of reading again
   again_text <- if (!is.null(again$Raw)) rawToChar(again$Raw) else again$Text
   expect_identical(strsplit(again_text, "\n", fixed = TRUE)[[1]][1], "51,51")
   .close_chunk_cursors(csv)
+})
+
+#### An early end of file, detected against the known file size ####
+
+test_that("an end of file before the file's known size is a premature end, not the end of the data", {
+  root <- tempfile("premature_"); dir.create(root); on.exit(unlink(root, recursive = TRUE), add = TRUE)
+  csv <- file.path(root, "a.csv")
+  body <- paste0("ID,V\n", paste(sprintf("%d,%d", 1:100, 1:100), collapse = "\n"), "\n")
+  con <- file(csv, open = "wb"); writeBin(charToRaw(body), con); close(con)
+  #### A cursor that has read nothing yet (no header to skip, no BOM check), whose file is reported larger.
+  cursor <- .cursor_new(csv, normalizePath(csv, winslash = "/"), "ISO-8859-1", ",", 0L, register = FALSE)
+  on.exit(try(close(cursor$con), silent = TRUE), add = TRUE)
+  cursor$size <- cursor$size + 40      # the share reported more bytes than it delivered
+  expect_error(.cursor_take(cursor, 1000, 1e6, as_raw = TRUE), "premature end of file: a.csv ended after")
+  #### The same read against the true size is a normal end of file.
+  cursor2 <- .cursor_new(csv, normalizePath(csv, winslash = "/"), "UTF-8", ",", 1L, register = FALSE)
+  on.exit(try(close(cursor2$con), silent = TRUE), add = TRUE)
+  taken <- .cursor_take(cursor2, 1000, 1e6, as_raw = TRUE)
+  expect_identical(taken$Rows, 100L)
+  expect_true(cursor2$eof)
+})
+
+test_that("a connection that ends early is retried from the batch offset even when no row count is known", {
+  old <- no_pause(); on.exit(options(old), add = TRUE)
+  root <- tempfile("shortconn_"); dir.create(root); on.exit(unlink(root, recursive = TRUE), add = TRUE)
+  csv <- file.path(root, "a.csv")
+  n <- 60L
+  body <- paste0("ID,TAG\n", paste(sprintf("%d,t%d", seq_len(n), seq_len(n)), collapse = "\n"), "\n")
+  con <- file(csv, open = "wb"); writeBin(charToRaw(body), con); close(con)
+  cut <- file.path(root, "cut.csv")
+  con <- file(cut, open = "wb"); writeBin(charToRaw(substr(body, 1L, floor(nchar(body) * 0.7))), con); close(con)
+  opened <- 0L
+  restore <- mock_repoquet(".binary_open", function(original) function(path) {
+    opened <<- opened + 1L
+    if (opened == 1L) original(cut) else original(path)   # only the first connection is cut short
+  }, via = ".read_delimited_chunk")
+  out <- utils::capture.output(
+    got <- .read_delimited_chunk(csv, 0L, n, c("ID", "TAG"), reader_options = list(Delimiter = ","),
+                                 exact_rows = FALSE))
+  restore()
+  expect_equal(got$ID, seq_len(n))   # complete, with no rows silently missing
+  expect_true(any(grepl("premature end of file", out, fixed = TRUE)))
+  expect_true(any(grepl("[IO RETRY] Attempt 2/", out, fixed = TRUE)))
+  expect_length(ls(.delimited_cursors), 0L)
 })
