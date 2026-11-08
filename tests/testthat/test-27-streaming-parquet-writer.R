@@ -80,18 +80,21 @@ test_that("streaming writer restarts an interrupted output piece without duplica
     },
     .package = "repoquet")
 
-  result <- read_delimited_chunked(
+  out <- utils::capture.output(result <- read_delimited_chunked(
     path = source_path, chunk_size = 10L, year_dir = output_dir,
     all_cols = "VALUE", col_classes = list(VALUE = "numeric"),
     year_val = "2020", partition_keys = "YEAR", partition_values = "2020",
     reader = "csv", DelimitedWriteMode = "streaming",
-    StreamingWriteRecovery = "restart_piece")
+    StreamingWriteRecovery = "restart_piece"))
 
   output_files <- list.files(output_dir, pattern = "\\.parquet$", full.names = TRUE)
   expect_length(output_files, 1L)
   expect_identical(arrow::read_parquet(output_files)$VALUE, as.numeric(seq_len(10L)))
   expect_equal(result$n_rows, 10L)
   expect_equal(write_calls, 2L)
+  #### The recovery line names what failed, so a restart can be diagnosed from the log alone.
+  expect_true(any(grepl("[PARQUET STREAM RECOVERY] Attempt 2/2", out, fixed = TRUE)))
+  expect_true(any(grepl("Cause: .*simulated temporary network write failure", out)))
 })
 
 test_that("streaming writer restarts a routed source after an interrupted partition write", {

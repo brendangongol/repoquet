@@ -546,3 +546,46 @@ test_that("a connection that ends early is retried from the batch offset even wh
   expect_true(any(grepl("[IO RETRY] Attempt 2/", out, fixed = TRUE)))
   expect_length(ls(.delimited_cursors), 0L)
 })
+
+#### The end of a file is remembered, so a read at the end does not rescan the source ####
+
+test_that("a read at the end of a file is answered from the remembered end, not by rescanning", {
+  root <- tempfile("eofmark_"); dir.create(root); on.exit(unlink(root, recursive = TRUE), add = TRUE)
+  csv <- file.path(root, "a.csv")
+  write_body <- function(n) {
+    body <- paste0("ID,V\n", paste(sprintf("%d,%d", seq_len(n), seq_len(n)), collapse = "\n"), "\n")
+    con <- file(csv, open = "wb"); writeBin(charToRaw(body), con); close(con)
+  }
+  write_body(100L)
+  key <- normalizePath(csv, winslash = "/")
+  opened <- 0L
+  restore <- mock_repoquet(".cursor_new", function(original) function(...) {
+    opened <<- opened + 1L
+    original(...)
+  }, via = ".delimited_chunk_batch")
+  on.exit(restore(), add = TRUE)
+  read <- function(offset, n) .read_delimited_chunk(csv, offset, n, c("ID", "V"),
+                                                    reader_options = list(Delimiter = ","), exact_rows = FALSE)
+  #### A partial last batch asks for more records after the end: one cursor, not a second rescan.
+  last <- read(90L, 50L)
+  expect_equal(last$ID, 91:100)
+  expect_identical(opened, 1L)
+  expect_length(ls(.delimited_cursors), 0L)
+  expect_identical(.delimited_eof_marks[[key]]$records, 100)
+  #### The probe past the end (what the streaming writer sends) opens nothing.
+  probe <- read(100L, 50L)
+  expect_identical(nrow(probe), 0L)
+  expect_identical(opened, 1L)
+  #### A read before the end still works from a new cursor.
+  expect_equal(read(10L, 5L)$ID, 11:15)
+  expect_identical(opened, 2L)
+  #### A file that grew is not taken for the old end.
+  write_body(120L)
+  grown <- read(100L, 50L)
+  expect_equal(grown$ID, 101:120)
+  #### An exact read still reports a short file.
+  expect_error(.read_delimited_chunk(csv, 120L, 5L, c("ID", "V"), reader_options = list(Delimiter = ","),
+                                     exact_rows = TRUE), "row count mismatch")
+  .close_chunk_cursors(csv)
+  expect_null(.delimited_eof_marks[[key]])
+})

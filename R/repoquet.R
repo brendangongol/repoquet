@@ -3924,6 +3924,12 @@ read_delimited_full <- function(path, col_classes = NULL, reader_options = list(
 
 .delimited_cursors <- new.env(parent = emptyenv())
 
+# Where a source ended: the record count, plus the file size and modification time the count was
+# learned for. A cursor that reaches the end of its file is released, which forgets its table of
+# batch starts; without this mark the next read at the end (a partial last batch asks for more, the
+# stream then probes for an empty batch) would rescan the whole file from its start to learn the same.
+.delimited_eof_marks <- new.env(parent = emptyenv())
+
 .close_delimited_cursor <- function(key) {
   cursor <- .delimited_cursors[[key]]
   if (!is.null(cursor)) {
@@ -3937,6 +3943,7 @@ read_delimited_full <- function(path, col_classes = NULL, reader_options = list(
 .close_chunk_cursors <- function(path) {
   key <- normalizePath(path, winslash = "/", mustWork = FALSE)
   .close_delimited_cursor(key)
+  if (exists(key, envir = .delimited_eof_marks, inherits = FALSE)) rm(list = key, envir = .delimited_eof_marks)
   .asc_close_cursor(key)
 }
 
@@ -4220,7 +4227,11 @@ read_delimited_full <- function(path, col_classes = NULL, reader_options = list(
 .cursor_release_if_drained <- function(path) {
   key <- normalizePath(path, winslash = "/", mustWork = FALSE)
   cursor <- .delimited_cursors[[key]]
-  if (!is.null(cursor) && cursor$eof && length(cursor$buf) == 0L) .close_delimited_cursor(key)
+  if (!is.null(cursor) && cursor$eof && length(cursor$buf) == 0L) {
+    assign(key, list(records = cursor$next_offset, size = cursor$size, encoding = cursor$encoding,
+                     mtime = file.mtime(path)), envir = .delimited_eof_marks)
+    .close_delimited_cursor(key)
+  }
   invisible(NULL)
 }
 
@@ -4235,6 +4246,15 @@ read_delimited_full <- function(path, col_classes = NULL, reader_options = list(
   if (!is.null(cursor) && (!identical(cursor$size, size) || !identical(cursor$encoding, encoding))) {
     .close_delimited_cursor(key)
     cursor <- NULL
+  }
+  #### A request at or past a recorded end of file is answered without reopening the source. A retry ####
+  #### (reopen) and any change to the file's size, modification time or encoding skip this.          ####
+  if (is.null(cursor) && !isTRUE(reopen)) {
+    mark <- .delimited_eof_marks[[key]]
+    if (!is.null(mark) && offset >= mark$records && identical(mark$size, size) &&
+        identical(mark$encoding, encoding) && identical(mark$mtime, file.mtime(path))) {
+      return(list(Text = "", Rows = 0L, Delimiter = NA_character_))
+    }
   }
   if (is.null(cursor)) {
     info <- .delimited_header_info(path, reader_options)
@@ -6738,8 +6758,9 @@ read_delimited_chunked <- function(path, chunk_size = 1000000L, year_dir = NULL,
         recovery_attempt <- recovery_attempt + 1L
         recovery_successes <- stream_successes
         wait <- .io_retry_wait(recovery_attempt, settings$pause)
-        log_msg(sprintf("[PARQUET STREAM RECOVERY] Attempt %d/%d after %gs: %s; restarting %s.",
-                        recovery_attempt, settings$attempts, wait, basename(path), restart$mode))
+        log_msg(sprintf("[PARQUET STREAM RECOVERY] Attempt %d/%d after %gs: %s; restarting %s. Cause: %s",
+                        recovery_attempt, settings$attempts, wait, basename(path), restart$mode,
+                        gsub("[\r\n]+", " ", conditionMessage(restart$cause))))
         if (wait > 0) Sys.sleep(wait)
         try(stream_close_all(publish = FALSE), silent = TRUE)
         if (identical(restart$mode, "source")) {

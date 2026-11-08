@@ -132,3 +132,12 @@
   same retry settings, but only when its root folder is also missing, which is
   what a dropped network drive looks like. A file missing under a visible root
   still fails at once, with no pause.
+* The chunked delimited reader now remembers where a source ended. Before, the cursor
+  that reached the end of a file was released and forgot its table of batch starts, so
+  the read for "more records" after a partial last batch, and the streaming writer's
+  probe for an empty batch, each rescanned the whole file from its start. On a 40 GB
+  source that was about three minutes each, in the isolated chunk worker, where the
+  total row count is unknown. A read at or past a remembered end now returns at once,
+  unless the file's size, modification time or encoding changed or the read is a retry.
+* The `[PARQUET STREAM RECOVERY]` log line now ends with `Cause:` and the error that
+  forced the piece to restart, so an interrupted write can be diagnosed from the log.
