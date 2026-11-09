@@ -2,11 +2,14 @@
 
 internal <- function(name) get(name, envir = environment(PrepareSchemaRegistry))
 
-resolve_with_rule <- function(observed, pattern, type, precision_risk = FALSE, warning = NA_character_) {
+resolve_with_rule <- function(observed, pattern, type, precision_risk = FALSE, warning = NA_character_,
+                              fractional = 0, minimum = NULL, maximum = NULL) {
   rows <- data.table::data.table(
     ObservedType = observed, ReaderWarning = warning,
     ReaderWarningSeverity = if (is.na(warning)) NA_character_ else "warning",
-    PrecisionRisk = precision_risk, FractionalCount = 0)
+    PrecisionRisk = precision_risk, FractionalCount = fractional)
+  if (!is.null(minimum)) rows[, Minimum := minimum]
+  if (!is.null(maximum)) rows[, Maximum := maximum]
   recommendation <- internal(".schema_recommendation_for_group")(rows)
   policy <- data.table::data.table(ColumnPattern = pattern, CanonicalType = type, Role = "analytic", AppliesTo = "all")
   list(data = recommendation, with_rule = internal(".schema_policy_resolution")(rows, recommendation, policy),
@@ -47,10 +50,11 @@ test_that("reader warnings and contradicted rules still need a person", {
   expect_true(contradicted$with_rule$RequiresReview)
   expect_identical(contradicted$with_rule$RecommendedType, "character")
   expect_identical(contradicted$with_rule$PolicyStatus, "explicit_override_required")
-  #### Numeric values do not prove a column is integer either.
-  fractional <- resolve_with_rule("numeric", "^DRG$", "integer")
-  expect_true(fractional$with_rule$RequiresReview)
-  expect_identical(fractional$with_rule$RecommendedType, "numeric")
+  #### Numeric values prove nothing about being integer unless the survey recorded that they are whole numbers
+  #### inside the integer range; with no range evidence the rule is a contradiction.
+  unproven <- resolve_with_rule("numeric", "^DRG$", "integer")
+  expect_true(unproven$with_rule$RequiresReview)
+  expect_identical(unproven$with_rule$RecommendedType, "numeric")
   #### Without a rule nothing changed: clean evidence passes, risky evidence is reviewed.
   expect_false(resolve_with_rule("integer", "^NOMATCH$", "integer")$without_rule$RequiresReview)
   expect_true(resolve_with_rule(c("integer", "numeric"), "^NOMATCH$", "integer", precision_risk = TRUE)$without_rule$RequiresReview)
@@ -97,7 +101,9 @@ test_that("the review workbook asks only about a contradicted rule and reports r
   fx <- new_repo_fixture(); on.exit(unlink(fx$root, recursive = TRUE))
   data.table::fwrite(data.table::data.table(
     KEY = 1:5, DIED = c("yes", "no", "no", "yes", "no"), AGE = c(30L, 41L, 52L, 63L, 74L),
-    NOTE = letters[1:5]), file.path(fx$src, "a.csv"))
+    NOTE = letters[1:5],
+    #### Whole numbers written with a decimal point are read as doubles; the survey records that they are whole.
+    DISPUNIFORM = c("1.0", "2.0", "3.0", "1.0", "5.0")), file.path(fx$src, "a.csv"))
   M <- data.frame(Database = "REG", MDBDir = "REG", TableName = "A", Path = "a.csv", FileType = "csv",
                   PartitionKey = "year", PartitionValue = "2024")
   review_path <- file.path(fx$root, "review.xlsx")
@@ -115,7 +121,11 @@ test_that("the review workbook asks only about a contradicted rule and reports r
   expect_match(decisions$RecommendationReason, "Select Accept to keep it")
   registry <- data.table::as.data.table(openxlsx::read.xlsx(review_path, sheet = "Registry"))
   expect_identical(sort(registry$Column[registry$RequiresReview %in% TRUE]), "DIED")
-  expect_true(all(registry$Decision[registry$Column %in% c("KEY", "AGE", "NOTE")] == "Auto-approved"))
+  expect_true(all(registry$Decision[registry$Column %in% c("KEY", "AGE", "NOTE", "DISPUNIFORM")] == "Auto-approved"))
+  #### The double-valued column that the rule declares integer needs no decision, and is stored as integer.
+  expect_identical(registry$ObservedTypes[registry$Column == "DISPUNIFORM"], "numeric")
+  expect_identical(registry$RecommendedType[registry$Column == "DISPUNIFORM"], "integer")
+  expect_match(registry$RecommendationReason[registry$Column == "DISPUNIFORM"], "every sampled value is a whole number")
   #### The policy report lists both rule differences and says which one needs action.
   policy <- data.table::as.data.table(openxlsx::read.xlsx(review_path, sheet = "PolicyReport"))
   expect_identical(policy$ActionRequired[policy$Column == "DIED"], "Yes - decide in ColumnDecisions")
@@ -128,4 +138,39 @@ test_that("the review workbook asks only about a contradicted rule and reports r
   expect_equal(sum(coverage$ColumnsMatched), nrow(registry))
   guide <- data.table::as.data.table(openxlsx::read.xlsx(review_path, sheet = "StartHere", startRow = 14))
   expect_true("RuleCoverage" %in% guide$Worksheet)
+})
+
+test_that("whole numbers stored as doubles satisfy an integer rule without a decision", {
+  #### A 0/1 flag read as 0.0/1.0: every sampled value is whole and inside the integer range.
+  flag <- resolve_with_rule("numeric", "^DIED$", "integer", minimum = "0", maximum = "1")
+  expect_true(flag$without_rule$RequiresReview == FALSE)
+  expect_identical(flag$with_rule$RecommendedType, "integer")
+  expect_identical(flag$with_rule$PolicyStatus, "lossless_policy_promotion")
+  expect_false(flag$with_rule$RequiresReview)
+  expect_match(flag$with_rule$Reason, "every sampled value is a whole number, so integer was applied automatically")
+  #### Mixed integer and double evidence is the same.
+  mixed <- resolve_with_rule(c("integer", "numeric"), "^DRG$", "integer", minimum = c("1", "1"), maximum = c("999", "999"))
+  expect_false(mixed$with_rule$RequiresReview)
+  expect_identical(mixed$with_rule$RecommendedType, "integer")
+  #### One fractional value, a value beyond the integer range, a precision risk, or no recorded range: still a decision.
+  fractional <- resolve_with_rule("numeric", "^DIED$", "integer", fractional = 3, minimum = "0", maximum = "1")
+  expect_true(fractional$with_rule$RequiresReview)
+  expect_identical(fractional$with_rule$RecommendedType, "numeric")
+  beyond <- resolve_with_rule("numeric", "^DIED$", "integer", minimum = "0", maximum = "3000000000")
+  expect_true(beyond$with_rule$RequiresReview)
+  expect_identical(beyond$with_rule$RecommendedType, "numeric")
+  risky <- resolve_with_rule("numeric", "^DIED$", "integer", precision_risk = TRUE, minimum = "0", maximum = "1")
+  expect_true(risky$with_rule$RequiresReview)
+  norange <- resolve_with_rule("numeric", "^DIED$", "integer")
+  expect_true(norange$with_rule$RequiresReview)
+  #### A 64-bit rule needs no range, only whole numbers within exact precision.
+  wide <- resolve_with_rule("numeric", "^ENCOUNTERKEY$", "int64")
+  expect_false(wide$with_rule$RequiresReview)
+  expect_identical(wide$with_rule$RecommendedType, "int64")
+  #### Text never counts as whole numbers: a label where a code is expected stays a decision.
+  labels <- resolve_with_rule("character", "^DIED$", "integer", minimum = "0", maximum = "1")
+  expect_true(labels$with_rule$RequiresReview)
+  expect_identical(labels$with_rule$RecommendedType, "character")
+  #### Without any rule, nothing changed.
+  expect_false(flag$without_rule$RequiresReview)
 })

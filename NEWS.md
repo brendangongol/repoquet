@@ -177,3 +177,23 @@
   promoted or were contradicted, and a status (a rule that matched nothing, or one that
   repeats an earlier pattern and scope, is called out). A last row counts the columns no
   rule covers. `PolicyReport` now says which of its rows need a decision.
+* Added `check_schema_conformance()`, `apply_schema_casts()` and
+  `reset_nonconforming_tables_for_reload()`: a repository can be checked against its
+  finalized `TableSchemas.xlsx`, brought into line, and the tables that cannot be
+  converted can be set aside for a reload, without a project script. The check is
+  read-only and gives each table one action: `OK`, `CAST`, `RELOAD` (some values cannot
+  be converted, for example `812.1` stored as a number where the catalog says text),
+  `REVIEW` or `NO_PARQUET`. Casts rewrite each file to a temporary copy, verify the row
+  count, the non-null counts of the converted columns and the new types, and keep the
+  original until the replacement is installed; an interrupted run is recovered the next
+  time, and a lock folder prevents two rewrites at once. Setting aside a table moves its
+  Parquet folder to a backup folder, clears its checkpoint and manifest entries, and
+  needs `Confirm = TRUE`; the normal load call then rebuilds it. Transient storage errors
+  use the shared retry policy. A `POSIXct` catalog type is now recognised as a timestamp.
+* A policy rule that declares `integer` or `int64` for a column the survey read as
+  `numeric` no longer needs a decision when the survey proved the values are whole
+  numbers: no sampled value is fractional, none exceeds exact floating-point
+  precision, and for `integer` the observed minimum and maximum are inside the 32-bit
+  range. A 0/1 flag stored as 0.0/1.0 is the usual case. The rule is applied
+  automatically and recorded in `PolicyReport`. Without that evidence, and for text
+  where a code is expected, the rule remains a decision.

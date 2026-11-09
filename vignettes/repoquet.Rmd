@@ -146,6 +146,31 @@ DBI::dbDisconnect(con, shutdown = TRUE)
 unlink(project_dir, recursive = TRUE)
 ```
 
+## Keeping a repository in line with its catalog (not run automatically)
+
+The finalized catalog (`TableSchemas.xlsx`) is the single source of truth for column
+types. After a load, or after you edit the schema rules or the catalog, check that
+every Parquet file carries the catalog's type. The check is read-only; each table is
+`OK`, `CAST` (every difference converts without loss), `RELOAD` (some values cannot be
+converted, for example the code `812.1` stored as a number where the catalog says
+text), `REVIEW` (a catalog type the check does not convert) or `NO_PARQUET`.
+
+```{r, eval = FALSE}
+plan <- check_schema_conformance(paths$TableSchemaPath, paths$ParquetBasePath)
+table(plan$tables$Database, plan$tables$Action)
+
+# CAST tables: each file is rewritten to a temporary copy, checked, then swapped in.
+result <- apply_schema_casts(plan, paths$ParquetBasePath)
+
+# RELOAD tables: set aside (nothing is deleted), then run the same load call again.
+reset_nonconforming_tables_for_reload(plan, MDT, MasterDBPath, paths$ParquetBasePath,
+                                      paths$CheckpointPath, paths$ManifestPath,
+                                      Confirm = TRUE)
+```
+
+Reload with `MaxCoerceNAPct = 0` so that a value that cannot be converted stops the load
+instead of becoming `NA`, then run `check_schema_conformance()` again.
+
 ## A richer example: real public health data (not run automatically)
 
 The synthetic repository above is deliberately tiny so this vignette builds

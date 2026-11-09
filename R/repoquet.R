@@ -55,7 +55,9 @@ utils::globalVariables(c(
   "age_hours", "mtime", "should_clean", "size_bytes",
   "TypeSet", "code", "column_name", "database_table", "diagnosis_column",
   "URI", "URIs", "n_keysets", "n_raw", "n_rows", "n_typesets", "pct_of_table",
-  "Member", "Sources", "Large"
+  "Member", "Sources", "Large",
+  "RuleOrder", "RuleStatus", "ColumnsMatched", "Contradicted",
+  "Action", "ActualType", "TargetType", "TargetDuck", "BadValues", "Samples", "FilePath"
 ))
 
 # Internal globals
@@ -8105,6 +8107,543 @@ audit_repository <- function(MDT, ParquetBasePath, CheckpointPath, ManifestPath 
 }
 
 ################################################################################
+#### Schema conformance: Parquet files against the finalized catalog ###########
+################################################################################
+# TableSchemas.xlsx is the single source of truth: every Parquet file should carry the catalog's type for
+# each column. check_schema_conformance() compares the files with the catalog (read-only) and tests whether
+# each needed conversion is value-safe; apply_schema_casts() rewrites the files whose conversions are all
+# value-safe; reset_nonconforming_tables_for_reload() sets aside the tables that cannot be converted so the
+# normal load can rebuild them from source.
+
+.conformance_sql_string <- function(con, x) as.character(DBI::dbQuoteString(con, gsub("\\\\", "/", x)))
+.conformance_sql_id <- function(con, x) as.character(DBI::dbQuoteIdentifier(con, x))
+
+# Catalog type name -> DuckDB type (NA when the catalog type is unsupported here).
+.conformance_duck_type <- function(canonical) {
+  switch(tolower(trimws(as.character(canonical)[1])),
+         character = "VARCHAR", integer = "INTEGER", int64 = "BIGINT",
+         numeric = "DOUBLE", logical = "BOOLEAN", date = "DATE",
+         datetime = "TIMESTAMP", timestamp = "TIMESTAMP", posixct = "TIMESTAMP", NA_character_)
+}
+
+.conformance_type_family <- function(actual) {
+  a <- toupper(trimws(as.character(actual)))
+  if (grepl("^U?(TINYINT|SMALLINT|INTEGER|BIGINT|HUGEINT)$", a)) "integer"
+  else if (grepl("^(FLOAT|REAL|DOUBLE|DECIMAL)", a)) "float"
+  else if (grepl("VARCHAR|CHAR|STRING|TEXT", a)) "varchar"
+  else "other"
+}
+
+.conformance_type_matches <- function(actual, canonical) {
+  actual <- toupper(trimws(as.character(actual)))
+  target <- .conformance_duck_type(canonical)
+  if (is.na(target)) return(FALSE)
+  switch(target,
+         VARCHAR = grepl("VARCHAR|CHAR|STRING|TEXT", actual),
+         INTEGER = identical(actual, "INTEGER"),
+         BIGINT = identical(actual, "BIGINT"),
+         DOUBLE = identical(actual, "DOUBLE"),
+         BOOLEAN = identical(actual, "BOOLEAN"),
+         DATE = identical(actual, "DATE"),
+         TIMESTAMP = startsWith(actual, "TIMESTAMP"),
+         FALSE)
+}
+
+# SQL condition that is TRUE for a row whose value CANNOT be converted safely.
+.conformance_bad_condition <- function(q, actual, target) {
+  fam <- .conformance_type_family(actual)
+  if (identical(target, "VARCHAR")) {
+    # Integers and text convert exactly. A float is only safe when every value is a whole number:
+    # 812.1 must never silently become "812".
+    if (fam == "float") return(sprintf(
+      "%1$s IS NOT NULL AND (NOT isfinite(CAST(%1$s AS DOUBLE)) OR CAST(%1$s AS DOUBLE) <> trunc(CAST(%1$s AS DOUBLE)))", q))
+    return("FALSE")
+  }
+  if (target %in% c("INTEGER", "BIGINT")) {
+    if (fam == "integer" && identical(target, "BIGINT")) return("FALSE")
+    return(sprintf(
+      "%1$s IS NOT NULL AND (TRY_CAST(%1$s AS %2$s) IS NULL OR TRY_CAST(%1$s AS DOUBLE) IS NULL OR CAST(TRY_CAST(%1$s AS %2$s) AS DOUBLE) <> TRY_CAST(%1$s AS DOUBLE))",
+      q, target))
+  }
+  if (identical(target, "DOUBLE")) {
+    if (fam %in% c("integer", "float")) return("FALSE")
+    return(sprintf("%1$s IS NOT NULL AND TRY_CAST(%1$s AS DOUBLE) IS NULL", q))
+  }
+  sprintf("%1$s IS NOT NULL AND TRY_CAST(%1$s AS %2$s) IS NULL", q, target)
+}
+
+.conformance_select_expression <- function(q, actual, target) {
+  if (identical(target, "VARCHAR") && .conformance_type_family(actual) == "float") {
+    return(sprintf("CASE WHEN %1$s IS NULL THEN NULL ELSE printf('%%.0f', CAST(%1$s AS DOUBLE)) END", q))
+  }
+  sprintf("CAST(%s AS %s)", q, target)
+}
+
+# The TableSchemas sheet of the finalized catalog, with trimmed names, upper-case columns, lower-case types.
+.conformance_read_catalog <- function(TableSchemaPath) {
+  if (is.null(TableSchemaPath) || !file.exists(TableSchemaPath)) {
+    stop("Schema catalog not found: ", TableSchemaPath, ". Finalize the schema (FinalizeSchemaRegistry) first.", call. = FALSE)
+  }
+  catalog <- data.table::as.data.table(openxlsx::read.xlsx(TableSchemaPath, sheet = "TableSchemas", detectDates = FALSE))
+  missing <- setdiff(c("Database", "TableName", "DuckDBTable", "Column", "CanonicalType"), names(catalog))
+  if (length(missing)) stop("The schema catalog is missing column(s): ", paste(missing, collapse = ", "), call. = FALSE)
+  if (!"Role" %in% names(catalog)) catalog[, Role := ""]
+  catalog[, `:=`(Database = trimws(as.character(Database)),
+                 TableName = trimws(as.character(TableName)),
+                 DuckDBTable = trimws(as.character(DuckDBTable)),
+                 Column = toupper(trimws(as.character(Column))),
+                 CanonicalType = tolower(trimws(as.character(CanonicalType))),
+                 Role = tolower(trimws(ifelse(is.na(Role), "", as.character(Role)))))]
+  catalog[]
+}
+
+.conformance_table_files <- function(ParquetBasePath, DuckDBTable) {
+  table_dir <- file.path(ParquetBasePath, DuckDBTable)
+  if (!dir.exists(table_dir)) return(character())
+  files <- list.files(table_dir, pattern = "\\.parquet$", recursive = TRUE, full.names = TRUE, ignore.case = TRUE)
+  files[!grepl("\\.schema_rewrite_", basename(files))]
+}
+
+.conformance_open_connection <- function(DuckDBTempPath = NULL, Threads = 1L) {
+  con <- DBI::dbConnect(duckdb::duckdb(), dbdir = ":memory:")
+  DBI::dbExecute(con, paste0("SET threads = ", max(1L, as.integer(Threads))))
+  if (!is.null(DuckDBTempPath) && nzchar(DuckDBTempPath)) {
+    dir.create(DuckDBTempPath, recursive = TRUE, showWarnings = FALSE)
+    DBI::dbExecute(con, paste0("SET temp_directory = ", .conformance_sql_string(con, DuckDBTempPath)))
+  }
+  con
+}
+
+# hive_partitioning = false: inspect only the columns physically in the file.
+.conformance_source <- function(con, file) {
+  paste0("read_parquet(", .conformance_sql_string(con, file), ", hive_partitioning = false)")
+}
+
+.conformance_describe <- function(con, file) {
+  .retry_io(function() DBI::dbGetQuery(con, paste0("DESCRIBE SELECT * FROM ", .conformance_source(con, file))),
+            label = paste0("Describe ", basename(file)))
+}
+
+# changes: data.table(Column, ActualType, TargetDuck). Returns bad-value counts (one scan of the file) plus up
+# to SampleLimit offending values per column.
+.conformance_check_columns <- function(con, file, changes, SampleLimit = 5L) {
+  src <- .conformance_source(con, file)
+  quoted <- vapply(changes$Column, function(x) .conformance_sql_id(con, x), character(1))
+  conditions <- mapply(.conformance_bad_condition, quoted, changes$ActualType, changes$TargetDuck, USE.NAMES = FALSE)
+  select_list <- paste0("COUNT(*) FILTER (WHERE ", conditions, ") AS bad_", seq_along(conditions), collapse = ", ")
+  counts <- .retry_io(function() DBI::dbGetQuery(con, paste0("SELECT ", select_list, " FROM ", src)),
+                      label = paste0("Check values in ", basename(file)))
+  bad <- as.numeric(unlist(counts[1, ], use.names = FALSE))
+  bad[is.na(bad)] <- 1
+  samples <- rep("", length(bad))
+  for (index in which(bad > 0)) {
+    samples[index] <- tryCatch(paste(DBI::dbGetQuery(con, paste0(
+      "SELECT CAST(", quoted[index], " AS VARCHAR) AS v FROM ", src, " WHERE ",
+      conditions[index], " GROUP BY 1 ORDER BY 1 LIMIT ", SampleLimit))$v, collapse = " | "),
+      error = function(error) "")
+  }
+  data.table::data.table(Column = changes$Column, BadValues = bad, Samples = samples)
+}
+
+#' Checks every Parquet file against the finalized schema catalog
+#'
+#' Reads nothing but file metadata and, for a column whose stored type differs
+#' from the catalog, one scan of that column to learn whether the conversion is
+#' value-safe. Nothing is written or changed. Each table is given one action:
+#' \code{OK} (every file matches the catalog), \code{CAST} (every difference
+#' converts without loss, so \code{\link{apply_schema_casts}} can fix it),
+#' \code{RELOAD} (some values cannot be converted, for example the code
+#' \code{812.1} stored as a number where the catalog says text, so the table
+#' must be rebuilt from its source, see
+#' \code{\link{reset_nonconforming_tables_for_reload}}), \code{REVIEW} (the
+#' catalog type is one this check does not convert) or \code{NO_PARQUET} (no
+#' file has been written yet). A table with the leftovers of an interrupted
+#' \code{\link{apply_schema_casts}} is reported as \code{CAST}, and that function
+#' restores the originals first.
+#' @param TableSchemaPath Character scalar. Path to the finalized
+#'   \code{TableSchemas.xlsx} catalog, for example
+#'   \code{RepositoryInitialize(...)$TableSchemaPath}.
+#' @param ParquetBasePath Character scalar. Root folder of the repository's
+#'   Parquet files, one sub-folder per physical table.
+#' @param Databases Character vector. Databases to check. Accepts \code{NULL},
+#'   which checks every database in the catalog. Defaults to \code{NULL}.
+#' @param LogPath Character scalar. Optional log file. Defaults to \code{NULL}.
+#' @param RunId Character scalar. Optional run identifier for log lines.
+#'   Defaults to \code{NULL}.
+#' @param DuckDBTempPath Character scalar. Optional folder DuckDB may use for
+#'   temporary files. Defaults to \code{NULL}.
+#' @param Threads Integer scalar. DuckDB threads for the scan. Defaults to 1.
+#' @return A list with two data.tables. \code{tables} has one row per table
+#'   (\code{Database}, \code{TableName}, \code{DuckDBTable}, \code{Files},
+#'   \code{FilesToChange}, \code{ParquetGB}, \code{ColumnsToChange},
+#'   \code{Action}). \code{columns} has one row per file and column that
+#'   differs (\code{Column}, \code{ActualType}, \code{TargetType},
+#'   \code{BadValues}, \code{Samples}, \code{Action}, \code{File},
+#'   \code{FilePath}), and is empty when every table is \code{OK}.
+#' @seealso \code{\link{apply_schema_casts}},
+#'   \code{\link{reset_nonconforming_tables_for_reload}}
+#' @examples
+#' \donttest{
+#' root <- tempfile("conformance_"); dir.create(root)
+#' table_dir <- file.path(root, "parquet", "REG_A", "year=2024")
+#' dir.create(table_dir, recursive = TRUE)
+#' arrow::write_parquet(data.frame(ID = 1:3, SCORE = c(1.5, 2.5, 3.5)),
+#'                      file.path(table_dir, "A_00001.parquet"))
+#' catalog <- data.frame(Database = "REG", TableName = "A", DuckDBTable = "REG_A",
+#'                       Column = c("ID", "SCORE"),
+#'                       CanonicalType = c("character", "numeric"), Role = "data")
+#' catalog_path <- file.path(root, "TableSchemas.xlsx")
+#' openxlsx::write.xlsx(list(TableSchemas = catalog), catalog_path)
+#' plan <- check_schema_conformance(catalog_path, file.path(root, "parquet"))
+#' plan$tables[, c("DuckDBTable", "ColumnsToChange", "Action")]
+#' }
+#' @export
+check_schema_conformance <- function(TableSchemaPath, ParquetBasePath, Databases = NULL, LogPath = NULL,
+                                     RunId = NULL, DuckDBTempPath = NULL, Threads = 1L) {
+  previous_run <- if (!is.null(LogPath) || !is.null(RunId)) begin_repository_run(LogPath, RunId) else NULL
+  if (!is.null(previous_run)) on.exit(restore_repository_run(previous_run), add = TRUE)
+  catalog <- .conformance_read_catalog(TableSchemaPath)
+  if (is.null(Databases)) Databases <- sort(unique(catalog$Database))
+  selected <- catalog[catalog$Database %in% Databases & catalog$Role != "partition"]
+  if (!nrow(selected)) stop("The catalog has no columns for: ", paste(Databases, collapse = ", "), call. = FALSE)
+  tables <- unique(selected[, .(Database, TableName, DuckDBTable)])
+  con <- .conformance_open_connection(DuckDBTempPath, Threads)
+  on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
+  column_rows <- list(); table_rows <- vector("list", nrow(tables))
+  for (table_index in seq_len(nrow(tables))) {
+    tbl <- tables[table_index]
+    wanted <- selected[selected$DuckDBTable == tbl$DuckDBTable]
+    wanted_type <- stats::setNames(wanted$CanonicalType, wanted$Column)
+    files <- .conformance_table_files(ParquetBasePath, tbl$DuckDBTable)
+    leftovers <- list.files(file.path(ParquetBasePath, tbl$DuckDBTable), recursive = TRUE,
+                            pattern = "\\.pre_schema_update$|\\.schema_rewrite_")
+    if (length(leftovers)) {
+      # An earlier rewrite was interrupted; apply_schema_casts() restores the originals first.
+      table_rows[[table_index]] <- data.table::data.table(
+        Database = tbl$Database, TableName = tbl$TableName, DuckDBTable = tbl$DuckDBTable,
+        Files = length(files), FilesToChange = length(leftovers), ParquetGB = 0,
+        ColumnsToChange = "(interrupted rewrite: apply_schema_casts() will recover it, then check again)",
+        Action = "CAST")
+      log_msg(sprintf("[SCHEMA CHECK] [%d/%d] %s: interrupted rewrite found", table_index, nrow(tables), tbl$DuckDBTable))
+      next
+    }
+    if (!length(files)) {
+      table_rows[[table_index]] <- data.table::data.table(
+        Database = tbl$Database, TableName = tbl$TableName, DuckDBTable = tbl$DuckDBTable,
+        Files = 0L, FilesToChange = 0L, ParquetGB = 0, ColumnsToChange = "", Action = "NO_PARQUET")
+      next
+    }
+    files_to_change <- 0L; table_column_rows <- list()
+    for (file in files) {
+      description <- .conformance_describe(con, file)
+      actual_type <- stats::setNames(as.character(description$column_type), toupper(as.character(description$column_name)))
+      common <- intersect(names(wanted_type), names(actual_type))
+      mismatch <- common[!vapply(common, function(x) .conformance_type_matches(actual_type[[x]], wanted_type[[x]]), logical(1))]
+      if (!length(mismatch)) next
+      files_to_change <- files_to_change + 1L
+      changes <- data.table::data.table(
+        Column = as.character(description$column_name)[match(mismatch, toupper(description$column_name))],
+        ActualType = unname(actual_type[mismatch]),
+        TargetType = unname(wanted_type[mismatch]))
+      changes[, TargetDuck := vapply(TargetType, .conformance_duck_type, character(1))]
+      supported <- !is.na(changes$TargetDuck)
+      verdict <- data.table::data.table(Column = changes$Column, BadValues = NA_real_, Samples = "")
+      if (any(supported)) verdict[supported, c("BadValues", "Samples") :=
+        .conformance_check_columns(con, file, changes[supported])[, .(BadValues, Samples)]]
+      changes[, `:=`(BadValues = verdict$BadValues, Samples = verdict$Samples)]
+      changes[, Action := ifelse(!supported, "REVIEW", ifelse(BadValues > 0, "RELOAD", "CAST"))]
+      changes[, `:=`(Database = tbl$Database, TableName = tbl$TableName, DuckDBTable = tbl$DuckDBTable,
+                     File = substring(file, nchar(file.path(ParquetBasePath, tbl$DuckDBTable)) + 2L),
+                     FilePath = file)]
+      table_column_rows[[length(table_column_rows) + 1L]] <- changes
+    }
+    table_columns <- data.table::rbindlist(table_column_rows, fill = TRUE)
+    column_rows[[length(column_rows) + 1L]] <- table_columns
+    action <- if (!nrow(table_columns)) "OK" else if (any(table_columns$Action == "REVIEW")) "REVIEW" else
+      if (any(table_columns$Action == "RELOAD")) "RELOAD" else "CAST"
+    table_rows[[table_index]] <- data.table::data.table(
+      Database = tbl$Database, TableName = tbl$TableName, DuckDBTable = tbl$DuckDBTable,
+      Files = length(files), FilesToChange = files_to_change,
+      ParquetGB = round(sum(file.info(files)$size, na.rm = TRUE) / 1024^3, 2),
+      ColumnsToChange = if (nrow(table_columns)) paste(unique(table_columns$Column), collapse = ", ") else "",
+      Action = action)
+    log_msg(sprintf("[SCHEMA CHECK] [%d/%d] %s: %s", table_index, nrow(tables), tbl$DuckDBTable, action))
+  }
+  columns <- data.table::rbindlist(column_rows, fill = TRUE)
+  if (!nrow(columns)) columns <- data.table::data.table(
+    Column = character(), ActualType = character(), TargetType = character(), TargetDuck = character(),
+    BadValues = numeric(), Samples = character(), Action = character(), Database = character(),
+    TableName = character(), DuckDBTable = character(), File = character(), FilePath = character())
+  list(columns = columns, tables = data.table::rbindlist(table_rows, fill = TRUE))
+}
+
+# Typed and empty, never untyped-empty, so result[Status == "FAILED"] works when nothing needed fixing.
+.conformance_empty_result <- function() data.table::data.table(
+  Database = character(), TableName = character(), File = character(), Columns = character(),
+  Rows = numeric(), Status = character(), Message = character())
+
+# Puts back the originals of an interrupted rewrite and removes its temporary files.
+.conformance_recover_interrupted <- function(table_dir) {
+  backups <- list.files(table_dir, pattern = "\\.parquet\\.pre_schema_update$",
+                        recursive = TRUE, full.names = TRUE, ignore.case = TRUE)
+  for (backup in backups) {
+    original <- sub("\\.pre_schema_update$", "", backup)
+    if (file.exists(original)) stop("An interrupted rewrite left both ", original,
+                                    " and its backup. Compare them, delete the wrong one, and rerun.", call. = FALSE)
+    if (!file.rename(backup, original)) stop("Could not restore interrupted backup: ", backup, call. = FALSE)
+    log_msg(sprintf("[SCHEMA CAST] Recovered interrupted file: %s", basename(original)))
+  }
+  stale <- list.files(table_dir, pattern = "\\.schema_rewrite_.*\\.parquet$",
+                      recursive = TRUE, full.names = TRUE, ignore.case = TRUE)
+  if (length(stale)) unlink(stale)
+  invisible(TRUE)
+}
+
+# Rewrites one file with the catalog's types: write a temporary copy, verify the row count, the non-null counts
+# of the converted columns and the new types, then swap it in with the original kept until the swap succeeds.
+.conformance_rewrite_file <- function(con, file, changes) {
+  # Re-verify right before writing; a plain-cast column must still be value-safe.
+  verdict <- .conformance_check_columns(con, file, changes)
+  if (any(verdict$BadValues > 0)) stop(
+    "values are no longer convertible for: ", paste(verdict$Column[verdict$BadValues > 0], collapse = ", "), call. = FALSE)
+  description <- .conformance_describe(con, file)
+  src <- .conformance_source(con, file)
+  select_list <- vapply(seq_len(nrow(description)), function(index) {
+    name <- as.character(description$column_name[index])
+    quoted <- .conformance_sql_id(con, name)
+    hit <- match(toupper(name), toupper(changes$Column))
+    if (is.na(hit)) return(paste0(quoted, " AS ", quoted))
+    paste0(.conformance_select_expression(quoted, changes$ActualType[hit], changes$TargetDuck[hit]), " AS ", quoted)
+  }, character(1))
+  source_count <- .retry_io(function() DBI::dbGetQuery(con, paste0("SELECT COUNT(*) AS n FROM ", src))$n[1],
+                            label = "Count source rows")
+  changed_q <- vapply(changes$Column, function(x) .conformance_sql_id(con, x), character(1))
+  nonnull_sql <- function(from) paste0("SELECT ", paste0("COUNT(", changed_q, ")", collapse = ", "), " FROM ", from)
+  source_nonnull <- unlist(.retry_io(function() DBI::dbGetQuery(con, nonnull_sql(src)),
+                                     label = "Count non-null values")[1, ], use.names = FALSE)
+  temporary <- tempfile(pattern = paste0(basename(file), ".schema_rewrite_"), tmpdir = dirname(file), fileext = ".parquet")
+  on.exit(if (file.exists(temporary)) unlink(temporary), add = TRUE)
+  .retry_io(function() {
+    if (file.exists(temporary)) unlink(temporary)
+    DBI::dbExecute(con, paste0("COPY (SELECT ", paste(select_list, collapse = ", "), " FROM ", src, ") TO ",
+                               .conformance_sql_string(con, temporary), " (FORMAT PARQUET, COMPRESSION ZSTD)"))
+  }, label = paste0("Rewrite ", basename(file)))
+  temp_src <- .conformance_source(con, temporary)
+  temporary_count <- .retry_io(function() DBI::dbGetQuery(con, paste0("SELECT COUNT(*) AS n FROM ", temp_src))$n[1],
+                               label = "Count new rows")
+  if (is.na(temporary_count) || temporary_count != source_count) stop(
+    "row count changed (", source_count, " -> ", temporary_count, "); original kept", call. = FALSE)
+  temp_nonnull <- unlist(.retry_io(function() DBI::dbGetQuery(con, nonnull_sql(temp_src)),
+                                   label = "Count new non-null values")[1, ], use.names = FALSE)
+  if (!identical(as.numeric(temp_nonnull), as.numeric(source_nonnull))) stop(
+    "non-null counts changed during conversion; original kept", call. = FALSE)
+  new_types <- .conformance_describe(con, temporary)
+  new_type <- stats::setNames(as.character(new_types$column_type), toupper(new_types$column_name))
+  ok <- vapply(seq_len(nrow(changes)), function(i) .conformance_type_matches(
+    new_type[[toupper(changes$Column[i])]], changes$TargetType[i]), logical(1))
+  if (!all(ok)) stop("rewritten file does not have the required types; original kept", call. = FALSE)
+  backup <- paste0(file, ".pre_schema_update")
+  if (!file.rename(file, backup)) stop("could not create the backup of ", file, call. = FALSE)
+  if (!file.rename(temporary, file)) {
+    file.rename(backup, file)
+    stop("could not install the new file; original restored", call. = FALSE)
+  }
+  unlink(backup)
+  list(rows = source_count)
+}
+
+#' Converts the Parquet files of tables whose differences are value-safe
+#'
+#' Rewrites every file of each table that \code{\link{check_schema_conformance}}
+#' marked \code{CAST}, converting the columns that differ from the catalog.
+#' Each file is written to a temporary copy first and checked (row count,
+#' non-null counts of the converted columns, and the new types) before it
+#' replaces the original, which is kept until the replacement succeeds. A
+#' failure leaves the original in place and is reported in the result, and an
+#' interrupted run is recovered automatically the next time. A lock folder next
+#' to the Parquet folder prevents two rewrites at once. Run
+#' \code{\link{check_schema_conformance}} again afterwards to confirm.
+#' @param plan The list returned by \code{\link{check_schema_conformance}}.
+#' @param ParquetBasePath Character scalar. Root folder of the repository's
+#'   Parquet files.
+#' @param Databases Character vector. Databases to convert. Accepts
+#'   \code{NULL}, which converts every database with a \code{CAST} table.
+#'   Defaults to \code{NULL}.
+#' @param LogPath Character scalar. Optional log file. Defaults to \code{NULL}.
+#' @param RunId Character scalar. Optional run identifier for log lines.
+#'   Defaults to \code{NULL}.
+#' @param DuckDBTempPath Character scalar. Optional folder DuckDB may use for
+#'   temporary files. Defaults to \code{NULL}.
+#' @param Threads Integer scalar. DuckDB threads. Defaults to 1.
+#' @param ResultPath Character scalar. Optional CSV file for the result.
+#'   Defaults to \code{NULL}.
+#' @return Invisibly, a data.table with one row per file: \code{Database},
+#'   \code{TableName}, \code{File}, \code{Columns}, \code{Rows},
+#'   \code{Status} (\code{"rewritten"} or \code{"FAILED"}) and \code{Message}.
+#'   It has zero rows when no table needed a conversion.
+#' @seealso \code{\link{check_schema_conformance}},
+#'   \code{\link{reset_nonconforming_tables_for_reload}}
+#' @examples
+#' \donttest{
+#' root <- tempfile("casts_"); dir.create(root)
+#' table_dir <- file.path(root, "parquet", "REG_A", "year=2024")
+#' dir.create(table_dir, recursive = TRUE)
+#' arrow::write_parquet(data.frame(ID = 1:3, SCORE = c(1, 2, 3)),
+#'                      file.path(table_dir, "A_00001.parquet"))
+#' catalog <- data.frame(Database = "REG", TableName = "A", DuckDBTable = "REG_A",
+#'                       Column = c("ID", "SCORE"),
+#'                       CanonicalType = c("character", "integer"), Role = "data")
+#' catalog_path <- file.path(root, "TableSchemas.xlsx")
+#' openxlsx::write.xlsx(list(TableSchemas = catalog), catalog_path)
+#' plan <- check_schema_conformance(catalog_path, file.path(root, "parquet"))
+#' result <- apply_schema_casts(plan, file.path(root, "parquet"))
+#' result[, c("File", "Columns", "Rows", "Status")]
+#' check_schema_conformance(catalog_path, file.path(root, "parquet"))$tables$Action
+#' }
+#' @export
+apply_schema_casts <- function(plan, ParquetBasePath, Databases = NULL, LogPath = NULL, RunId = NULL,
+                               DuckDBTempPath = NULL, Threads = 1L, ResultPath = NULL) {
+  previous_run <- if (!is.null(LogPath) || !is.null(RunId)) begin_repository_run(LogPath, RunId) else NULL
+  if (!is.null(previous_run)) on.exit(restore_repository_run(previous_run), add = TRUE)
+  tables <- plan$tables
+  todo <- tables[tables$Action == "CAST" & (if (is.null(Databases)) TRUE else tables$Database %in% Databases)]
+  if (!nrow(todo)) {
+    log_msg("[SCHEMA CAST] No table needs a conversion.")
+    return(invisible(.conformance_empty_result()))
+  }
+  lock_dir <- file.path(dirname(ParquetBasePath), ".schema_rewrite.lock")
+  if (!dir.create(lock_dir, showWarnings = FALSE)) stop(
+    "A rewrite lock exists: ", lock_dir, ". If no rewrite is running, delete only that folder.", call. = FALSE)
+  on.exit(unlink(lock_dir, recursive = TRUE), add = TRUE)
+  con <- .conformance_open_connection(DuckDBTempPath, Threads)
+  on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
+  results <- list()
+  for (table_index in seq_len(nrow(todo))) {
+    tbl <- todo[table_index]
+    table_dir <- file.path(ParquetBasePath, tbl$DuckDBTable)
+    recovered <- tryCatch(.conformance_recover_interrupted(table_dir), error = function(error) conditionMessage(error))
+    if (is.character(recovered)) {
+      results[[length(results) + 1L]] <- data.table::data.table(
+        Database = tbl$Database, TableName = tbl$TableName, File = "", Columns = "",
+        Rows = NA_real_, Status = "FAILED", Message = recovered)
+      next
+    }
+    table_columns <- plan$columns[plan$columns$DuckDBTable == tbl$DuckDBTable]
+    for (file in unique(table_columns$FilePath)) {
+      changes <- table_columns[table_columns$FilePath == file, .(Column, ActualType, TargetType, TargetDuck)]
+      outcome <- tryCatch(.conformance_rewrite_file(con, file, changes), error = function(error) list(error = conditionMessage(error)))
+      failed <- !is.null(outcome$error)
+      results[[length(results) + 1L]] <- data.table::data.table(
+        Database = tbl$Database, TableName = tbl$TableName,
+        File = table_columns$File[table_columns$FilePath == file][1], Columns = paste(changes$Column, collapse = ","),
+        Rows = if (failed) NA_real_ else as.numeric(outcome$rows),
+        Status = if (failed) "FAILED" else "rewritten", Message = if (failed) outcome$error else "")
+      log_msg(sprintf("[SCHEMA CAST] [%s %d/%d] %s", tbl$DuckDBTable, table_index, nrow(todo),
+                      if (failed) paste0("FAILED ", basename(file), ": ", outcome$error) else
+                        paste0("rewrote ", basename(file), " (", paste(changes$Column, collapse = ", "), ")")))
+    }
+  }
+  results <- if (length(results)) data.table::rbindlist(results, fill = TRUE) else .conformance_empty_result()
+  if (!is.null(ResultPath)) data.table::fwrite(results, ResultPath)
+  invisible(results)
+}
+
+#' Sets aside the tables that cannot be converted so the load can rebuild them
+#'
+#' For each table that \code{\link{check_schema_conformance}} marked
+#' \code{RELOAD}, moves its Parquet folder to a backup folder (nothing is
+#' deleted) and clears its checkpoint and manifest entries with
+#' \code{\link{reset_table_for_reload}}. It does not read the sources itself:
+#' run the same load call you used for the first load
+#' (\code{\link{ParquetBackEndCreate}}), which loads only what the checkpoint
+#' lacks, then run \code{\link{check_schema_conformance}} again. Use
+#' \code{MaxCoerceNAPct = 0} for that reload, so that a value that cannot be
+#' converted stops the load instead of becoming \code{NA}. Every source file of
+#' every affected table must exist before anything is moved, and nothing is
+#' changed unless \code{Confirm} is \code{TRUE}.
+#' @param plan The list returned by \code{\link{check_schema_conformance}}.
+#' @param MDT Data frame. The master database table, as used by the load.
+#' @param MasterDBPath Character scalar. Root folder of the source files.
+#' @param ParquetBasePath Character scalar. Root folder of the repository's
+#'   Parquet files.
+#' @param CheckpointPath Character scalar. Path to the load checkpoint.
+#' @param ManifestPath Character scalar. Path to the manifest. Accepts
+#'   \code{NULL}. Defaults to \code{NULL}.
+#' @param BackupDir Character scalar. Folder that receives the moved Parquet
+#'   folders. Accepts \code{NULL}, which uses a new, time-stamped folder
+#'   \code{reload_backups/<time>} beside the Parquet folder. Defaults to
+#'   \code{NULL}.
+#' @param Databases Character vector. Databases to reset. Accepts \code{NULL},
+#'   which uses every database in \code{plan}. Defaults to \code{NULL}.
+#' @param Confirm Logical. Accepts \code{TRUE}, which allows the move and the
+#'   reset. Accepts \code{FALSE}, which only lists what would be rebuilt and
+#'   stops. Defaults to \code{FALSE}.
+#' @param LogPath Character scalar. Optional log file. Defaults to \code{NULL}.
+#' @param RunId Character scalar. Optional run identifier for log lines.
+#'   Defaults to \code{NULL}.
+#' @return Invisibly, a list with \code{reset} (the physical tables moved and
+#'   reset), \code{pending} (tables with no Parquet yet, which the next load
+#'   writes) and \code{BackupDir} (the backup folder, or \code{NA} when
+#'   nothing was moved).
+#' @seealso \code{\link{check_schema_conformance}}, \code{\link{ParquetBackEndCreate}},
+#'   \code{\link{reset_table_for_reload}}
+#' @examples
+#' \donttest{
+#' #### After check_schema_conformance() reports a table as RELOAD:
+#' # reset_nonconforming_tables_for_reload(
+#' #   plan, MDT, MasterDBPath, ParquetBasePath, CheckpointPath, ManifestPath,
+#' #   Confirm = TRUE)
+#' # ... then run the load call again, and check_schema_conformance() again.
+#' }
+#' @export
+reset_nonconforming_tables_for_reload <- function(plan, MDT, MasterDBPath, ParquetBasePath, CheckpointPath,
+                                                  ManifestPath = NULL, BackupDir = NULL, Databases = NULL,
+                                                  Confirm = FALSE, LogPath = NULL, RunId = NULL) {
+  previous_run <- if (!is.null(LogPath) || !is.null(RunId)) begin_repository_run(LogPath, RunId) else NULL
+  if (!is.null(previous_run)) on.exit(restore_repository_run(previous_run), add = TRUE)
+  tables <- plan$tables
+  if (!is.null(Databases)) tables <- tables[tables$Database %in% Databases]
+  reload <- tables[tables$Action == "RELOAD"]
+  pending <- tables[tables$Action == "NO_PARQUET"]
+  if (!nrow(reload) && !nrow(pending)) {
+    log_msg("[SCHEMA RELOAD] No table needs a reload.")
+    return(invisible(list(reset = character(), pending = character(), BackupDir = NA_character_)))
+  }
+  log_msg(sprintf("[SCHEMA RELOAD] Will rebuild from source: %s", if (nrow(reload)) paste(reload$DuckDBTable, collapse = ", ") else "(none)"))
+  log_msg(sprintf("[SCHEMA RELOAD] Will load, no Parquet yet: %s", if (nrow(pending)) paste(pending$DuckDBTable, collapse = ", ") else "(none)"))
+  # Every source file must exist BEFORE anything is moved or reset.
+  both <- rbind(reload, pending, fill = TRUE)
+  missing_sources <- character()
+  for (index in seq_len(nrow(both))) {
+    rows <- MDT[MDT$Database == both$Database[index] & MDT$TableName == both$TableName[index], , drop = FALSE]
+    sources <- file.path(MasterDBPath, rows$MDBDir, rows$Path)
+    missing_sources <- c(missing_sources, sources[!file.exists(sources)])
+  }
+  if (length(missing_sources)) stop("Source file(s) not found (nothing was changed):\n",
+                                    paste(utils::head(missing_sources, 20), collapse = "\n"), call. = FALSE)
+  if (!isTRUE(Confirm)) stop("The tables above would be rebuilt from source and nothing was changed. ",
+                             "Run again with Confirm = TRUE to proceed.", call. = FALSE)
+  moved <- character()
+  if (nrow(reload)) {
+    if (is.null(BackupDir)) BackupDir <- file.path(dirname(ParquetBasePath), "reload_backups", format(Sys.time(), "%Y%m%d_%H%M%S"))
+    dir.create(BackupDir, recursive = TRUE, showWarnings = FALSE)
+    for (index in seq_len(nrow(reload))) {
+      table_dir <- file.path(ParquetBasePath, reload$DuckDBTable[index])
+      if (dir.exists(table_dir) && !file.rename(table_dir, file.path(BackupDir, reload$DuckDBTable[index]))) {
+        stop("Could not move ", table_dir, " to the backup folder. Nothing further was changed.", call. = FALSE)
+      }
+      reset_table_for_reload(MDT = MDT, Database = reload$Database[index], TableName = reload$TableName[index],
+                             ParquetBasePath = ParquetBasePath, CheckpointPath = CheckpointPath,
+                             ManifestPath = ManifestPath, DryRun = FALSE, LogPath = LogPath)
+      moved <- c(moved, reload$DuckDBTable[index])
+    }
+    log_msg(sprintf("[SCHEMA RELOAD] Moved %d table(s) to %s. Run your load call again (use MaxCoerceNAPct = 0), then check again.",
+                    length(moved), BackupDir))
+  }
+  invisible(list(reset = moved, pending = pending$DuckDBTable, BackupDir = if (nrow(reload)) BackupDir else NA_character_))
+}
+
+################################################################################
 #### Schema registry ############################################################
 ################################################################################
 #' Builds the default repository schema registry
@@ -13915,6 +14454,23 @@ GetSchemaObservations <- function(ObservationPath, Database = NULL, TableName = 
        Reason = reason, RequiresReview = risk != "Lossless", HasWarning = has_warning)
 }
 
+# TRUE when the survey evidence proves that numeric values can be stored as the integer type a policy declares:
+# every sampled value is a whole number, none exceeds exact floating-point precision, and for 32-bit integers
+# the observed minimum and maximum are inside the integer range. Without that evidence it is FALSE, so a policy
+# is never trusted to narrow a column the survey could not vouch for.
+.schema_integral_evidence <- function(rows, observed, policy_type) {
+  if (!policy_type %in% c("integer", "int64")) return(FALSE)
+  if (!length(observed) || !all(observed %in% c("logical", "integer", "int64", "numeric"))) return(FALSE)
+  if (!"FractionalCount" %in% names(rows) || all(is.na(rows$FractionalCount))) return(FALSE)
+  if (sum(rows$FractionalCount, na.rm = TRUE) != 0) return(FALSE)
+  if ("PrecisionRisk" %in% names(rows) && any(rows$PrecisionRisk %in% TRUE, na.rm = TRUE)) return(FALSE)
+  if (identical(policy_type, "int64")) return(TRUE)
+  if (!all(c("Minimum", "Maximum") %in% names(rows))) return(FALSE)
+  low <- suppressWarnings(as.numeric(rows$Minimum)); high <- suppressWarnings(as.numeric(rows$Maximum))
+  low <- low[is.finite(low)]; high <- high[is.finite(high)]
+  length(low) > 0L && length(high) > 0L && min(low) >= -2147483647 && max(high) <= 2147483647
+}
+
 .schema_policy_resolution <- function(rows, recommendation, policy_hit = NULL) {
   data_type <- normalize_type_name(recommendation$RecommendedType)
   if (is.null(policy_hit) || nrow(policy_hit) == 0L) {
@@ -13930,6 +14486,10 @@ GetSchemaObservations <- function(ObservationPath, Database = NULL, TableName = 
   policy_type <- normalize_type_name(policy_hit$CanonicalType[1])
   observed <- unique(rows$ObservedType[!is.na(rows$ObservedType) & rows$ObservedType != "unknown"])
   safe_policy <- identical(promote_types(c(observed, policy_type)), policy_type)
+  #### Whole numbers stored as doubles (a 0/1 flag read as 0.0/1.0) hold an integer type without loss; the survey
+  #### records that, so the policy type is applied without a decision.
+  whole_numbers <- !safe_policy && .schema_integral_evidence(rows, observed, policy_type)
+  if (whole_numbers) safe_policy <- TRUE
   conflict <- !identical(policy_type, data_type)
   status <- if (!conflict) {
     "matched"
@@ -13945,7 +14505,9 @@ GetSchemaObservations <- function(ObservationPath, Database = NULL, TableName = 
   if (conflict) {
     risk <- recommendation$Risk
     reason <- paste0(reason, " Policy ", pattern, " proposes ", policy_type, "; ",
-                     if (safe_policy) "the lossless policy promotion was applied automatically and is recorded in PolicyReport."
+                     if (whole_numbers) paste0("every sampled value is a whole number, so ", policy_type,
+                                               " was applied automatically and is recorded in PolicyReport.")
+                     else if (safe_policy) "the lossless policy promotion was applied automatically and is recorded in PolicyReport."
                      else paste0("the observed evidence does not support that coercion, so the data-derived type was retained. ",
                                  "Select Accept to keep it, or choose ", policy_type, " as ApprovedType and select Override."))
   }
