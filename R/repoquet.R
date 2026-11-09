@@ -8118,9 +8118,12 @@ audit_repository <- function(MDT, ParquetBasePath, CheckpointPath, ManifestPath 
 #' through a row a person authors.
 #' @param profile Character scalar. Accepts one of two values.
 #'   \code{"generic"} returns an empty, zero row template with no naming
-#'   assumption. \code{"hcup"} returns the built in HCUP conventions for
-#'   merge keys, diagnosis and procedure codes, and survey weights.
-#'   Defaults to \code{"generic"}.
+#'   assumption. \code{"hcup"} returns the HCUP conventions shipped with the
+#'   package in \code{inst/extdata/hcup_schema_rules.csv}: merge keys and
+#'   hospital identifiers, diagnosis, procedure and other code columns,
+#'   survey weights, costs and charges, and the Epic variance decomposition
+#'   tables (scoped to the \code{Epic} database). The first matching row
+#'   wins, so the order of the rows matters. Defaults to \code{"generic"}.
 #' @return A data.table with columns \code{Profile}, \code{ColumnPattern},
 #'   \code{CanonicalType}, \code{Role}, \code{AppliesTo}, and \code{Notes}.
 #'   Has zero rows when \code{profile} is \code{"generic"}.
@@ -8140,57 +8143,82 @@ build_default_schema_registry <- function(profile = c("generic", "hcup")) {
       CanonicalType = character(), Role = character(),
       AppliesTo = character(), Notes = character()))
   }
-  data.table::data.table(
-    Profile = "hcup",
-    ColumnPattern = c(
-      "^KEY$", "^KEY_[A-Z0-9]+$", "^HOSP_NIS$", "^HOSPID$", "^HOSP_[A-Z0-9]+$",
-      "^VISITLINK$", "^NRD_VISITLINK$", "^DIED$", "^AGE$", "^LOS$",
-      "^DISCWT$", "^TRENDWT$", "^HOSPWT$", "^PAY[0-9]$", "^PAY[0-9]_X$",
-      "^DX[0-9]+$", "^I10_DX[0-9]+$", "^PR[0-9]+$", "^I10_PR[0-9]+$",
-      "^ECODE[0-9]+$", "^CPT$", "^CPT[0-9]*$", "^ICD.*CODE$", "^.*_CODE$"
-    ),
-    CanonicalType = c(
-      "character", "character", "character", "character", "character",
-      "character", "character", "integer", "numeric", "numeric",
-      "numeric", "numeric", "numeric", "integer", "character",
-      "character", "character", "character", "character",
-      "character", "character", "character", "character", "character"
-    ),
-    Role = c(
-      "join_key", "join_key", "join_key", "join_key", "join_key",
-      "join_key", "join_key", "analytic", "analytic", "analytic",
-      "weight", "weight", "weight", "categorical", "code",
-      "code", "code", "code", "code",
-      "code", "code", "code", "code", "code"
-    ),
-    AppliesTo = "all",
-    Notes = c(
-      "Discharge/stay identifier; preserve exact formatting.",
-      "Database-specific key identifier; preserve exact formatting.",
-      "NIS hospital identifier; preserve exact formatting.",
-      "Hospital identifier; preserve exact formatting.",
-      "Database-specific hospital identifier; preserve exact formatting.",
-      "NRD visit linkage identifier; preserve exact formatting.",
-      "NRD visit linkage identifier; preserve exact formatting.",
-      "Death indicator.",
-      "Age in years; store as numeric across sources.",
-      "Length of stay is analytic; numeric supports aggregation.",
-      "Survey/discharge weight.",
-      "Trend weight.",
-      "Hospital weight.",
-      "Primary payer category.",
-      "Payer/code text field; preserve leading zeros and symbols.",
-      "Diagnosis code; preserve leading zeros/decimals/alphanumeric values.",
-      "ICD-10 diagnosis code; preserve alphanumeric values.",
-      "Procedure code; preserve leading zeros/decimals/alphanumeric values.",
-      "ICD-10 procedure code; preserve alphanumeric values.",
-      "External cause code.",
-      "CPT code; preserve leading zeros.",
-      "CPT code; preserve leading zeros.",
-      "Generic ICD/code field.",
-      "Generic code field."
-    )
-  )
+  rules <- data.table::fread(.packaged_extdata_file("hcup_schema_rules.csv"), encoding = "UTF-8",
+                             colClasses = "character", na.strings = "", data.table = TRUE)
+  expected <- c("Profile", "ColumnPattern", "CanonicalType", "Role", "AppliesTo", "Notes")
+  if (!identical(names(rules), expected) || nrow(rules) == 0L) {
+    stop("The packaged hcup_schema_rules.csv must have the columns ",
+         paste(expected, collapse = ", "), " and at least one rule.", call. = FALSE)
+  }
+  rules
+}
+
+# Locates a data file shipped in the package's inst/extdata folder. The installed
+# package is searched first, then an inst/extdata folder at or above the working
+# directory or REPOQUET_ROOT, which is how the source tree is found during
+# development and testing.
+.packaged_extdata_file <- function(file) {
+  installed <- system.file("extdata", file, package = "repoquet")
+  roots <- unique(c(Sys.getenv("REPOQUET_ROOT", unset = ""), getwd()))
+  development <- character()
+  for (root in roots[nzchar(roots)]) {
+    directory <- normalizePath(root, winslash = "/", mustWork = FALSE)
+    for (step in 1:8) {
+      candidate <- file.path(directory, "inst", "extdata", file)
+      if (file.exists(candidate)) { development <- c(development, candidate); break }
+      parent <- dirname(directory)
+      if (identical(parent, directory)) break
+      directory <- parent
+    }
+  }
+  found <- unique(c(if (nzchar(installed)) installed, development))
+  found <- found[file.exists(found)]
+  if (!length(found)) stop(sprintf("Packaged data file is unavailable: %s", file), call. = FALSE)
+  found[1]
+}
+
+# Identifies a schema registry rule by its pattern and scope.
+.schema_rule_key <- function(pattern, applies_to) {
+  applies <- trimws(as.character(applies_to))
+  applies[is.na(applies) | !nzchar(applies)] <- "all"
+  paste(tolower(trimws(as.character(pattern))), tolower(applies), sep = "||")
+}
+
+# Adds the shipped hcup rules that an existing schema registry lacks. A registry
+# that already exists is a person's file, so it is never replaced. Each rule in
+# build_default_schema_registry("hcup") whose pattern and scope are not already
+# present is appended after the existing rows, so a person's own rows, including
+# an edited copy of a shipped rule, take precedence. The registry is backed up
+# once, as <name>.pre_hcup.<ext>, before the first change, and a registry that
+# already holds every shipped rule is left untouched. Returns, invisibly, the
+# number of rules added.
+install_shipped_schema_rules <- function(SchemaRegistryPath, profile = "hcup") {
+  if (!identical(profile, "hcup") || is.null(SchemaRegistryPath) || !file.exists(SchemaRegistryPath)) {
+    return(invisible(0L))
+  }
+  existing <- if (is_excel_workbook_path(SchemaRegistryPath)) {
+    openxlsx::read.xlsx(SchemaRegistryPath, sheet = 1)
+  } else {
+    data.table::fread(SchemaRegistryPath)
+  }
+  existing <- data.table::as.data.table(existing)
+  #### A registry without the required columns is reported by load_schema_registry(), not repaired here.
+  if (!all(c("ColumnPattern", "CanonicalType") %in% names(existing))) return(invisible(0L))
+  if (!"AppliesTo" %in% names(existing)) existing[, AppliesTo := "all"]
+  shipped <- build_default_schema_registry("hcup")
+  missing_rules <- shipped[!.schema_rule_key(ColumnPattern, AppliesTo) %in%
+                             .schema_rule_key(existing$ColumnPattern, existing$AppliesTo)]
+  if (nrow(missing_rules) == 0L) return(invisible(0L))
+  backup <- paste0(tools::file_path_sans_ext(SchemaRegistryPath), ".pre_hcup.", tools::file_ext(SchemaRegistryPath))
+  if (!file.exists(backup) && !file.copy(SchemaRegistryPath, backup)) {
+    stop("Could not back up the schema registry before adding rules: ", backup, call. = FALSE)
+  }
+  for (column in names(existing)) data.table::set(existing, j = column, value = as.character(existing[[column]]))
+  merged <- data.table::rbindlist(list(existing, missing_rules), fill = TRUE, use.names = TRUE)
+  write_schema_registry(merged, SchemaRegistryPath)
+  log_msg(sprintf("[SCHEMA REGISTRY] Added %d shipped hcup rule(s) to %s (backup: %s).",
+                  nrow(missing_rules), SchemaRegistryPath, basename(backup)))
+  invisible(nrow(missing_rules))
 }
 
 #' Applies schema policies that cannot be overridden
@@ -12458,8 +12486,11 @@ generate_real_world_repository <- function(
 #'   \code{"generic"} or \code{"hcup"}, passed to
 #'   \code{\link{load_schema_registry}} when seeding a new schema
 #'   registry. \code{"hcup"} preloads column name patterns for the
-#'   HCUP hospital discharge family of databases. Defaults to
-#'   \code{"generic"}.
+#'   HCUP hospital discharge family of databases. When \code{create} is
+#'   \code{TRUE} and the registry already exists, \code{"hcup"} also adds
+#'   the shipped rules it lacks, after the existing rows so that those
+#'   rows keep precedence, and saves the registry once beforehand as
+#'   \code{<name>.pre_hcup.<ext>}. Defaults to \code{"generic"}.
 #' @return A named list of resolved paths: \code{FormattedDBPath},
 #'   \code{ParquetBasePath}, \code{CheckpointPath}, \code{LogPath},
 #'   \code{DownloadCachePath}, \code{SchemaDir}, \code{SchemaRegistryPath},
@@ -12518,6 +12549,12 @@ RepositoryInitialize <- function(FormattedDBPath, ParquetBasePath = file.path(Fo
     for (d in dirs) dir.create(d, recursive = TRUE, showWarnings = FALSE)
     if (!file.exists(SchemaRegistryPath)) {
       load_schema_registry(SchemaRegistryPath = SchemaRegistryPath, create_if_missing = TRUE, profile = profile)
+    } else if (identical(profile, "hcup")) {
+      #### A registry already in use gains the shipped rules it lacks; a locked or unreadable file only warns.
+      tryCatch(withCallingHandlers(install_shipped_schema_rules(SchemaRegistryPath, profile),
+                                   warning = function(w) invokeRestart("muffleWarning")),
+               error = function(e) warning("Could not add the shipped hcup schema rules to ", SchemaRegistryPath,
+                                           ": ", conditionMessage(e), call. = FALSE))
     }
     if (!file.exists(DataContractPath)) load_data_contracts(DataContractPath, create_if_missing = TRUE)
   }
@@ -13875,7 +13912,7 @@ GetSchemaObservations <- function(ObservationPath, Database = NULL, TableName = 
   if (has_warning && risk == "Lossless") risk <- "Review"
   if (has_warning) reason <- paste(reason, "Reader warnings require confirmation.")
   list(RecommendedType = normalize_type_name(recommended), Risk = risk,
-       Reason = reason, RequiresReview = risk != "Lossless")
+       Reason = reason, RequiresReview = risk != "Lossless", HasWarning = has_warning)
 }
 
 .schema_policy_resolution <- function(rows, recommendation, policy_hit = NULL) {
@@ -13904,23 +13941,85 @@ GetSchemaObservations <- function(ObservationPath, Database = NULL, TableName = 
   final_type <- if (safe_policy) policy_type else data_type
   risk <- recommendation$Risk
   reason <- recommendation$Reason
+  pattern <- as.character(policy_hit$ColumnPattern[1])
   if (conflict) {
     risk <- recommendation$Risk
-    reason <- paste0(reason, " Policy ", as.character(policy_hit$ColumnPattern[1]),
-                     " proposes ", policy_type, "; ",
+    reason <- paste0(reason, " Policy ", pattern, " proposes ", policy_type, "; ",
                      if (safe_policy) "the lossless policy promotion was applied automatically and is recorded in PolicyReport."
-                     else "the observed evidence does not support that coercion, so the data-derived type was retained and the conflict is recorded in PolicyReport.")
+                     else paste0("the observed evidence does not support that coercion, so the data-derived type was retained. ",
+                                 "Select Accept to keep it, or choose ", policy_type, " as ApprovedType and select Override."))
+  }
+  #### A rule the data supports resolves the column, even where the data alone would have asked for review (no    ####
+  #### values, a precision risk, mixed evidence). Reader warnings still need a person, and a rule the data        ####
+  #### contradicts is a decision: keep the data type or override it.                                              ####
+  requires_review <- if (!safe_policy) TRUE else isTRUE(recommendation$HasWarning)
+  if (safe_policy && !requires_review && isTRUE(recommendation$RequiresReview)) {
+    reason <- paste0(reason, " Policy ", pattern, " declares ", policy_type, ", so no review is needed.")
   }
   list(
     DataRecommendedType = data_type, RecommendedType = final_type,
     Risk = risk, Reason = reason,
-    RequiresReview = isTRUE(recommendation$RequiresReview),
+    RequiresReview = requires_review,
     Role = if ("Role" %in% names(policy_hit)) as.character(policy_hit$Role[1]) else NULL,
     PolicyPattern = as.character(policy_hit$ColumnPattern[1]),
     PolicyType = policy_type,
     PolicyRole = if ("Role" %in% names(policy_hit)) as.character(policy_hit$Role[1]) else NA_character_,
     PolicyStatus = status, PolicyConflict = conflict
   )
+}
+
+# One row per policy rule, in the order the rules are tried, saying how it was used by this survey: how many
+# columns it was the first matching rule for, and how many of those agreed with the data, were promoted
+# losslessly, or were contradicted by it. A rule that matched nothing, a rule hidden behind an identical
+# earlier one, and the number of columns no rule covers are listed too. Returns a zero-row table when no
+# rules were supplied or the registry lacks the columns needed.
+.schema_rule_coverage <- function(registry, policy_rules) {
+  empty <- data.table::data.table(
+    RuleOrder = integer(), ColumnPattern = character(), AppliesTo = character(),
+    CanonicalType = character(), Role = character(), ColumnsMatched = integer(),
+    Agreed = integer(), LosslessPromotion = integer(), Contradicted = integer(),
+    RuleStatus = character())
+  if (is.null(policy_rules) || is.null(registry)) return(empty)
+  rules <- data.table::as.data.table(policy_rules)
+  registry <- data.table::as.data.table(registry)
+  if (nrow(rules) == 0L || nrow(registry) == 0L || !"ColumnPattern" %in% names(rules) ||
+      !all(c("Database", "TableName", "Column") %in% names(registry))) return(empty)
+  field <- function(table, name) if (name %in% names(table)) as.character(table[[name]]) else rep(NA_character_, nrow(table))
+  applies <- field(rules, "AppliesTo")
+  columns <- canonical_colnames(as.character(registry$Column))
+  status <- field(registry, "PolicyStatus")
+  assigned <- rep(NA_integer_, nrow(registry))
+  for (i in seq_len(nrow(rules))) {
+    open <- which(is.na(assigned))
+    if (length(open) == 0L) break
+    hit <- grepl(rules$ColumnPattern[i], columns[open], perl = TRUE, ignore.case = TRUE)
+    if (!any(hit)) next
+    candidates <- open[hit]
+    in_scope <- vapply(candidates, function(row) {
+      schema_registry_applies(applies[i], database = registry$Database[row], table_name = registry$TableName[row])
+    }, logical(1))
+    assigned[candidates[in_scope]] <- i
+  }
+  keys <- .schema_rule_key(rules$ColumnPattern, applies)
+  coverage <- data.table::data.table(
+    RuleOrder = seq_len(nrow(rules)), ColumnPattern = as.character(rules$ColumnPattern),
+    AppliesTo = ifelse(is.na(applies) | !nzchar(applies), "all", applies),
+    CanonicalType = field(rules, "CanonicalType"), Role = field(rules, "Role"),
+    ColumnsMatched = tabulate(assigned[!is.na(assigned)], nbins = nrow(rules)),
+    Agreed = tabulate(assigned[status %in% "matched" & !is.na(assigned)], nbins = nrow(rules)),
+    LosslessPromotion = tabulate(assigned[status %in% "lossless_policy_promotion" & !is.na(assigned)], nbins = nrow(rules)),
+    Contradicted = tabulate(assigned[status %in% "explicit_override_required" & !is.na(assigned)], nbins = nrow(rules)))
+  first_use <- match(keys, keys)
+  coverage[, RuleStatus := ifelse(
+    first_use != RuleOrder, sprintf("Same pattern and scope as rule %d; this row is never used.", first_use),
+    ifelse(Contradicted > 0L,
+           sprintf("The data contradicts this rule in %d column(s); decide them in ColumnDecisions.", Contradicted),
+           ifelse(ColumnsMatched == 0L, "Matched no column in this survey.", "OK")))]
+  uncovered <- sum(is.na(assigned))
+  rbind(coverage, data.table::data.table(
+    RuleOrder = NA_integer_, ColumnPattern = "(no rule matched)", AppliesTo = "", CanonicalType = "", Role = "",
+    ColumnsMatched = uncovered, Agreed = NA_integer_, LosslessPromotion = NA_integer_, Contradicted = NA_integer_,
+    RuleStatus = "The type of these columns comes from the data."))
 }
 
 .schema_compatibility_review <- function(registry) {
@@ -14448,7 +14547,7 @@ RecommendRepositorySchema <- function(survey = NULL, ObservationPath = NULL,
                  history = history, source_issues = source_issues,
                  value_preview = value_profiles$details,
                  dictionary_review = dictionary_review,
-                 summary = summary,
+                 summary = summary, policy_rules = schema_registry,
                  ObservationPath = ObservationPath %||% survey$ObservationPath,
                  ValuePreviewMaxDistinct = ValuePreviewMaxDistinct,
                  ValuePreviewTypes = ValuePreviewTypes,
@@ -14554,7 +14653,10 @@ RecommendRepositorySchema <- function(survey = NULL, ObservationPath = NULL,
 #' \code{StartHere} summary tab, an action tab limited to a row that
 #' still needs a decision, \code{ColumnDecisions},
 #' \code{CompatibilityDecisions}, \code{DictionaryReview}, a
-#' reference overview tab, and a hidden, machine readable
+#' reference overview tab, a \code{PolicyReport} of differences between the
+#' data and the schema policy rules, a \code{RuleCoverage} tab showing how
+#' each rule was used (columns matched, agreed, promoted or contradicted,
+#' rules that matched nothing, and the number of columns no rule covers), and a hidden, machine readable
 #' \code{Registry}, \code{CompatibilityRegistry},
 #' \code{DictionaryRegistry}, and \code{Settings} tab, consumed by
 #' \code{\link{FinalizeRepositorySchema}}. When
@@ -14693,16 +14795,19 @@ WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = 
       c(intersect(first, names(dictionary)), setdiff(names(dictionary), first)))
   }
   policy_report <- registry[PolicyConflict %in% TRUE, .(
-    ActionRequired = "No - informational only",
+    ActionRequired = ifelse(PolicyStatus == "lossless_policy_promotion",
+                            "No - informational only",
+                            "Yes - decide in ColumnDecisions"),
     Database, TableName, DuckDBTable, Column, ObservedTypes,
     DataRecommendedType, PolicyType, RecommendedType,
     PolicyPattern, PolicyRole, PolicyStatus,
     PolicyApplied = PolicyStatus == "lossless_policy_promotion",
     Outcome = ifelse(PolicyStatus == "lossless_policy_promotion",
                      "Lossless policy type applied automatically",
-                     "Policy not applied; data-derived type retained"),
+                     "Policy not applied; data-derived type retained until you decide"),
     RecommendationReason
   )]
+  rule_coverage <- .schema_rule_coverage(registry, proposal$policy_rules)
   source_issues <- data.table::copy(data.table::as.data.table(
     proposal$source_issues %||% data.table::data.table()))
   source_errors <- if ("SurveyStatus" %in% names(source_issues)) {
@@ -14789,10 +14894,10 @@ WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = 
     Worksheet = c(
       "StartHere", "ColumnDecisions", "CompatibilityDecisions", "DictionaryReview", "SourceIssues",
       "ColumnOverview", "CompatibilityOverview", "TypeHistory", "ValuePreview", "PolicyReport",
-      "Registry", "CompatibilityRegistry", "DictionaryRegistry", "Settings"),
+      "RuleCoverage", "Registry", "CompatibilityRegistry", "DictionaryRegistry", "Settings"),
     Category = c(
       "Guide", "Action", "Action", "Action", "Validation", "Reference", "Reference",
-      "Reference", "Reference", "Reference", "System", "System", "System", "System"),
+      "Reference", "Reference", "Reference", "Reference", "System", "System", "System", "System"),
     Contains = c(
       "Current workflow status, required actions, and this workbook guide.",
       "Only columns whose recommended type needs an explicit decision.",
@@ -14803,7 +14908,8 @@ WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = 
       "Every compatibility candidate and its proposed common type and role.",
       "Detailed evidence for columns whose types changed or whose readers raised warnings.",
       "Low-cardinality character, integer, int64, and logical values with counts and partition coverage.",
-      "Informational differences between data-derived recommendations and optional policies.",
+      "Differences between data-derived recommendations and policy rules. A rule the data contradicts is also listed in ColumnDecisions.",
+      "How each policy rule was used: columns matched, agreed, promoted or contradicted, rules that matched nothing, and columns no rule covers.",
       "Complete machine-readable column registry used during finalization.",
       "Complete machine-readable compatibility registry used during finalization.",
       "Unedited semantic dictionary evidence used during finalization.",
@@ -14820,6 +14926,7 @@ WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = 
       "Review proposed shared types; make decisions only in CompatibilityDecisions.",
       "Use for investigation; no edits are required.",
       "Use to understand codes and how values change across partitions; no edits are required.",
+      "Review when useful; decide a contradicted rule in ColumnDecisions, not here.",
       "Review when useful; no decisions are required here.",
       "Do not edit.", "Do not edit.", "Do not edit.", "Do not edit."),
     Status = c(
@@ -14828,11 +14935,11 @@ WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = 
       if (n_compatibility_decisions > 0L) "ACTION REQUIRED" else "COMPLETE",
       if (n_dictionary_decisions > 0L) "ACTION REQUIRED" else "COMPLETE",
       if (n_source_errors > 0L) "BLOCKED" else if (nrow(source_issues) > 0L) "WARNINGS" else "COMPLETE",
-      rep("REFERENCE", 5L), rep("HIDDEN", 4L)),
+      rep("REFERENCE", 6L), rep("HIDDEN", 4L)),
     Rows = c(
       nrow(start_here), n_column_decisions, n_compatibility_decisions, nrow(dictionary),
       nrow(source_issues), nrow(column_overview), nrow(compatibility_overview),
-      nrow(type_history), nrow(value_preview), nrow(policy_report), nrow(registry),
+      nrow(type_history), nrow(value_preview), nrow(policy_report), nrow(rule_coverage), nrow(registry),
       nrow(compatibility), nrow(dictionary), nrow(settings))
   )
   dir.create(dirname(SchemaReviewPath), recursive = TRUE, showWarnings = FALSE)
@@ -14926,6 +15033,8 @@ WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = 
     empty_display("INFORMATIONAL", "No low-cardinality values or source labels were available for a semantic dictionary.")
   policy_report_display <- if (nrow(policy_report) > 0L) policy_report else
     empty_display("INFORMATIONAL", "No policy conflicts were identified.")
+  rule_coverage_display <- if (nrow(rule_coverage) > 0L) rule_coverage else
+    empty_display("INFORMATIONAL", "No schema policy rules were supplied for this survey.")
   sheets <- list(ColumnDecisions = column_decisions_display,
                  CompatibilityDecisions = compatibility_decisions_display,
                  DictionaryReview = dictionary_display,
@@ -14935,6 +15044,7 @@ WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = 
                  TypeHistory = type_history_display,
                  ValuePreview = value_preview_display,
                  PolicyReport = policy_report_display,
+                 RuleCoverage = rule_coverage_display,
                  Registry = registry,
                  CompatibilityRegistry = compatibility,
                  DictionaryRegistry = dictionary,
@@ -14945,7 +15055,7 @@ WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = 
     tab_colour <- if (sheet %in% c("ColumnDecisions", "CompatibilityDecisions", "DictionaryReview")) "#FFC000" else
       if (sheet == "SourceIssues" && n_source_errors > 0L) "#C00000" else
       if (sheet %in% c("ColumnOverview", "CompatibilityOverview", "TypeHistory", "ValuePreview")) "#5B9BD5" else
-      if (sheet == "PolicyReport") "#A5A5A5" else "#D9E1F2"
+      if (sheet %in% c("PolicyReport", "RuleCoverage")) "#A5A5A5" else "#D9E1F2"
     openxlsx::addWorksheet(wb, sheet, gridLines = FALSE, tabColour = tab_colour)
     value <- data.table::as.data.table(sheets[[sheet]])
     if (nrow(value) > 0L) {
@@ -14958,7 +15068,7 @@ WriteSchemaProposal <- function(proposal, SchemaReviewPath, PreserveDecisions = 
     widths <- pmin(45, pmax(12, nchar(names(value)) + 2))
     if (ncol(value) > 0L) openxlsx::setColWidths(wb, sheet, cols = seq_len(ncol(value)), widths = widths)
     wide_cols <- which(names(value) %in% c(
-      "RequiredAction", "RecommendationReason", "TypeHistory", "Tables",
+      "RequiredAction", "RecommendationReason", "TypeHistory", "Tables", "RuleStatus",
       "SourcePath", "SurveyMessage", "ReaderWarning", "Outcome",
        "ObservedValues", "Value", "ApprovedLabel", "ProposedLabel", "VariableLabel",
        "EvidenceLabels", "EvidenceSources", "PartitionsObserved"))

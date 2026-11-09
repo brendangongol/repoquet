@@ -55,7 +55,7 @@ test_that("an unconfigured short record remains a structural warning", {
   expect_true(recommendation$RequiresReview)
 })
 
-test_that("unsafe policies remain visible but retain the safe data recommendation", {
+test_that("unsafe policies retain the safe data recommendation and ask for a decision", {
   internal <- function(name) get(name, envir = environment(PrepareSchemaRegistry))
   rows <- data.table::data.table(
     ObservedType = "character", ReaderWarning = NA_character_,
@@ -71,7 +71,9 @@ test_that("unsafe policies remain visible but retain the safe data recommendatio
   expect_identical(resolved$PolicyType, "numeric")
   expect_identical(resolved$PolicyStatus, "explicit_override_required")
   expect_true(resolved$PolicyConflict)
-  expect_false(resolved$RequiresReview)
+  #### A rule the data contradicts is a decision: keep the data type, or override it.
+  expect_true(resolved$RequiresReview)
+  expect_match(resolved$Reason, "Select Accept to keep it, or choose numeric as ApprovedType and select Override")
   expect_identical(resolved$Risk, "Lossless")
 })
 

@@ -141,3 +141,39 @@
   unless the file's size, modification time or encoding changed or the read is a retry.
 * The `[PARQUET STREAM RECOVERY]` log line now ends with `Cause:` and the error that
   forced the piece to restart, so an interrupted write can be diagnosed from the log.
+* The `hcup` schema profile is now a shipped, ordered rule file,
+  `inst/extdata/hcup_schema_rules.csv`, read by `build_default_schema_registry("hcup")`
+  (the first matching row wins). It holds 57 rules: the 38 HCUP rules a project had
+  been installing by hand, the built-in diagnosis, procedure, CPT and payer-text
+  rules, and rules for the Epic variance decomposition tables (date keys as integers,
+  other keys as 64-bit integers, ICD and DRG codes as text, `LocationEpicid` as text,
+  0/1 flags and whole-number age and length of stay as integers, timestamps), which
+  apply only to the `Epic` database. A timestamp rule never turns text into a
+  timestamp; a column that was not read as one stays text.
+* Two over-broad built-in `hcup` rules were retired: `^HOSP_[A-Z0-9]+$` typed hospital
+  characteristics such as `HOSP_TEACH` and `HOSP_CONTROL` as text, and `^.*_CODE$` typed
+  integer category codes in NTDB and TQP (for example `ANGIOGRAPHY_CODE`) as text.
+  Narrower rules cover the hospital identifiers. A registry that already contains
+  either rule keeps it; delete the row to adopt the change.
+* `RepositoryInitialize(profile = "hcup")` now adds the shipped rules that an
+  existing schema registry lacks. They are appended after the registry's own rows,
+  so a person's rows, including an edited copy of a shipped rule, keep precedence.
+  The registry is saved once, as `<name>.pre_hcup.<ext>`, before the first change,
+  a registry that already holds every shipped rule is not rewritten, and a locked or
+  unreadable registry only produces a warning. The `generic` profile is unchanged.
+* A schema policy rule now resolves a column that the data supports. Before, a column
+  with a matching rule still went to `ColumnDecisions` whenever the data alone was
+  doubtful (no usable values, integers beyond exact floating-point precision, mixed
+  evidence), even though the rule had declared its type. Such a column is now
+  auto-approved and its reason says which rule declared the type. Reader warnings
+  still ask for confirmation.
+* A rule that the data contradicts (for example `DIED` declared `integer` but read as
+  text, or `PAY1` read as numeric) is now a decision in `ColumnDecisions` instead of
+  being kept silently. The data-derived type is retained until you choose Accept, or
+  choose the rule's type as `ApprovedType` and Override. This surfaces a problem such as
+  a categorical code stored as text in some years at survey time, instead of after a load.
+* `SchemaReview.xlsx` has a new `RuleCoverage` tab with one row per rule: its order,
+  pattern, scope, type, the columns it was the first match for, how many agreed, were
+  promoted or were contradicted, and a status (a rule that matched nothing, or one that
+  repeats an earlier pattern and scope, is called out). A last row counts the columns no
+  rule covers. `PolicyReport` now says which of its rows need a decision.

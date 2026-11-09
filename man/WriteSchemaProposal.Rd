@@ -31,7 +31,10 @@ the \code{SchemaReview.xlsx} workbook used for human review: a
 \code{StartHere} summary tab, an action tab limited to a row that
 still needs a decision, \code{ColumnDecisions},
 \code{CompatibilityDecisions}, \code{DictionaryReview}, a
-reference overview tab, and a hidden, machine readable
+reference overview tab, a \code{PolicyReport} of differences between the
+data and the schema policy rules, a \code{RuleCoverage} tab showing how
+each rule was used (columns matched, agreed, promoted or contradicted,
+rules that matched nothing, and the number of columns no rule covers), and a hidden, machine readable
 \code{Registry}, \code{CompatibilityRegistry},
 \code{DictionaryRegistry}, and \code{Settings} tab, consumed by
 \code{\link{FinalizeRepositorySchema}}. When

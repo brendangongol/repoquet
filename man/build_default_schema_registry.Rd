@@ -9,9 +9,12 @@ build_default_schema_registry(profile = c("generic", "hcup"))
 \arguments{
 \item{profile}{Character scalar. Accepts one of two values.
 \code{"generic"} returns an empty, zero row template with no naming
-assumption. \code{"hcup"} returns the built in HCUP conventions for
-merge keys, diagnosis and procedure codes, and survey weights.
-Defaults to \code{"generic"}.}
+assumption. \code{"hcup"} returns the HCUP conventions shipped with the
+package in \code{inst/extdata/hcup_schema_rules.csv}: merge keys and
+hospital identifiers, diagnosis, procedure and other code columns,
+survey weights, costs and charges, and the Epic variance decomposition
+tables (scoped to the \code{Epic} database). The first matching row
+wins, so the order of the rows matters. Defaults to \code{"generic"}.}
 }
 \value{
 A data.table with columns \code{Profile}, \code{ColumnPattern},

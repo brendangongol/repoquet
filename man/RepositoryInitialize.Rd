@@ -78,8 +78,11 @@ returns the paths. Defaults to \code{TRUE}.}
 \code{"generic"} or \code{"hcup"}, passed to
 \code{\link{load_schema_registry}} when seeding a new schema
 registry. \code{"hcup"} preloads column name patterns for the
-HCUP hospital discharge family of databases. Defaults to
-\code{"generic"}.}
+HCUP hospital discharge family of databases. When \code{create} is
+\code{TRUE} and the registry already exists, \code{"hcup"} also adds
+the shipped rules it lacks, after the existing rows so that those
+rows keep precedence, and saves the registry once beforehand as
+\code{<name>.pre_hcup.<ext>}. Defaults to \code{"generic"}.}
 }
 \value{
 A named list of resolved paths: \code{FormattedDBPath},

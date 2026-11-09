@@ -1,0 +1,58 @@
+Profile,ColumnPattern,CanonicalType,Role,AppliesTo,Notes
+hcup,^KEY$,character,join_key,all,"Discharge/stay identifier. Declared so every table storing it agrees; without a declaration repoquet infers per table and promote_types() falls back to character on any disagreement, leaving one table numeric and another character."
+hcup,^KEY_[A-Z0-9]+$,character,join_key,all,KEY_NIS / KEY_NRD / KEY_ED. Character preserves exact formatting and avoids DOUBLE precision loss on long identifiers.
+hcup,^HOSP_NIS$,character,join_key,all,NIS hospital identifier; joined to NIS_Hospital and NIS_Severity.
+hcup,^HOSPID$,character,join_key,all,Legacy (pre-2012) hospital identifier retained in unioned Core views.
+hcup,^HOSPSTCO$,character,join_key,all,HCUP State hospital identifier used by compatible SID/SEDD sources; preserve exact formatting.
+hcup,^HOSP_(NRD|ED)$,character,join_key,all,HOSP_NRD and HOSP_ED database-specific hospital identifiers. Keep this pattern narrow so HOSP_BEDSIZE and other hospital characteristics retain their analytic types.
+hcup,^DSHOSPID$,character,join_key,all,Data-source hospital identifier.
+hcup,^VISITLINK$,character,join_key,all,NRD patient linkage identifier.
+hcup,^NRD_VISITLINK$,character,join_key,all,NRD patient linkage identifier.
+hcup,^INC_KEY$,character,join_key,all,NTDB/TQP encounter identifier; preserve exact formatting across source tables.
+hcup,^FACILITYKEY$,character,join_key,all,TQP facility identifier; preserve exact formatting for hospital-level models.
+hcup,^NRD_DAYSTOEVENT$,numeric,analytic,all,Days to event; numeric so readmission intervals can be differenced.
+hcup,^DAYSTOEVENT$,numeric,analytic,all,Days to event; numeric so intervals can be differenced.
+hcup,^YEAR$,integer,partition,all,Hive partition column. Declared here so the CAST in register_parquet_view() is driven by the registry rather than the year-name fallback.
+hcup,^NIS_STRATUM$,character,join_key,all,"Sampling stratum identifier; treated as a code, not a number."
+hcup,^CCR$,numeric,analytic,all,Cost-to-charge ratio. Numeric so charges x CCR yields an estimated cost.
+hcup,^CCR_[A-Z0-9]+$,numeric,analytic,all,CCR_NIS / CCR_NRD / CCR_NEDS / CCR_ED.
+hcup,^APICC$,numeric,analytic,all,All-payer inpatient cost-to-charge ratio.
+hcup,^TOTCHG$,numeric,analytic,all,Total charges; numeric so it can be multiplied by a CCR.
+hcup,^TOTCHG_[A-Z0-9]+$,numeric,analytic,all,TOTCHG_IP / TOTCHG_ED and other charge variants.
+hcup,^TOTAL_CHARGES$,numeric,analytic,all,Total charges under an alternate source name.
+hcup,^ESTIMATED_COST$,numeric,analytic,all,Precomputed encounter cost when the source supplies one.
+hcup,^TOTAL_COST$,numeric,analytic,all,Precomputed encounter cost under an alternate source name.
+hcup,^TOTCOST$,numeric,analytic,all,Precomputed encounter cost under an alternate source name.
+hcup,^TOTAL_DISC$,numeric,analytic,all,Hospital discharge count in the sample; used as a relative volume measure.
+hcup,^N_DISC_U$,numeric,analytic,all,Stratum universe discharge count.
+hcup,^DISCWT$,numeric,weight,all,Discharge weight.
+hcup,^TRENDWT$,numeric,weight,all,Trend weight.
+hcup,^HOSPWT$,numeric,weight,all,Hospital weight.
+hcup,^DIED$,integer,analytic,all,Death indicator. Currently VARCHAR in NIS_Core while AGE and DRG are DOUBLE; declaring it removes that per-column drift.
+hcup,^LOS$,numeric,analytic,all,Length of stay; numeric supports aggregation.
+hcup,^LOS_X$,numeric,analytic,all,Length of stay excluding transfers.
+hcup,^FEMALE$,integer,analytic,all,Sex indicator; currently VARCHAR in NIS_Core.
+hcup,^PAY[0-9]$,integer,categorical,all,Primary/secondary payer code.
+hcup,^DRG$,integer,categorical,all,DRG code; integer keeps it comparable across tables.
+hcup,^DISPUNIFORM$,integer,categorical,all,"Uniform discharge disposition, used by the disposition-derived outcomes."
+hcup,^(ENCOUNTERKEY|PATIENTDURABLEKEY)$,int64,join_key,Epic,Variance-decomposition linkage keys
+hcup,^ECODE$,character,code,TQP,External-cause code; preserve non-numeric and non-integral source values
+hcup,^AGE$,numeric,analytic,all,Age in years; numeric across sources.
+hcup,^PAY[0-9]_X$,character,code,all,Payer/code text field; preserve leading zeros and symbols.
+hcup,^DX[0-9]+$,character,code,all,Diagnosis code; preserve leading zeros/decimals/alphanumeric values.
+hcup,^I10_DX[0-9]+$,character,code,all,ICD-10 diagnosis code; preserve alphanumeric values.
+hcup,^PR[0-9]+$,character,code,all,Procedure code; preserve leading zeros/decimals/alphanumeric values.
+hcup,^I10_PR[0-9]+$,character,code,all,ICD-10 procedure code; preserve alphanumeric values.
+hcup,^ECODE[0-9]+$,character,code,all,External cause code.
+hcup,^CPT$,character,code,all,CPT code; preserve leading zeros.
+hcup,^CPT[0-9]*$,character,code,all,CPT code; preserve leading zeros.
+hcup,^ICD.*CODE$,character,code,all,Generic ICD/code field.
+hcup,^.+DATEKEY$,integer,analytic,Epic,"Epic date key columns (AdmissionDateKey, StartDateKey, ...) are stored as integers."
+hcup,^.+KEY$,int64,join_key,Epic,Epic surrogate keys are 64-bit integers. Listed after the DateKey rule so date keys stay integer.
+hcup,^(ICD|.+_ICD)$,character,code,Epic,Epic diagnosis codes; preserve the code text.
+hcup,^PROCEDURECODE$,character,code,Epic,Epic procedure code; preserve the code text.
+hcup,^DRGCODE$,character,code,Epic,Epic DRG code; analyses use DrgType with DrgCode.
+hcup,^.+(INSTANT|DATETIME)$,POSIXct,analytic,Epic,Epic timestamps. Applied only when the source values are read as timestamps; otherwise the column stays character for review.
+hcup,^LOCATIONEPICID$,character,join_key,Epic,"Epic location identifier; an identifier, not a number."
+hcup,^(ISPRIMARY|PRESENTONADMISSION)$,integer,analytic,Epic,Epic 0/1 diagnosis flags.
+hcup,^(AGEADMIT|LENGTHOFSTAYINDAYS)$,integer,analytic,Epic,Epic whole-number age at admission and length of stay.
