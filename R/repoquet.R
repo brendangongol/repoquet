@@ -12188,7 +12188,7 @@ discover_schema_relationships <- function(table_schema, include_candidates = TRU
 #'   values: \code{"adaptive"}, \code{"full"}, or \code{"sample"}.
 #'   Defaults to \code{"adaptive"}.
 #' @param SchemaFastReadMaxBytes Numeric scalar. Maximum source size,
-#'   in bytes, for the schema fast path bounded in memory with
+#'   in bytes, eligible for the full-read schema fast path using
 #'   \code{fread}.
 #' @param SchemaChunkSize Integer. Rows per chunk for an exhaustive
 #'   schema stream.
@@ -12536,7 +12536,7 @@ create_repository_project <- function(dir, MasterDBPath = file.path(dir, "source
     "  MaxCoerceNAPct    = 25,          # fail a file when coercion destroys more than this % of a column",
     "  SourceFingerprintMode = \"metadata\", # metadata | sha256 | none",
     "  SchemaSurveyMode   = \"adaptive\", # adaptive | full | sample",
-    "  SchemaFastReadMaxBytes = 256 * 1024^2, # bounded fread fast path",
+    "  SchemaFastReadMaxBytes = 256 * 1024^2, # maximum source size for full-read fread fast path",
     "  SchemaChunkSize    = 100000L,      # rows per exhaustive schema chunk",
     "  SchemaAdaptiveSampleRows = 100000L, # rows sampled from large clean files",
     "  SchemaFutureGlobalsMaxSizeMB = 768, # sourced-development worker allowance",
@@ -13451,8 +13451,13 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
        Class = "reader_warning", Severity = "warning")
 }
 
-.schema_observation_issue_row <- function(row_meta, full_path, message, encoding_info = NULL) {
+.schema_observation_issue_row <- function(row_meta, full_path, message, encoding_info = NULL,
+                                          SourceFingerprintMode = c("metadata", "sha256", "none")) {
+  SourceFingerprintMode <- match.arg(SourceFingerprintMode)
   pspec <- tryCatch(partition_spec_for_row(row_meta), error = function(e) list(keys = NA_character_, values = NA_character_))
+  source_meta <- tryCatch(source_fingerprint(full_path, mode = SourceFingerprintMode),
+                          error = function(e) list(size = suppressWarnings(as.numeric(file.info(full_path)$size[1])),
+                                                   mtime_utc = NA_character_, fingerprint = NA_character_))
   encoding_related <- grepl("utf-8|multibyte|unable to translate|encoding",
                            as.character(message)[1], ignore.case = TRUE)
   data.table::data.table(
@@ -13478,8 +13483,9 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
     ReaderRepairCount = NA_real_, ReaderRepairLines = NA_character_,
     ReaderRepairPolicy = NA_character_,
     SurveyStatus = "error", SurveyMessage = as.character(message),
-    SourceSize = suppressWarnings(as.numeric(file.info(full_path)$size[1])),
-    SourceModifiedUTC = NA_character_, SourceFingerprint = NA_character_,
+    SourceSize = source_meta$size %||% suppressWarnings(as.numeric(file.info(full_path)$size[1])),
+    SourceModifiedUTC = source_meta$mtime_utc %||% NA_character_,
+    SourceFingerprint = source_meta$fingerprint %||% NA_character_,
     DeclaredEncoding = encoding_info$DeclaredEncoding %||% NA_character_,
     DetectedEncoding = encoding_info$DetectedEncoding %||% NA_character_,
     EncodingConfidence = encoding_info$EncodingConfidence %||% NA_real_,
@@ -13711,31 +13717,7 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
     !is.na(source_size) && source_size <= FastReadMaxBytes
   use_sample <- SchemaSurveyMode == "sample" ||
     (SchemaSurveyMode == "adaptive" && clean_source && !use_fast_full)
-  diagnostics <- if (use_fast_full) {
-    if (isTRUE(Progress)) {
-      log_msg(sprintf("[SCHEMA PROGRESS] %s: using bounded fread fast path (%s MiB source).",
-                      ProgressContext %||% basename(path),
-                      format(round(source_size / 1024^2, 1), nsmall = 1)))
-    }
-    df <- if (fixed_width) read_asc_full(path, reader_options = reader_options) else
-      read_delimited_full(path, reader_options = reader_options)
-    profile_chunk(df)
-    list(Header = names(df), LogicalRows = as.numeric(nrow(df)),
-         PhysicalLinesRead = NA_real_, RepairCount = 0, RepairLines = integer(),
-         RepairPolicy = repair$Policy, ContinuationColumn = repair$Column,
-         EncodingInfo = reader_options$.EncodingInfo,
-         ProfileMode = "full_fast")
-  } else if (use_sample) {
-    df <- call_reader(reader, "read_sample", path, reader_options = reader_options,
-                      n_max = AdaptiveSampleRows)
-    if (nrow(df) > AdaptiveSampleRows) df <- utils::head(df, AdaptiveSampleRows)
-    profile_chunk(df)
-    list(Header = names(df), LogicalRows = as.numeric(nrow(df)),
-         PhysicalLinesRead = NA_real_, RepairCount = 0, RepairLines = integer(),
-         RepairPolicy = repair$Policy, ContinuationColumn = repair$Column,
-         EncodingInfo = reader_options$.EncodingInfo,
-         ProfileMode = if (SchemaSurveyMode == "sample") "sample" else "adaptive_sample")
-  } else {
+  stream_profile <- function() {
     result <- if (fixed_width) {
       .stream_asc_records(path, reader_options = reader_options, chunk_size = chunk_size,
                           callback = profile_chunk)
@@ -13747,6 +13729,53 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
     result$ProfileMode <- "full_stream"
     result
   }
+  diagnostics <- if (use_fast_full) {
+    if (isTRUE(Progress)) {
+      log_msg(sprintf("[SCHEMA PROGRESS] %s: using full-read fread fast path (%s MiB source; eligible under SchemaFastReadMaxBytes).",
+                      ProgressContext %||% basename(path),
+                      format(round(source_size / 1024^2, 1), nsmall = 1)))
+    }
+    fast <- tryCatch(
+      if (fixed_width) read_asc_full(path, reader_options = reader_options) else
+        read_delimited_full(path, reader_options = reader_options),
+      error = function(e) e)
+    if (!inherits(fast, "error")) {
+      profile_chunk(fast)
+      list(Header = names(fast), LogicalRows = as.numeric(nrow(fast)),
+           PhysicalLinesRead = NA_real_, RepairCount = 0, RepairLines = integer(),
+           RepairPolicy = repair$Policy, ContinuationColumn = repair$Column,
+           EncodingInfo = reader_options$.EncodingInfo,
+           ProfileMode = "full_fast")
+    } else {
+      fast_message <- conditionMessage(fast)
+      terminal_structure_error <- !fixed_width && grepl(
+        "Delimited structure error.*(Discarded single-line footer|Stopped early on line)",
+        fast_message, ignore.case = TRUE, perl = TRUE)
+      if (!terminal_structure_error) stop(fast)
+      log_msg(sprintf(paste0("[SCHEMA STRUCTURE FALLBACK] %s: the full-read parser reported a terminal ",
+                             "structural warning; running the read-only logical-record diagnostic scanner."),
+                      ProgressContext %||% basename(path)))
+      diagnosed <- tryCatch(stream_profile(), error = function(e) e)
+      if (inherits(diagnosed, "error")) {
+        stop(sprintf(paste0("Full-read parser reported a terminal structural warning in %s. ",
+                            "Read-only logical-record diagnosis: %s. The source was not modified. ",
+                            "Do not select a malformed-row repair policy unless this diagnosis confirms its semantics."),
+                     basename(path), conditionMessage(diagnosed)), call. = FALSE)
+      }
+      diagnosed$ProfileMode <- "full_stream_diagnostic"
+      diagnosed
+    }
+  } else if (use_sample) {
+    df <- call_reader(reader, "read_sample", path, reader_options = reader_options,
+                      n_max = AdaptiveSampleRows)
+    if (nrow(df) > AdaptiveSampleRows) df <- utils::head(df, AdaptiveSampleRows)
+    profile_chunk(df)
+    list(Header = names(df), LogicalRows = as.numeric(nrow(df)),
+         PhysicalLinesRead = NA_real_, RepairCount = 0, RepairLines = integer(),
+         RepairPolicy = repair$Policy, ContinuationColumn = repair$Column,
+         EncodingInfo = reader_options$.EncodingInfo,
+         ProfileMode = if (SchemaSurveyMode == "sample") "sample" else "adaptive_sample")
+  } else stream_profile()
 
   finalize <- function(acc) {
     if (is.null(acc)) {
@@ -13795,6 +13824,7 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
   confidence <- switch(diagnostics$ProfileMode,
                        full_fast = "full_profiled_fast",
                        full_stream = "full_profiled",
+                       full_stream_diagnostic = "full_profiled",
                        adaptive_sample = "adaptive_sampled",
                        sample = "sampled",
                        "full_profiled")
@@ -14054,7 +14084,9 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
          error = NA_character_)
   }, error = function(e) {
     list(ok = FALSE, path = full_path,
-         data = .schema_observation_issue_row(row_meta, full_path, conditionMessage(e), encoding_info),
+         data = .schema_observation_issue_row(
+           row_meta, full_path, conditionMessage(e), encoding_info,
+           SourceFingerprintMode = SourceFingerprintMode),
          error = conditionMessage(e))
   })
 }
@@ -14117,7 +14149,7 @@ ValidateMDTPreflight <- function(MDT, strict = TRUE, logStatus = TRUE,
 #'   \code{"adaptive"} or \code{"sample"} mode. Defaults to
 #'   \code{100000}.
 #' @param FastReadMaxBytes Numeric scalar. Maximum source size, in
-#'   bytes, eligible for the fast read path bounded in memory.
+#'   bytes, eligible for the full-read fast path.
 #'   Defaults to \code{256} MiB.
 #' @param SchemaChunkSize Integer. Rows per chunk for the exhaustive
 #'   streaming schema scan. Defaults to \code{100000}.
@@ -16211,7 +16243,7 @@ FinalizeRepositorySchema <- function(SchemaReviewPath, TableSchemaPath, strict =
 #' @param AdaptiveSampleRows Integer. Rows retained for adaptive or
 #'   sample mode. Defaults to \code{100000}.
 #' @param FastReadMaxBytes Numeric scalar. Maximum size, in bytes,
-#'   for the bounded fast read path. Defaults to \code{256} MiB.
+#'   for the full-read fast path. Defaults to \code{256} MiB.
 #' @param SchemaChunkSize Integer. Rows per exhaustive schema scan
 #'   chunk. Defaults to \code{100000}.
 #' @param ObservationCachePath Character scalar. Per source

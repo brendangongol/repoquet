@@ -213,6 +213,42 @@ test_that("adaptive schema profiling uses bounded fast and sampled paths", {
   expect_identical(sampled$Stats$ID$ValueProfileStatus, "suppressed_identifier")
 })
 
+test_that("fast schema profiling diagnoses a short final record without source changes", {
+  fx <- new_repo_fixture(); on.exit(unlink(fx$root, recursive = TRUE))
+  path <- file.path(fx$src, "short_final.csv")
+  writeLines(c("ID,VALUE", "1,first", "2"), path, useBytes = TRUE)
+  before <- digest::digest(file = path, algo = "sha256")
+  profile_fun <- if (exists(".profile_delimited_schema", mode = "function")) {
+    get(".profile_delimited_schema", mode = "function")
+  } else {
+    getFromNamespace(".profile_delimited_schema", "repoquet")
+  }
+
+  expect_error(
+    profile_fun(path, get_file_reader("csv"), SchemaSurveyMode = "adaptive",
+                FastReadMaxBytes = file.info(path)$size + 1),
+    "Read-only logical-record diagnosis: Malformed delimited record at physical line 3.*expected 2 fields, found 1")
+  expect_identical(digest::digest(file = path, algo = "sha256"), before)
+})
+
+test_that("failed schema observations retain source metadata", {
+  fx <- new_repo_fixture(); on.exit(unlink(fx$root, recursive = TRUE))
+  path <- file.path(fx$src, "metadata.csv")
+  data.table::fwrite(data.table::data.table(ID = 1L), path)
+  row <- data.frame(Database = "REG", MDBDir = "REG", TableName = "Core",
+                    Path = "metadata.csv", FileType = "csv",
+                    PartitionKey = "year", PartitionValue = "2024")
+  issue_fun <- if (exists(".schema_observation_issue_row", mode = "function")) {
+    get(".schema_observation_issue_row", mode = "function")
+  } else {
+    getFromNamespace(".schema_observation_issue_row", "repoquet")
+  }
+  issue <- issue_fun(row, path, "test failure", SourceFingerprintMode = "metadata")
+  expect_true(is.finite(issue$SourceSize))
+  expect_true(nzchar(issue$SourceModifiedUTC))
+  expect_true(nzchar(issue$SourceFingerprint))
+})
+
 test_that("schema surveys resume from unchanged per-source observations", {
   skip_if_not_installed("arrow")
   fx <- new_repo_fixture(); on.exit(unlink(fx$root, recursive = TRUE))
